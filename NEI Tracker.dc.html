@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="_ds/industry-e81e33a9-683c-4ebf-a5a4-a47e4fc446de/styles.css">
+<script src="_ds/industry-e81e33a9-683c-4ebf-a5a4-a47e4fc446de/_ds_bundle.js"></script>
+<style>
+  body { margin:0; background:var(--color-bg); color:var(--color-text); font-family:var(--font-body); }
+  a { color:var(--color-accent-700); text-decoration:none; }
+  a:hover { color:var(--color-accent-800); }
+</style>
+</helmet>
+
+<div style="min-height:100vh;padding-bottom:64px">
+
+  <div style="display:flex;align-items:stretch;gap:var(--space-4);padding:0 var(--space-8);height:58px;border-bottom:1px solid var(--color-divider);background:var(--color-bg);position:sticky;top:0;z-index:30">
+    <div onClick="{{ toggleProj }}" style="position:relative;display:flex;align-items:center;gap:var(--space-3);cursor:pointer;padding-right:var(--space-4);flex:none">
+      <span style="font-family:var(--font-heading);font-weight:600;font-size:20px;letter-spacing:-.01em;white-space:nowrap">{{ orgName }}</span>
+      <span style="width:1px;height:16px;background:var(--color-divider);flex:none"></span>
+      <span style="font-family:var(--font-heading);font-size:15px;letter-spacing:.09em;text-transform:uppercase;color:var(--color-accent-700);white-space:nowrap">{{ projectName }}</span>
+      <span style="font-size:10px;color:var(--color-neutral-600)">▼</span>
+    </div>
+    <sc-if value="{{ projOpen }}" hint-placeholder-val="{{ false }}">
+      <div class="blueprint" style="position:absolute;top:56px;left:var(--space-8);width:330px;background:var(--color-bg);box-shadow:var(--shadow-md);z-index:40">
+        <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+        <div style="padding:var(--space-3) var(--space-4);font-family:var(--font-heading);font-size:12px;letter-spacing:.13em;text-transform:uppercase;color:var(--color-neutral-600);border-bottom:1px solid var(--color-divider)">{{ orgName }} — projects</div>
+        <sc-for list="{{ projects }}" as="p" hint-placeholder-count="4">
+          <div onClick="{{ p.pick }}" style="display:flex;align-items:baseline;gap:var(--space-3);padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--color-divider);cursor:pointer" style-hover="background:var(--color-accent-100)">
+            <span style="flex:1;font-family:var(--font-heading);font-size:16px;letter-spacing:.06em;text-transform:uppercase">{{ p.name }}</span>
+            <span style="font-size:12px;color:var(--color-neutral-600)">{{ p.meta }}</span>
+          </div>
+        </sc-for>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--space-3) var(--space-4);font-size:12px;color:var(--color-neutral-600)">
+          <span>Tenants &amp; admins are set in the super-admin panel</span>
+          <span style="font-family:var(--font-heading);letter-spacing:.1em;text-transform:uppercase">later</span>
+        </div>
+      </div>
+    </sc-if>
+    <div style="display:flex;align-self:stretch;flex:1 1 auto;min-width:0;overflow-x:auto;scrollbar-width:none">
+      <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="6">
+        <div onClick="{{ t.go }}" style="position:relative;display:flex;align-items:center;flex:none;white-space:nowrap;padding:0 var(--space-3);cursor:pointer;font-family:var(--font-heading);font-size:16px;letter-spacing:.04em;text-transform:uppercase;color:var(--color-neutral-700)" style-hover="color:var(--color-text);background:var(--color-accent-100)">
+          {{ t.label }}
+          <sc-if value="{{ t.active }}" hint-placeholder-val="{{ false }}">
+            <span style="position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--color-accent)"></span>
+          </sc-if>
+        </div>
+      </sc-for>
+    </div>
+    <div style="display:flex;align-items:center;gap:var(--space-3);font-size:13px;color:var(--color-neutral-700);flex:none;white-space:nowrap;padding-left:var(--space-3)">
+      <span style="width:1px;height:18px;background:var(--color-divider);flex:none"></span>
+      <span>P. Mahajan · Admin</span>
+    </div>
+  </div>
+
+  <!-- ══════════ DASHBOARD ══════════ -->
+  <sc-if value="{{ isDash }}" hint-placeholder-val="{{ true }}">
+  <div style="max-width:1440px;margin:0 auto;padding:var(--space-8)">
+
+    <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:var(--space-6);margin-bottom:var(--space-6)">
+      <div>
+        <div style="font-family:var(--font-heading);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--color-neutral-600)">{{ orgName }} / {{ projectName }}</div>
+        <h1 style="margin:0">CR automation — node-wise status</h1>
+        <div style="color:var(--color-neutral-700);font-size:14px">Every change moving toward production, per node, per CR group.</div>
+      </div>
+      <div style="display:flex;gap:var(--space-2)">
+        <button class="btn btn-secondary">Export</button>
+        <button class="btn btn-primary">New request</button>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--color-divider);border:1px solid var(--color-divider);margin-bottom:var(--space-8)">
+      <sc-for list="{{ figures }}" as="f" hint-placeholder-count="4">
+        <div style="background:var(--color-bg);padding:var(--space-6)">
+          <div style="font-family:var(--font-heading);font-size:12px;letter-spacing:.13em;text-transform:uppercase;color:var(--color-neutral-600)">{{ f.label }}</div>
+          <div style="display:flex;align-items:baseline;gap:var(--space-3);margin-top:var(--space-1)">
+            <span style="font-family:var(--font-heading);font-weight:600;font-size:44px;line-height:1;font-variant-numeric:tabular-nums">{{ f.value }}</span>
+            <span style="font-size:13px;color:var(--color-neutral-700)">{{ f.note }}</span>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1.35fr 1fr;gap:var(--space-8);align-items:start">
+      <div>
+        <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:var(--space-3)">
+          <h3 style="margin:0;letter-spacing:.02em;text-transform:uppercase">What is on each environment</h3>
+          <span style="font-size:13px;color:var(--color-neutral-600)">identity by content hash, not by path</span>
+        </div>
+        <div class="blueprint" style="padding:var(--space-6)">
+          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-6)">
+            <sc-for list="{{ envs }}" as="e" hint-placeholder-count="4">
+              <div>
+                <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:0 var(--space-3);padding-bottom:var(--space-2);border-bottom:1px solid var(--color-divider)">
+                  <span style="font-family:var(--font-heading);font-weight:600;font-size:17px;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap">{{ e.name }}</span>
+                  <span style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--color-neutral-700);white-space:nowrap">{{ e.state }}</span>
+                </div>
+                <div style="margin-top:var(--space-3);font-family:ui-monospace,Menlo,monospace;font-size:12px">{{ e.pkg }}</div>
+                <div style="font-size:12px;color:var(--color-neutral-600);margin-bottom:var(--space-3)">{{ e.deployed }}</div>
+                <sc-for list="{{ e.layers }}" as="l" hint-placeholder-count="5">
+                  <div style="display:flex;align-items:center;gap:var(--space-2);padding:var(--space-1) 0;border-top:1px dotted var(--color-divider)">
+                    <span style="width:7px;height:7px;flex:none;background:{{ l.dot }}"></span>
+                    <span style="flex:1;font-size:12px;color:var(--color-neutral-700)">{{ l.name }}</span>
+                    <span style="font-family:ui-monospace,Menlo,monospace;font-size:11px">{{ l.hash }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-for>
+          </div>
+          <div style="margin-top:var(--space-6);padding-top:var(--space-4);border-top:1px solid var(--color-divider);display:flex;gap:var(--space-6);font-size:12px;color:var(--color-neutral-700);flex-wrap:wrap">
+            <span style="display:flex;align-items:center;gap:var(--space-2)"><span style="width:7px;height:7px;background:var(--color-accent)"></span>matches promoted hash</span>
+            <span style="display:flex;align-items:center;gap:var(--space-2)"><span style="width:7px;height:7px;background:var(--color-text)"></span>drift — patched in place</span>
+            <span style="display:flex;align-items:center;gap:var(--space-2)"><span style="width:7px;height:7px;background:var(--color-neutral-300)"></span>no recorded hash</span>
+          </div>
+        </div>
+
+        <h3 style="margin:var(--space-8) 0 var(--space-3);letter-spacing:.02em;text-transform:uppercase">Blocked</h3>
+        <div style="border:1px solid var(--color-divider)">
+          <sc-for list="{{ blocked }}" as="b" hint-placeholder-count="3">
+            <div onClick="{{ b.open }}" style="display:grid;grid-template-columns:96px 96px 1fr 64px;gap:var(--space-4);align-items:baseline;padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--color-divider);cursor:pointer" style-hover="background:var(--color-accent-100)">
+              <span style="font-family:ui-monospace,Menlo,monospace;font-size:12px;font-weight:500">{{ b.id }}</span>
+              <span style="font-family:var(--font-heading);font-size:15px;letter-spacing:.04em">{{ b.node }}</span>
+              <span style="font-size:13px;text-wrap:pretty">{{ b.reason }}</span>
+              <span style="font-size:12px;color:var(--color-neutral-600);text-align:right">{{ b.age }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <div>
+        <h3 style="margin:0 0 var(--space-3);letter-spacing:.02em;text-transform:uppercase">Waiting on you</h3>
+        <div style="display:flex;flex-direction:column;gap:var(--space-3)">
+          <sc-for list="{{ waiting }}" as="w" hint-placeholder-count="2">
+            <div style="border:1px solid var(--color-divider);padding:var(--space-4)">
+              <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3)">
+                <span style="font-family:ui-monospace,Menlo,monospace;font-size:12px;font-weight:500">{{ w.id }}</span>
+                <span class="tag tag-accent">{{ w.ask }}</span>
+              </div>
+              <div style="margin-top:var(--space-2);font-size:14px;line-height:1.35">{{ w.title }}</div>
+              <div style="margin-top:var(--space-1);font-size:12px;color:var(--color-neutral-600)">{{ w.meta }}</div>
+              <div style="display:flex;gap:var(--space-2);margin-top:var(--space-4)">
+                <button class="btn btn-primary">Approve</button>
+                <button class="btn btn-secondary">Hold</button>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+
+        <h3 style="margin:var(--space-8) 0 var(--space-3);letter-spacing:.02em;text-transform:uppercase">Last prod moves</h3>
+        <div style="border:1px solid var(--color-divider)">
+          <sc-for list="{{ recent }}" as="r" hint-placeholder-count="5">
+            <div style="display:flex;align-items:baseline;gap:var(--space-3);padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--color-divider)">
+              <span style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--color-neutral-600);width:32px">{{ r.run }}</span>
+              <span style="font-family:var(--font-heading);font-size:15px;letter-spacing:.04em;flex:1">{{ r.node }}</span>
+              <span class="tag tag-outline">{{ r.type }}</span>
+              <span style="font-size:12px;color:var(--color-neutral-700)">{{ r.when }}</span>
+              <span style="font-family:var(--font-heading);font-size:12px;letter-spacing:.1em;text-transform:uppercase;padding:1px 7px;border:1px solid var(--color-neutral-400)">{{ r.verdict }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ══════════ PIPELINE ══════════ -->
+  <sc-if value="{{ isBoard }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:1760px;margin:0 auto;padding:var(--space-8)">
+    <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:var(--space-6);margin-bottom:var(--space-6)">
+      <div>
+        <h1 style="margin:0">Pipeline</h1>
+        <div style="color:var(--color-neutral-700);font-size:14px">Stages come from project configuration — rename, add or drop them in Configure.</div>
+      </div>
+      <div style="display:flex;gap:var(--space-6);align-items:flex-end">
+        <div>
+          <div style="font-family:var(--font-heading);font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:var(--space-1)">Work type</div>
+          <div style="display:flex;gap:var(--space-1)">
+            <sc-for list="{{ kindFilters }}" as="k" hint-placeholder-count="3">
+              <div onClick="{{ k.go }}" style="padding:var(--space-1) var(--space-3);border:1px solid var(--color-neutral-400);font-family:var(--font-heading);font-size:14px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;background:{{ k.bg }};color:{{ k.fg }}">{{ k.label }}</div>
+            </sc-for>
+          </div>
+        </div>
+        <div>
+          <div style="font-family:var(--font-heading);font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:var(--space-1)">Node type</div>
+          <div style="display:flex;gap:var(--space-1)">
+            <sc-for list="{{ typeFilters }}" as="k" hint-placeholder-count="5">
+              <div onClick="{{ k.go }}" style="padding:var(--space-1) var(--space-3);border:1px solid var(--color-neutral-400);font-family:var(--font-heading);font-size:14px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;background:{{ k.bg }};color:{{ k.fg }}">{{ k.label }}</div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:{{ boardCols }};gap:1px;background:var(--color-divider);border:1px solid var(--color-divider)">
+      <sc-for list="{{ stages }}" as="s" hint-placeholder-count="6">
+        <div style="background:var(--color-bg);padding-bottom:var(--space-4)">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--color-divider)">
+            <span style="font-family:var(--font-heading);font-weight:600;font-size:15px;letter-spacing:.09em;text-transform:uppercase">{{ s.label }}</span>
+            <span style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--color-neutral-600)">{{ s.count }}</span>
+          </div>
+          <div style="padding:var(--space-3) var(--space-3) 0;display:flex;flex-direction:column;gap:var(--space-3)">
+            <sc-for list="{{ s.items }}" as="i" hint-placeholder-count="2">
+              <div onClick="{{ i.open }}" style="border:1px solid var(--color-neutral-400);padding:var(--space-3);cursor:pointer" style-hover="border-color:var(--color-accent);background:var(--color-accent-100)">
+                <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-2)">
+                  <span style="font-family:ui-monospace,Menlo,monospace;font-size:11px;font-weight:500">{{ i.id }}</span>
+                  <span style="font-family:var(--font-heading);font-size:11px;letter-spacing:.1em;color:var(--color-neutral-600)">{{ i.kind }}</span>
+                </div>
+                <div style="margin-top:var(--space-2);font-size:13px;line-height:1.3;text-wrap:pretty">{{ i.title }}</div>
+                <div style="margin-top:var(--space-2);display:flex;align-items:center;gap:var(--space-1);flex-wrap:wrap">
+                  <span class="tag tag-accent">{{ i.nodeType }}</span>
+                  <span style="font-size:11px;color:var(--color-neutral-600)">{{ i.node }}</span>
+                  <sc-if value="{{ i.variant }}" hint-placeholder-val="{{ false }}">
+                    <span class="tag tag-outline">{{ i.variant }}</span>
+                  </sc-if>
+                </div>
+                <sc-if value="{{ i.flag }}" hint-placeholder-val="{{ false }}">
+                  <div style="margin-top:var(--space-2);padding-top:var(--space-2);border-top:1px dotted var(--color-neutral-400);font-size:11px;line-height:1.3">{{ i.flag }}</div>
+                </sc-if>
+                <sc-if value="{{ i.linkCount }}" hint-placeholder-val="{{ false }}">
+                  <div style="margin-top:var(--space-2);font-size:11px;color:var(--color-accent-700)">{{ i.linkCount }} linked</div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ══════════ ALL ITEMS ══════════ -->
+  <sc-if value="{{ isTable }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:1760px;margin:0 auto;padding:var(--space-8)">
+    <div style="margin-bottom:var(--space-6)">
+      <h1 style="margin:0">All items</h1>
+      <div style="color:var(--color-neutral-700);font-size:14px">{{ rowCount }} in flight. Columns are per-user — turn any off, or add your own.</div>
+    </div>
+
+    <div class="blueprint" style="padding:var(--space-4);margin-bottom:var(--space-6)">
+      <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+      <div style="font-family:var(--font-heading);font-size:12px;letter-spacing:.13em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:var(--space-2)">Columns</div>
+      <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center">
+        <sc-for list="{{ allCols }}" as="c" hint-placeholder-count="12">
+          <div onClick="{{ c.toggle }}" style="display:flex;align-items:center;gap:var(--space-2);padding:var(--space-1) var(--space-3);border:1px solid var(--color-neutral-400);font-size:13px;cursor:pointer;background:{{ c.bg }};color:{{ c.fg }}">
+            <span style="font-family:ui-monospace,Menlo,monospace;font-size:11px">{{ c.mark }}</span>{{ c.label }}
+          </div>
+        </sc-for>
+        <span style="width:1px;height:22px;background:var(--color-divider);margin:0 var(--space-1)"></span>
+        <input class="input" value="{{ newCol }}" onChange="{{ onNewCol }}" onKeyDown="{{ onNewColKey }}" placeholder="New column name" style="width:180px">
+        <button class="btn btn-primary" onClick="{{ addCol }}">Add column</button>
+      </div>
+    </div>
+
+    <div style="border:1px solid var(--color-divider);overflow-x:auto">
+      <table class="table" style="width:100%">
+        <thead>
+          <tr>
+            <sc-for list="{{ headers }}" as="h" hint-placeholder-count="8">
+              <th style="white-space:nowrap">{{ h.label }}</th>
+            </sc-for>
+          </tr>
+        </thead>
+        <tbody>
+          <sc-for list="{{ rows }}" as="r" hint-placeholder-count="12">
+            <tr onClick="{{ r.open }}" style="cursor:pointer" style-hover="background:var(--color-accent-100)">
+              <sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="8">
+                <td style="white-space:nowrap;vertical-align:top">{{ c.v }}</td>
+              </sc-for>
+            </tr>
+          </sc-for>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ══════════ ITEM ══════════ -->
+  <sc-if value="{{ isItem }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:1440px;margin:0 auto;padding:var(--space-8)">
+    <div style="font-size:13px;color:var(--color-neutral-600);margin-bottom:var(--space-2)">{{ projectName }} / {{ item.node }} / {{ item.id }}</div>
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-8);margin-bottom:var(--space-6)">
+      <div>
+        <h1 style="margin:0">{{ item.title }}</h1>
+        <div style="display:flex;gap:var(--space-3);margin-top:var(--space-2);align-items:center;flex-wrap:wrap">
+          <span class="tag tag-accent">{{ item.kind }}</span>
+          <sc-if value="{{ item.variant }}" hint-placeholder-val="{{ false }}">
+            <span class="tag tag-outline">{{ item.variant }}</span>
+          </sc-if>
+          <span class="tag tag-neutral">{{ item.nodeType }}</span>
+          <span style="font-size:13px;color:var(--color-neutral-700)">{{ item.activity }}</span>
+          <span style="font-size:13px;color:var(--color-neutral-700)">{{ item.cr }}</span>
+          <span style="font-size:13px;color:var(--color-neutral-700)">owner {{ item.owner }}</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:var(--space-2);flex:none">
+        <button class="btn btn-secondary">Open MOP</button>
+        <button class="btn btn-primary">Promote to prod</button>
+      </div>
+    </div>
+
+    <div style="display:flex;border:1px solid var(--color-divider);margin-bottom:var(--space-8)">
+      <sc-for list="{{ itemStages }}" as="s" hint-placeholder-count="6">
+        <div style="flex:1;padding:var(--space-3) var(--space-4);border-right:1px solid var(--color-divider);background:{{ s.bg }};color:{{ s.fg }}">
+          <div style="font-family:var(--font-heading);font-size:12px;letter-spacing:.11em;text-transform:uppercase;opacity:.8">{{ s.label }}</div>
+          <div style="font-size:13px;margin-top:2px">{{ s.who }}</div>
+          <div style="font-size:12px;opacity:.7">{{ s.when }}</div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-8);align-items:start">
+      <div>
+        <h4 style="margin:0 0 var(--space-3);letter-spacing:.02em;text-transform:uppercase">Node identity</h4>
+        <div style="border:1px solid var(--color-divider)">
+          <sc-for list="{{ identity }}" as="d" hint-placeholder-count="5">
+            <div style="display:grid;grid-template-columns:104px 1fr;gap:var(--space-3);padding:var(--space-2) var(--space-4);border-bottom:1px solid var(--color-divider)">
+              <span style="font-family:var(--font-heading);font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-neutral-600)">{{ d.k }}</span>
+              <span style="font-family:ui-monospace,Menlo,monospace;font-size:12px;word-break:break-all">{{ d.v }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="margin-top:var(--space-2);font-size:12px;color:var(--color-neutral-600);line-height:1.4">Four names for one node. Every filter states which one it means.</div>
+
+        <h4 style="margin:var(--space-8) 0 var(--space-3);letter-spacing:.02em;text-transform:uppercase">Run {{ item.run }} · attempt 2</h4>
+        <div style="border:1px solid var(--color-divider)">
+          <sc-for list="{{ phases }}" as="p" hint-placeholder-count="5">
+            <div style="display:flex;align-items:center;gap:var(--space-3);padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--color-divider)">
+              <span style="width:7px;height:7px;flex:none;background:{{ p.dot }}"></span>
+              <span style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:12px">{{ p.name }}</span>
+              <span style="font-size:12px;color:var(--color-neutral-700)">{{ p.steps }}</span>
+              <span style="font-size:12px;color:var(--color-neutral-600);font-variant-numeric:tabular-nums">{{ p.dur }}</span>
+            </div>
+          </sc-for>
+        </div>
+
+        <h4 style="margin:var(--space-8) 0 var(--space-3);letter-spacing:.02em;text-transform:uppercase">Links</h4>
+        <div class="blueprint">
+          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <sc-for list="{{ links }}" as="l" hint-placeholder-count="3">
+            <div style="display:flex;align-items:baseline;gap:var(--space-3);padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--color-divider)">
+              <span class="tag tag-neutral" style="flex:none">{{ l.type }}</span>
+              <div style="flex:1;min-width:0">
+                <a href="{{ l.url }}" style="font-size:13px">{{ l.label }}</a>
+                <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--color-neutral-600);overflow:hidden;text-overflow:ellipsis">{{ l.url }}</div>
+              </div>
+              <span onClick="{{ l.remove }}" style="font-size:12px;color:var(--color-neutral-600);cursor:pointer;flex:none" style-hover="color:var(--color-text)">remove</span>
+            </div>
+          </sc-for>
+          <div style="display:flex;gap:var(--space-2);padding:var(--space-3) var(--space-4);align-items:center;flex-wrap:wrap">
+            <select class="input" value="{{ linkType }}" onChange="{{ onLinkType }}" style="width:126px">
+              <sc-for list="{{ linkTypes }}" as="t" hint-placeholder-count="5">
+                <option value="{{ t }}">{{ t }}</option>
+              </sc-for>
+            </select>
+            <input class="input" value="{{ linkLabel }}" onChange="{{ onLinkLabel }}" placeholder="Label" style="width:150px">
+            <input class="input" value="{{ linkUrl }}" onChange="{{ onLinkUrl }}" onKeyDown="{{ onLinkKey }}" placeholder="https://…" style="flex:1;min-width:170px">
+            <button class="btn btn-primary" onClick="{{ addLink }}">Add link</button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h4 style="margin:0 0 var(--space-3);letter-spacing:.02em;text-transform:uppercase">Definition files that ran</h4>
+        <div class="blueprint">
+          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <sc-for list="{{ fingerprint }}" as="f" hint-placeholder-count="6">
+            <div style="padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--color-divider)">
+              <div style="display:flex;align-items:baseline;gap:var(--space-3)">
+                <span style="font-family:var(--font-heading);font-size:12px;letter-spacing:.09em;text-transform:uppercase;width:78px;flex:none;color:var(--color-neutral-600)">{{ f.layer }}</span>
+                <span style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:12px;word-break:break-all">{{ f.file }}</span>
+                <span class="tag tag-outline" style="flex:none">{{ f.scope }}</span>
+                <span style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--color-accent-700);flex:none">{{ f.hash }}</span>
+              </div>
+              <div style="margin-top:2px;padding-left:90px;font-size:12px;color:var(--color-neutral-600)">{{ f.note }}</div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="margin-top:var(--space-2);font-size:12px;color:var(--color-neutral-600);line-height:1.4">Execution and validation YAML are per flavour (File CR / CLICR). The json template and HTML template are shared, so a change there hits both.</div>
+
+        <h4 style="margin:var(--space-8) 0 var(--space-3);letter-spacing:.02em;text-transform:uppercase">Artifacts</h4>
+        <div style="border:1px solid var(--color-divider)">
+          <sc-for list="{{ artifacts }}" as="a" hint-placeholder-count="5">
+            <div style="display:flex;align-items:baseline;gap:var(--space-3);padding:var(--space-2) var(--space-4);border-bottom:1px solid var(--color-divider)">
+              <span style="font-family:var(--font-heading);font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-600);width:70px;flex:none">{{ a.kind }}</span>
+              <span style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:12px;word-break:break-all">{{ a.path }}</span>
+              <span style="font-size:12px;color:var(--color-neutral-700);font-variant-numeric:tabular-nums;flex:none">{{ a.size }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="margin-top:var(--space-2);font-size:12px;color:var(--color-neutral-600);line-height:1.4">Immutable per attempt. Re-running the CR writes a new tree, never over this one.</div>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ══════════ DRIFT ══════════ -->
+  <sc-if value="{{ isDrift }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:1440px;margin:0 auto;padding:var(--space-8)">
+    <h1 style="margin:0">Drift</h1>
+    <div style="color:var(--color-neutral-700);font-size:14px;margin-bottom:var(--space-6)">Each layer of the package changes at its own pace. This is where they are out of step.</div>
+
+    <div style="border:1px solid var(--color-divider);overflow-x:auto;margin-bottom:var(--space-8)">
+      <table class="table" style="width:100%">
+        <thead>
+          <tr>
+            <th>Layer</th><th>Scope</th><th>Repo</th><th>Lab</th><th>Preprod</th><th>Prod</th><th>Verdict</th>
+          </tr>
+        </thead>
+        <tbody>
+          <sc-for list="{{ driftRows }}" as="d" hint-placeholder-count="6">
+            <tr>
+              <td><span style="font-family:var(--font-heading);font-size:15px;letter-spacing:.05em;text-transform:uppercase">{{ d.layer }}</span><div style="font-size:12px;color:var(--color-neutral-600)">{{ d.cadence }}</div></td>
+              <td><span class="tag tag-outline">{{ d.scope }}</span></td>
+              <td style="font-family:ui-monospace,Menlo,monospace;font-size:12px">{{ d.repo }}</td>
+              <td style="font-family:ui-monospace,Menlo,monospace;font-size:12px">{{ d.lab }}</td>
+              <td style="font-family:ui-monospace,Menlo,monospace;font-size:12px">{{ d.preprod }}</td>
+              <td style="font-family:ui-monospace,Menlo,monospace;font-size:12px">{{ d.prod }}</td>
+              <td><span style="font-family:var(--font-heading);font-size:13px;letter-spacing:.07em;text-transform:uppercase;padding:2px 8px;background:{{ d.bg }};color:{{ d.fg }}">{{ d.verdict }}</span></td>
+            </tr>
+          </sc-for>
+        </tbody>
+      </table>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-8);align-items:start">
+      <div>
+        <h4 style="margin:0 0 var(--space-3);letter-spacing:.02em;text-transform:uppercase">Open warnings</h4>
+        <div style="border:1px solid var(--color-divider)">
+          <sc-for list="{{ warnings }}" as="w" hint-placeholder-count="4">
+            <div style="padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--color-divider)">
+              <div style="display:flex;align-items:baseline;gap:var(--space-3)">
+                <span style="font-family:var(--font-heading);font-size:12px;letter-spacing:.1em;text-transform:uppercase;padding:1px 7px;background:var(--color-text);color:var(--color-bg);flex:none">{{ w.sev }}</span>
+                <span style="flex:1;font-size:13px;line-height:1.35;text-wrap:pretty">{{ w.text }}</span>
+              </div>
+              <div style="margin-top:var(--space-1);font-size:12px;color:var(--color-neutral-600)">{{ w.where }}</div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      <div>
+        <h4 style="margin:0 0 var(--space-3);letter-spacing:.02em;text-transform:uppercase">Promotion gate</h4>
+        <div class="blueprint" style="padding:var(--space-6)">
+          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <div style="font-size:14px;line-height:1.5;margin-bottom:var(--space-4);text-wrap:pretty">A prod deployment must be byte-identical to one that already passed preprod. Promotion copies hashes; it never rebuilds. Gates are set per project.</div>
+          <sc-for list="{{ gate }}" as="g" hint-placeholder-count="4">
+            <div style="display:flex;align-items:center;gap:var(--space-3);padding:var(--space-2) 0;border-top:1px solid var(--color-divider)">
+              <span style="width:14px;height:14px;flex:none;border:1px solid var(--color-neutral-500);background:{{ g.fill }}"></span>
+              <span style="flex:1;font-size:13px">{{ g.text }}</span>
+              <span style="font-size:12px;color:var(--color-neutral-600)">{{ g.by }}</span>
+            </div>
+          </sc-for>
+          <div style="margin-top:var(--space-6);padding:var(--space-2) var(--space-4);text-align:center;background:var(--color-neutral-300);color:var(--color-neutral-700);font-family:var(--font-heading);font-size:15px;letter-spacing:.06em;text-transform:uppercase">Promote — blocked by 1 gate</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ══════════ CONFIGURE ══════════ -->
+  <sc-if value="{{ isConfig }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:1440px;margin:0 auto;padding:var(--space-8)">
+    <div style="margin-bottom:var(--space-6)">
+      <h1 style="margin:0">Configure — {{ projectName }}</h1>
+      <div style="color:var(--color-neutral-700);font-size:14px">Everything a project admin sets. Nothing here is hard-coded, so another team can stand up their own process without a code change.</div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-8);align-items:start">
+      <sc-for list="{{ configSets }}" as="c" hint-placeholder-count="5">
+        <div class="blueprint" style="padding:var(--space-6)">
+          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3)">
+            <h4 style="margin:0;letter-spacing:.02em;text-transform:uppercase">{{ c.title }}</h4>
+            <span style="font-size:12px;color:var(--color-neutral-600)">{{ c.hint }}</span>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-4)">
+            <sc-for list="{{ c.values }}" as="v" hint-placeholder-count="4">
+              <div style="display:flex;align-items:center;gap:var(--space-2);padding:var(--space-1) var(--space-3);border:1px solid var(--color-neutral-400);background:var(--color-accent-100);font-size:13px">
+                <span>{{ v.label }}</span>
+                <span onClick="{{ v.remove }}" style="cursor:pointer;color:var(--color-neutral-600);font-family:ui-monospace,Menlo,monospace" style-hover="color:var(--color-text)">×</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:flex;gap:var(--space-2);margin-top:var(--space-4)">
+            <input class="input" value="{{ c.draft }}" onChange="{{ c.onDraft }}" onKeyDown="{{ c.onKey }}" placeholder="{{ c.placeholder }}" style="flex:1">
+            <button class="btn btn-secondary" onClick="{{ c.add }}">Add</button>
+          </div>
+        </div>
+      </sc-for>
+
+      <div class="blueprint" style="padding:var(--space-6);grid-column:1 / -1">
+        <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);margin-bottom:var(--space-4)">
+          <h4 style="margin:0;letter-spacing:.02em;text-transform:uppercase">Definition files per NEI flavour</h4>
+          <span style="font-size:12px;color:var(--color-neutral-600)">shared files are tracked once and affect every flavour</span>
+        </div>
+        <table class="table" style="width:100%">
+          <thead>
+            <tr><th>File</th><th>Layer</th><th>Scope</th><th>File CR</th><th>CLICR</th><th>Change cadence</th></tr>
+          </thead>
+          <tbody>
+            <sc-for list="{{ defFiles }}" as="d" hint-placeholder-count="5">
+              <tr>
+                <td style="font-family:ui-monospace,Menlo,monospace;font-size:12px">{{ d.file }}</td>
+                <td>{{ d.layer }}</td>
+                <td><span class="tag tag-outline">{{ d.scope }}</span></td>
+                <td style="font-family:ui-monospace,Menlo,monospace;font-size:12px">{{ d.filecr }}</td>
+                <td style="font-family:ui-monospace,Menlo,monospace;font-size:12px">{{ d.clicr }}</td>
+                <td style="font-size:12px;color:var(--color-neutral-700)">{{ d.cadence }}</td>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+      </div>
+
+      <div style="grid-column:1 / -1;border:1px dashed var(--color-neutral-400);padding:var(--space-6);display:flex;align-items:center;justify-content:space-between;gap:var(--space-6)">
+        <div>
+          <h4 style="margin:0 0 var(--space-1);letter-spacing:.02em;text-transform:uppercase">Super admin</h4>
+          <div style="font-size:13px;color:var(--color-neutral-700);max-width:70ch;text-wrap:pretty">Creating organisations, onboarding project admins and assigning them to projects sits one level above this screen. Out of scope for the {{ projectName }} release.</div>
+        </div>
+        <span style="font-family:var(--font-heading);font-size:14px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-600);flex:none">Later</span>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;orgName&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Flow One&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;projectName&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;CR_AUTOMATION&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;defaultScreen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dash&quot;,&quot;board&quot;,&quot;table&quot;,&quot;item&quot;,&quot;drift&quot;,&quot;config&quot;],&quot;default&quot;:&quot;dash&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+const ACC = "#5980a6", INK = "#1d1f20", DIM = "#d4d4d7", PAPER = "#f2f2f3";
+
+const TASKS = [
+  { id: "CR-1284", kind: "NEI", variant: "CLICR", title: "Trunk group config — 4 new TGRPs", activity: "128_TGRP_CONFIG_IN_CFX", node: "DRDLCFXA", host: "lab01cci02", cr: "CFXA / CR1", stage: "test", owner: "P. Mahajan", nodeType: "CFX", run: "751", updated: "2h ago", verdict: "PASS", links: 3 },
+  { id: "CR-1279", kind: "NEI", variant: "File CR", title: "SIP profile update on border nodes", activity: "SBC_SIP_PROFILE_UPDATE", node: "BHPPNCFQD1", host: "pp02cci01", cr: "SBCB / CR3", stage: "move", owner: "A. Iyer", nodeType: "SBC", run: "748", updated: "5h ago", verdict: "AWAIT", ask: "Client sign-off", links: 2 },
+  { id: "BST-4471", kind: "BST", variant: "", title: "Trunk group audit export", activity: "—", node: "DRDLCFXA", host: "—", cr: "—", stage: "dev", owner: "R. Kaur", nodeType: "CFX", run: "—", updated: "1d ago", verdict: "—", links: 1 },
+  { id: "CR-1266", kind: "NEI", variant: "CLICR", title: "Announcement sync on MRF pool", activity: "MRF_ANNOUNCEMENT_SYNC", node: "LKNWMRF02", host: "lab04mrf02", cr: "MRFA / CR2", stage: "ut", owner: "S. Nair", nodeType: "MRF", run: "744", updated: "3h ago", verdict: "FAIL", flag: "py2: str() on non-ASCII in compare script", links: 4 },
+  { id: "CR-1251", kind: "NEI", variant: "File CR", title: "Route table bulk load", activity: "DPA_ROUTE_TABLE_BULK", node: "PUNEDPA01", host: "pr01dpa01", cr: "DPAA / CR1", stage: "live", owner: "A. Iyer", nodeType: "DPA", run: "739", updated: "28 Aug", verdict: "PASS", links: 2 },
+  { id: "BST-4462", kind: "BST", variant: "", title: "Comparison report node filter", activity: "—", node: "all nodes", host: "—", cr: "—", stage: "test", owner: "P. Mahajan", nodeType: "—", run: "—", updated: "6h ago", verdict: "—", flag: "--node matched NODE_NAME only", links: 1 },
+  { id: "CR-1248", kind: "NEI", variant: "CLICR", title: "Trunk group config — Mumbai B", activity: "128_TGRP_CONFIG_IN_CFX", node: "MUMBCFXB", host: "—", cr: "CFXB / CR4", stage: "request", owner: "unassigned", nodeType: "CFX", run: "—", updated: "1d ago", verdict: "—", links: 0 },
+  { id: "CR-1290", kind: "NEI", variant: "CLICR", title: "BGCF next-hop modification", activity: "CFX_BGCF_NEXTHOP_MOD", node: "DRDLCFXA", host: "lab01cci02", cr: "CFXA / CR5", stage: "dev", owner: "R. Kaur", nodeType: "CFX", run: "—", updated: "4h ago", verdict: "—", links: 1 },
+  { id: "BST-4480", kind: "BST", variant: "", title: "packinglist lint in build", activity: "—", node: "—", host: "—", cr: "—", stage: "ut", owner: "S. Nair", nodeType: "—", run: "—", updated: "2d ago", verdict: "—", links: 0 },
+  { id: "CR-1240", kind: "NEI", variant: "File CR", title: "Media profile change", activity: "SBC_MEDIA_PROFILE", node: "BLRSBC03", host: "pr02sbc03", cr: "SBCA / CR2", stage: "live", owner: "A. Iyer", nodeType: "SBC", run: "736", updated: "26 Aug", verdict: "ROLLED BACK", links: 3 },
+  { id: "CR-1295", kind: "NEI", variant: "CLICR", title: "Retire legacy TGRP entries", activity: "CFX_TGRP_DELETE", node: "BHPPNCFQD1", host: "—", cr: "CFXD / CR6", stage: "request", owner: "unassigned", nodeType: "CFX", run: "—", updated: "30m ago", verdict: "—", links: 0 },
+  { id: "BST-4455", kind: "BST", variant: "", title: "Content-hash stamp in run log", activity: "—", node: "—", host: "—", cr: "—", stage: "move", owner: "P. Mahajan", nodeType: "—", run: "—", updated: "1d ago", verdict: "—", ask: "Release approval", links: 1 }
+];
+
+const COL_DEFS = [
+  { key: "id", label: "ID" }, { key: "kind", label: "Work type" }, { key: "variant", label: "Flavour" },
+  { key: "title", label: "Title" }, { key: "nodeType", label: "Node type" }, { key: "node", label: "NODE_NAME" },
+  { key: "host", label: "HOSTNAME" }, { key: "activity", label: "Activity" }, { key: "cr", label: "CR group" },
+  { key: "stage", label: "Stage" }, { key: "owner", label: "Owner" }, { key: "run", label: "CHILD_REQ_ID" },
+  { key: "verdict", label: "Verdict" }, { key: "links", label: "Links" }, { key: "updated", label: "Updated" }
+];
+
+const DEF_FILES = [
+  { file: "execution.yaml", layer: "Workflow", scope: "per flavour", filecr: "b71e04", clicr: "c0d883", cadence: "very often" },
+  { file: "validation.yaml", layer: "Workflow", scope: "per flavour", filecr: "5ac118", clicr: "9e2f77", cadence: "very often" },
+  { file: "jsonTemplate.yaml", layer: "Output shaping", scope: "shared", filecr: "40bb6a", clicr: "40bb6a", cadence: "rarely" },
+  { file: "templates/html/report.html", layer: "Report", scope: "shared", filecr: "d3f902", clicr: "d3f902", cadence: "rarely" },
+  { file: "script/python/*.py", layer: "Python", scope: "shared", filecr: "7fb210", clicr: "7fb210", cadence: "often" },
+  { file: "macro_CLICR_ANY_V1.jar", layer: "Java", scope: "shared", filecr: "a41c9e", clicr: "a41c9e", cadence: "rarely" }
+];
+
+class Component extends DCLogic {
+  state = {
+    screen: null, projOpen: false, kind: "All", nodeType: "All", itemId: "CR-1284",
+    cols: ["id", "kind", "variant", "title", "nodeType", "node", "stage", "run", "links", "updated"],
+    extraCols: [], newCol: "",
+    stages: [
+      { key: "request", label: "Request" }, { key: "dev", label: "Dev" }, { key: "ut", label: "UT" },
+      { key: "test", label: "Lab / Preprod" }, { key: "move", label: "Moving to prod" }, { key: "live", label: "Live on prod" }
+    ],
+    nodeTypes: ["CFX", "SBC", "DPA", "MRF"],
+    kinds: ["NEI", "BST"],
+    variants: ["File CR", "CLICR"],
+    linkTypes: ["Jira", "MOP", "Run log", "Report", "Commit", "Confluence"],
+    drafts: { stages: "", nodeTypes: "", kinds: "", variants: "", linkTypes: "" },
+    links: [
+      { type: "Jira", label: "CRAUT-2291", url: "https://jira.internal/browse/CRAUT-2291" },
+      { type: "Run log", label: "751 execution log", url: "/mnt/shared_data/751/DRDLCFXA/LOGS/DRDLCFXA_execution.log" },
+      { type: "Commit", label: "4f21ab — tgrp loop fix", url: "https://git.internal/nei/clicr/commit/4f21ab" }
+    ],
+    linkType: "Jira", linkLabel: "", linkUrl: ""
+  };
+
+  get screen() { return this.state.screen || this.props.defaultScreen || "dash"; }
+  go = (s) => () => this.setState({ screen: s, projOpen: false });
+  openItem = (id) => () => this.setState({ screen: "item", itemId: id, projOpen: false });
+
+  toggleCol = (k) => () => this.setState(s => ({
+    cols: s.cols.indexOf(k) >= 0 ? s.cols.filter(c => c !== k) : s.cols.concat([k])
+  }));
+
+  addCol = () => {
+    const name = (this.state.newCol || "").trim();
+    if (!name) return;
+    const key = "x_" + name.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+    this.setState(s => ({ extraCols: s.extraCols.concat([{ key, label: name }]), cols: s.cols.concat([key]), newCol: "" }));
+  };
+
+  setDraft = (field) => (e) => {
+    const v = e.target.value;
+    this.setState(s => ({ drafts: Object.assign({}, s.drafts, { [field]: v }) }));
+  };
+
+  addTo = (field) => () => {
+    const v = (this.state.drafts[field] || "").trim();
+    if (!v) return;
+    this.setState(s => {
+      const next = field === "stages"
+        ? s.stages.concat([{ key: "x_" + v.toLowerCase().replace(/[^a-z0-9]+/g, "_"), label: v }])
+        : s[field].concat([v]);
+      return { [field]: next, drafts: Object.assign({}, s.drafts, { [field]: "" }) };
+    });
+  };
+
+  removeFrom = (field, i) => () => this.setState(s => ({ [field]: s[field].filter((_, j) => j !== i) }));
+
+  addLink = () => {
+    const url = (this.state.linkUrl || "").trim();
+    if (!url) return;
+    this.setState(s => ({
+      links: s.links.concat([{ type: s.linkType, label: (s.linkLabel || "").trim() || url, url }]),
+      linkLabel: "", linkUrl: ""
+    }));
+  };
+
+  configSet(title, hint, field, placeholder, labels) {
+    const d = this.state.drafts[field];
+    return {
+      title, hint, placeholder, draft: d,
+      values: labels.map((label, i) => ({ label, remove: this.removeFrom(field, i) })),
+      onDraft: this.setDraft(field),
+      onKey: e => { if (e.key === "Enter") this.addTo(field)(); },
+      add: this.addTo(field)
+    };
+  }
+
+  renderVals() {
+    const sc = this.screen, st = this.state;
+    const allDefs = COL_DEFS.concat(st.extraCols);
+    const visible = st.cols.map(k => allDefs.find(d => d.key === k)).filter(Boolean);
+    let filtered = st.kind === "All" ? TASKS : TASKS.filter(t => t.kind === st.kind);
+    if (st.nodeType !== "All") filtered = filtered.filter(t => t.nodeType === st.nodeType);
+    const item = TASKS.find(t => t.id === st.itemId) || TASKS[0];
+    const stageLabel = k => (st.stages.find(s => s.key === k) || {}).label || k;
+    const itemStageIdx = st.stages.findIndex(s => s.key === item.stage);
+    const isCli = item.variant === "CLICR";
+
+    return {
+      orgName: this.props.orgName ?? "Flow One",
+      projectName: this.props.projectName ?? "CR_AUTOMATION",
+      projOpen: st.projOpen,
+      toggleProj: () => this.setState(s => ({ projOpen: !s.projOpen })),
+      projects: [
+        { name: "CR_AUTOMATION", meta: "63 in flight · you", pick: this.go("dash") },
+        { name: "CMDB", meta: "not configured", pick: this.go("config") },
+        { name: "INVENTORY_SYNC", meta: "not configured", pick: this.go("config") },
+        { name: "+ New project", meta: "project admin", pick: this.go("config") }
+      ],
+
+      tabs: [
+        { label: "Dashboard", active: sc === "dash", go: this.go("dash") },
+        { label: "Pipeline", active: sc === "board", go: this.go("board") },
+        { label: "All items", active: sc === "table", go: this.go("table") },
+        { label: "Item", active: sc === "item", go: this.go("item") },
+        { label: "Drift", active: sc === "drift", go: this.go("drift") },
+        { label: "Configure", active: sc === "config", go: this.go("config") }
+      ],
+      isDash: sc === "dash", isBoard: sc === "board", isTable: sc === "table",
+      isItem: sc === "item", isDrift: sc === "drift", isConfig: sc === "config",
+
+      figures: [
+        { label: "In flight", value: "63", note: "NEI 41 · BST 22" },
+        { label: "Waiting on you", value: "2", note: "oldest 5h" },
+        { label: "Blocked", value: "3", note: "2 are layer drift" },
+        { label: "Prod moves this week", value: "9", note: "1 rolled back" }
+      ],
+
+      envs: [
+        { name: "Dev", state: "open", pkg: "v1.9.4-dev.221", deployed: "built 12:41 today", layers: [
+          { name: "Java", hash: "a41c9e", dot: ACC }, { name: "Python", hash: "7fb210", dot: ACC },
+          { name: "Exec YAML", hash: "c0d883", dot: ACC }, { name: "Valid. YAML", hash: "9e2f77", dot: ACC },
+          { name: "Shared tmpl", hash: "40bb6a", dot: ACC }] },
+        { name: "Lab", state: "testing", pkg: "v1.9.3", deployed: "3 Sep 09:12", layers: [
+          { name: "Java", hash: "a41c9e", dot: ACC }, { name: "Python", hash: "7fb210", dot: ACC },
+          { name: "Exec YAML", hash: "c0d883", dot: ACC }, { name: "Valid. YAML", hash: "9e2f77", dot: ACC },
+          { name: "Shared tmpl", hash: "40bb6a", dot: ACC }] },
+        { name: "Preprod", state: "verified", pkg: "v1.9.2", deployed: "1 Sep 18:30", layers: [
+          { name: "Java", hash: "a41c9e", dot: ACC }, { name: "Python", hash: "3d19c2", dot: INK },
+          { name: "Exec YAML", hash: "c0d883", dot: ACC }, { name: "Valid. YAML", hash: "9e2f77", dot: ACC },
+          { name: "Shared tmpl", hash: "40bb6a", dot: ACC }] },
+        { name: "Prod", state: "live", pkg: "v1.9.1", deployed: "28 Aug 02:10", layers: [
+          { name: "Java", hash: "8e7b03", dot: INK }, { name: "Python", hash: "3d19c2", dot: INK },
+          { name: "Exec YAML", hash: "c0d883", dot: ACC }, { name: "Valid. YAML", hash: "9e2f77", dot: ACC },
+          { name: "Shared tmpl", hash: "—", dot: DIM }] }
+      ],
+
+      blocked: [
+        { id: "CR-1266", node: "MRF", reason: "py2 str() on non-ASCII — fails on server, passes on the dev machine", age: "3d", open: this.openItem("CR-1266") },
+        { id: "BST-4462", node: "all", reason: "--node filter matched NODE_NAME only; niamID and HOSTNAME silently matched nothing", age: "2d", open: this.openItem("BST-4462") },
+        { id: "CR-1279", node: "SBC", reason: "prod hash differs from the preprod-verified build — promotion gate held", age: "1d", open: this.openItem("CR-1279") }
+      ],
+
+      waiting: [
+        { id: "CR-1279", ask: "Client sign-off", title: "SIP profile update on border nodes", meta: "SBC · File CR · preprod verified 2 Sep" },
+        { id: "BST-4455", ask: "Release approval", title: "Content-hash stamp in run log", meta: "tooling change · no node impact" }
+      ],
+
+      recent: [
+        { run: "751", node: "DRDLCFXA", type: "CFX", when: "2h ago", verdict: "PASS" },
+        { run: "748", node: "BHPPNCFQD1", type: "SBC", when: "5h ago", verdict: "HOLD" },
+        { run: "744", node: "LKNWMRF02", type: "MRF", when: "3h ago", verdict: "FAIL" },
+        { run: "739", node: "PUNEDPA01", type: "DPA", when: "28 Aug", verdict: "PASS" },
+        { run: "736", node: "BLRSBC03", type: "SBC", when: "26 Aug", verdict: "R/BACK" }
+      ],
+
+      kindFilters: ["All"].concat(st.kinds).map(k => ({
+        label: k, go: () => this.setState({ kind: k }),
+        bg: st.kind === k ? ACC : "transparent", fg: st.kind === k ? PAPER : INK
+      })),
+      typeFilters: ["All"].concat(st.nodeTypes).map(k => ({
+        label: k, go: () => this.setState({ nodeType: k }),
+        bg: st.nodeType === k ? ACC : "transparent", fg: st.nodeType === k ? PAPER : INK
+      })),
+
+      boardCols: "repeat(" + st.stages.length + ",minmax(0,1fr))",
+      stages: st.stages.map(s => {
+        const items = filtered.filter(t => t.stage === s.key);
+        return {
+          label: s.label, count: items.length,
+          items: items.map(t => ({
+            id: t.id, kind: t.kind, title: t.title, node: t.node, nodeType: t.nodeType,
+            variant: t.variant, flag: t.flag || "",
+            linkCount: t.links ? String(t.links) : "", open: this.openItem(t.id)
+          }))
+        };
+      }),
+
+      rowCount: TASKS.length,
+      allCols: allDefs.map(d => ({
+        label: d.label, toggle: this.toggleCol(d.key),
+        mark: st.cols.indexOf(d.key) >= 0 ? "×" : "+",
+        bg: st.cols.indexOf(d.key) >= 0 ? "var(--color-accent-200)" : "transparent",
+        fg: st.cols.indexOf(d.key) >= 0 ? "var(--color-accent-800)" : "var(--color-neutral-700)"
+      })),
+      headers: visible,
+      rows: TASKS.map(t => ({
+        open: this.openItem(t.id),
+        cells: visible.map(c => ({
+          v: c.key === "stage" ? stageLabel(t.stage) : (t[c.key] === "" || t[c.key] == null ? "—" : String(t[c.key]))
+        }))
+      })),
+      newCol: st.newCol,
+      onNewCol: e => this.setState({ newCol: e.target.value }),
+      onNewColKey: e => { if (e.key === "Enter") this.addCol(); },
+      addCol: this.addCol,
+
+      item: {
+        id: item.id, title: item.title, kind: item.kind, variant: item.variant, nodeType: item.nodeType,
+        activity: item.activity, node: item.node, cr: item.cr, owner: item.owner, run: item.run
+      },
+      itemStages: st.stages.map((s, i) => ({
+        label: s.label,
+        who: i < itemStageIdx ? "done" : i === itemStageIdx ? "in progress" : "—",
+        when: i < itemStageIdx ? "signed off" : i === itemStageIdx ? item.updated : "",
+        bg: i === itemStageIdx ? ACC : i < itemStageIdx ? "var(--color-accent-200)" : "transparent",
+        fg: i === itemStageIdx ? PAPER : i < itemStageIdx ? "var(--color-accent-800)" : "var(--color-neutral-600)"
+      })),
+      identity: [
+        { k: "Node type", v: item.nodeType },
+        { k: "NODE_NAME", v: item.node },
+        { k: "HOSTNAME", v: item.host },
+        { k: "niamID", v: "CFX_CIF_02_10.71.138.167-CLI" },
+        { k: "UNIQUEID", v: "Labcscf/Labcfx01_DU/23.8/Ep0dH5M1" }
+      ],
+      phases: [
+        { name: "PRE_NODE_HEALTH_CHECK", steps: "6 / 6 ok", dur: "00:41", dot: ACC },
+        { name: "BACKUP", steps: "1 / 1 ok", dur: "01:12", dot: ACC },
+        { name: "ACTIVITY_CONFIGURATION", steps: "12 / 12 ok", dur: "03:58", dot: ACC },
+        { name: "POST_NODE_HEALTH_CHECK", steps: "6 / 6 ok", dur: "00:44", dot: ACC },
+        { name: "ROLLBACK_CONFIGURATION", steps: "not required", dur: "—", dot: DIM }
+      ],
+      fingerprint: [
+        { layer: "Exec YAML", file: isCli ? "clicr/execution.yaml" : "filecr/execution.yaml", scope: "per flavour", hash: isCli ? "c0d883" : "b71e04", note: "validated against the compiled bean, not a schema copy" },
+        { layer: "Valid. YAML", file: isCli ? "clicr/validation.yaml" : "filecr/validation.yaml", scope: "per flavour", hash: isCli ? "9e2f77" : "5ac118", note: "drives the postcheck comparison" },
+        { layer: "JSON tmpl", file: "jsonTemplate.yaml", scope: "shared", hash: "40bb6a", note: "common to File CR and CLICR — a change here hits both" },
+        { layer: "HTML tmpl", file: "templates/html/report.html", scope: "shared", hash: "d3f902", note: "common to all flavours" },
+        { layer: "Python", file: "script/python/netconf_compare_xml.py", scope: "shared", hash: "7fb210", note: "matches repo copy · 5 other copies on disk, none ran" },
+        { layer: "Java", file: "macro_CLICR_ANY_V1.jar", scope: "shared", hash: "a41c9e", note: "built from commit 4f21ab · sources not newer" }
+      ],
+      artifacts: [
+        { kind: "Log", path: "751/DRDLCFXA/LOGS/DRDLCFXA_execution.log", size: "2.1 MB" },
+        { kind: "Precheck", path: "751/DRDLCFXA/Precheck/lab01cci02_config.txt", size: "415 KB" },
+        { kind: "Postcheck", path: "751/DRDLCFXA/Postcheck/lab01cci02_config.txt", size: "418 KB" },
+        { kind: "Report", path: "751/REPORT/751_CR1_SUMMARY_REPORT.html", size: "6.0 MB" },
+        { kind: "MOP", path: "751/MOP/751-CR1.html", size: "88 KB" }
+      ],
+
+      links: st.links.map((l, i) => ({
+        type: l.type, label: l.label, url: l.url,
+        remove: () => this.setState(s => ({ links: s.links.filter((_, j) => j !== i) }))
+      })),
+      linkTypes: st.linkTypes,
+      linkType: st.linkType, linkLabel: st.linkLabel, linkUrl: st.linkUrl,
+      onLinkType: e => this.setState({ linkType: e.target.value }),
+      onLinkLabel: e => this.setState({ linkLabel: e.target.value }),
+      onLinkUrl: e => this.setState({ linkUrl: e.target.value }),
+      onLinkKey: e => { if (e.key === "Enter") this.addLink(); },
+      addLink: this.addLink,
+
+      driftRows: [
+        { layer: "Java", scope: "shared", cadence: "changes rarely", repo: "a41c9e", lab: "a41c9e", preprod: "a41c9e", prod: "8e7b03", verdict: "Prod behind", bg: INK, fg: PAPER },
+        { layer: "Python", scope: "shared", cadence: "changes often", repo: "7fb210", lab: "7fb210", preprod: "3d19c2", prod: "3d19c2", verdict: "Patched in place", bg: INK, fg: PAPER },
+        { layer: "Exec YAML", scope: "per flavour", cadence: "changes very often", repo: "c0d883", lab: "c0d883", preprod: "c0d883", prod: "c0d883", verdict: "In step", bg: "var(--color-accent-200)", fg: "var(--color-accent-800)" },
+        { layer: "Valid. YAML", scope: "per flavour", cadence: "changes very often", repo: "9e2f77", lab: "9e2f77", preprod: "9e2f77", prod: "9e2f77", verdict: "In step", bg: "var(--color-accent-200)", fg: "var(--color-accent-800)" },
+        { layer: "JSON tmpl", scope: "shared", cadence: "changes rarely", repo: "40bb6a", lab: "40bb6a", preprod: "40bb6a", prod: "unknown", verdict: "Never verified", bg: INK, fg: PAPER },
+        { layer: "HTML tmpl", scope: "shared", cadence: "changes rarely", repo: "d3f902", lab: "d3f902", preprod: "d3f902", prod: "d3f902", verdict: "In step", bg: "var(--color-accent-200)", fg: "var(--color-accent-800)" }
+      ],
+      warnings: [
+        { sev: "High", text: "Prod is running a Python build that no environment promoted. It was edited on the server.", where: "prod · script/python/netconf_compare_xml.py · 3d19c2" },
+        { sev: "High", text: "Prod has no recorded hash for the shared templates, so no run on prod can be attributed to a known build.", where: "prod · jsonTemplate.yaml, templates/html/*" },
+        { sev: "Med", text: "Compiled bean older than its source — YAML with a new key will throw at parse, not at build.", where: "dev · NodeDefinition.class vs NodeDefinition.java" },
+        { sev: "Med", text: "A script added to the repo is absent from .packinglist, so it will not ship.", where: "repo · script/python/tgrp_diff.py" }
+      ],
+      gate: [
+        { text: "Preprod run passed with no rollback", by: "run 748", fill: ACC },
+        { text: "Every layer hash matches the preprod-verified set", by: "1 mismatch", fill: "transparent" },
+        { text: "Client sign-off recorded", by: "A. Iyer, 3 Sep", fill: ACC },
+        { text: "Rollback plan attached to the MOP", by: "751-CR1.html", fill: ACC }
+      ],
+
+      configSets: [
+        this.configSet("Stages", "the pipeline columns", "stages", "New stage name", st.stages.map(s => s.label)),
+        this.configSet("Node types", "more will come", "nodeTypes", "e.g. HSS", st.nodeTypes),
+        this.configSet("Work types", "NEI, BST, …", "kinds", "e.g. INFRA", st.kinds),
+        this.configSet("NEI flavours", "own execution + validation YAML", "variants", "e.g. NETCONF CR", st.variants),
+        this.configSet("Link types", "what can be attached to an item", "linkTypes", "e.g. Test report", st.linkTypes)
+      ],
+      defFiles: DEF_FILES
+    };
+  }
+}
+</script>
+</body>
+</html>

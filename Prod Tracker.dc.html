@@ -1,0 +1,1563 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="_ds/industry-e81e33a9-683c-4ebf-a5a4-a47e4fc446de/styles.css">
+<script src="_ds/industry-e81e33a9-683c-4ebf-a5a4-a47e4fc446de/_ds_bundle.js"></script>
+<style>
+  body { margin:0; background:var(--color-bg); color:var(--color-text); font-family:var(--font-body); }
+  a { color:var(--color-accent-700); text-decoration:none; }
+  a:hover { color:var(--color-accent-800); }
+</style>
+</helmet>
+
+<div style="min-height:100vh;padding-bottom:64px">
+
+  <div style="display:flex;align-items:center;flex-wrap:wrap;padding:0 var(--space-6);min-height:58px;border-bottom:1px solid var(--color-divider);background:var(--color-bg);position:sticky;top:0;z-index:30">
+    <div onClick="{{ toggleProj }}" style="display:flex;align-items:center;gap:var(--space-3);cursor:pointer;padding-right:var(--space-4);flex:none">
+      <span style="font-family:var(--font-heading);font-weight:600;font-size:20px;white-space:nowrap">{{ orgName }}</span>
+      <span style="width:1px;height:16px;background:var(--color-divider);flex:none"></span>
+      <span style="font-family:var(--font-heading);font-size:15px;letter-spacing:.09em;text-transform:uppercase;color:var(--color-accent-700);white-space:nowrap">{{ projectName }}</span>
+      <span style="font-size:10px;color:var(--color-neutral-600)">▼</span>
+    </div>
+    <sc-if value="{{ projOpen }}" hint-placeholder-val="{{ false }}">
+      <div class="blueprint" style="position:absolute;top:58px;left:var(--space-6);width:330px;background:var(--color-bg);box-shadow:var(--shadow-md);z-index:40">
+        <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+        <div style="padding:var(--space-3) var(--space-4);font-family:var(--font-heading);font-size:12px;letter-spacing:.13em;text-transform:uppercase;color:var(--color-neutral-600);border-bottom:1px solid var(--color-divider)">{{ orgName }} — projects</div>
+        <sc-for list="{{ projects }}" as="p" hint-placeholder-count="4">
+          <div onClick="{{ p.pick }}" style="display:flex;align-items:baseline;gap:var(--space-3);padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--color-divider);cursor:pointer" style-hover="background:var(--color-accent-100)">
+            <span style="flex:1;font-family:var(--font-heading);font-size:16px;letter-spacing:.06em;text-transform:uppercase">{{ p.name }}</span>
+            <span style="font-size:12px;color:var(--color-neutral-600)">{{ p.meta }}</span>
+          </div>
+        </sc-for>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:var(--space-3) var(--space-4);font-size:12px;color:var(--color-neutral-600)">
+          <span>Organisations &amp; admins</span>
+          <span style="font-family:var(--font-heading);letter-spacing:.1em;text-transform:uppercase">super admin — later</span>
+        </div>
+      </div>
+    </sc-if>
+    <div style="display:flex;flex-wrap:wrap;flex:1 1 auto;min-width:0">
+      <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="6">
+        <div onClick="{{ t.go }}" style="position:relative;display:flex;align-items:center;flex:none;white-space:nowrap;height:57px;padding:0 var(--space-3);cursor:pointer;font-family:var(--font-heading);font-size:15px;letter-spacing:.03em;text-transform:uppercase;color:var(--color-neutral-700)" style-hover="color:var(--color-text);background:var(--color-accent-100)">
+          {{ t.label }}
+          <sc-if value="{{ t.active }}" hint-placeholder-val="{{ false }}">
+            <span style="position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--color-accent)"></span>
+          </sc-if>
+        </div>
+      </sc-for>
+    </div>
+    <div style="display:flex;align-items:center;gap:var(--space-3);font-size:13px;color:var(--color-neutral-700);flex:none;white-space:nowrap;padding-left:var(--space-3)">
+      <span style="width:1px;height:18px;background:var(--color-divider);flex:none"></span>
+      <span>P. Mahajan · Admin</span>
+    </div>
+  </div>
+
+  <!-- ══════════ DASHBOARD ══════════ -->
+  <sc-if value="{{ isDash }}" hint-placeholder-val="{{ true }}">
+  <div style="max-width:1500px;margin:0 auto;padding:var(--space-8)">
+    <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:var(--space-6);margin-bottom:var(--space-6)">
+      <div>
+        <div style="font-family:var(--font-heading);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--color-neutral-600)">{{ orgName }} / {{ projectName }}</div>
+        <h1 style="margin:0">Prod readiness</h1>
+        <div style="color:var(--color-neutral-700);font-size:14px">{{ activityCount }} modules across {{ nodeTypeCount }} node types. A module is a node type plus an activity; readiness is measured per deliverable.</div>
+      </div>
+      <div style="display:flex;gap:var(--space-2)">
+        <button class="btn btn-secondary" onClick="{{ goMatrix }}">Open matrix</button>
+        <button class="btn btn-primary">New module</button>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--color-divider);border:1px solid var(--color-divider);margin-bottom:var(--space-8)">
+      <sc-for list="{{ figures }}" as="f" hint-placeholder-count="4">
+        <div onClick="{{ f.go }}" style="background:var(--color-bg);padding:var(--space-6);cursor:pointer" style-hover="background:var(--color-accent-100)">
+          <div style="font-family:var(--font-heading);font-size:12px;letter-spacing:.13em;text-transform:uppercase;color:var(--color-neutral-600)">{{ f.label }}</div>
+          <div style="display:flex;align-items:baseline;gap:var(--space-3);margin-top:var(--space-1)">
+            <span style="font-family:var(--font-heading);font-weight:600;font-size:44px;line-height:1;font-variant-numeric:tabular-nums">{{ f.value }}</span>
+            <span style="font-size:13px;color:var(--color-neutral-700);text-wrap:pretty">{{ f.note }}</span>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1.25fr 1fr;gap:var(--space-8);align-items:start">
+      <div>
+        <h3 style="margin:0 0 var(--space-3);letter-spacing:.02em;text-transform:uppercase">Readiness by node type</h3>
+        <div style="border:1px solid var(--color-divider)">
+          <sc-for list="{{ byNodeType }}" as="n" hint-placeholder-count="6">
+            <div onClick="{{ n.go }}" style="display:flex;align-items:center;gap:var(--space-4);padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--color-divider);cursor:pointer" style-hover="background:var(--color-accent-100)">
+              <span style="width:56px;flex:none;font-family:var(--font-heading);font-size:17px;letter-spacing:.08em;text-transform:uppercase">{{ n.name }}</span>
+              <span style="width:74px;flex:none;font-size:12px;color:var(--color-neutral-600)">{{ n.count }}</span>
+              <span style="flex:1;height:10px;background:var(--color-neutral-200);position:relative;overflow:hidden">
+                <span style="position:absolute;left:0;top:0;bottom:0;width:{{ n.pct }};background:var(--color-accent)"></span>
+              </span>
+              <span style="width:44px;flex:none;text-align:right;font-family:var(--font-heading);font-size:16px;font-variant-numeric:tabular-nums">{{ n.pct }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <div>
+        <h3 style="margin:0 0 var(--space-3);letter-spacing:.02em;text-transform:uppercase">Nothing recorded</h3>
+        <div class="blueprint" style="padding:var(--space-6)">
+          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <div style="font-size:14px;line-height:1.5;margin-bottom:var(--space-4);text-wrap:pretty">A blank cell is not a status. These are the gaps in the sheet itself — the fastest thing to fix, because nobody knows whether the work is done or not.</div>
+          <sc-for list="{{ gaps }}" as="g" hint-placeholder-count="4">
+            <div style="display:flex;align-items:baseline;gap:var(--space-3);padding:var(--space-2) 0;border-top:1px solid var(--color-divider)">
+              <span style="font-family:var(--font-heading);font-weight:600;font-size:20px;width:40px;flex:none;font-variant-numeric:tabular-nums">{{ g.n }}</span>
+              <span style="flex:1;font-size:13px;text-wrap:pretty">{{ g.text }}</span>
+            </div>
+          </sc-for>
+        </div>
+
+        <h3 style="margin:var(--space-8) 0 var(--space-3);letter-spacing:.02em;text-transform:uppercase">Closest to prod</h3>
+        <div style="border:1px solid var(--color-divider)">
+          <sc-for list="{{ nearly }}" as="a" hint-placeholder-count="5">
+            <div onClick="{{ a.open }}" style="padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--color-divider);cursor:pointer" style-hover="background:var(--color-accent-100)">
+              <div style="display:flex;align-items:baseline;gap:var(--space-3)">
+                <span class="tag tag-accent" style="flex:none">{{ a.nodeType }}</span>
+                <span style="flex:1;font-size:13px;line-height:1.3;word-break:break-word">{{ a.name }}</span>
+                <span style="font-family:var(--font-heading);font-size:16px;flex:none;font-variant-numeric:tabular-nums">{{ a.pct }}</span>
+              </div>
+              <div style="margin-top:var(--space-1);font-size:12px;color:var(--color-neutral-600)">{{ a.missing }}</div>
+            </div>
+          </sc-for>
+        </div>
+
+        <h3 style="margin:var(--space-8) 0 var(--space-3);letter-spacing:.02em;text-transform:uppercase">Recent changes</h3>
+        <div style="border:1px solid var(--color-divider)">
+          <sc-for list="{{ auditFeed }}" as="h" hint-placeholder-count="5">
+            <div style="display:flex;align-items:baseline;gap:var(--space-3);padding:var(--space-2) var(--space-4);border-bottom:1px solid var(--color-divider);font-size:12px">
+              <span style="font-family:var(--font-heading);letter-spacing:.06em;text-transform:uppercase;width:76px;flex:none">{{ h.col }}</span>
+              <span style="flex:1;color:var(--color-neutral-700);word-break:break-word">{{ h.what }}</span>
+              <span style="color:var(--color-neutral-600);flex:none">{{ h.who }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ══════════ SIGN IN ══════════ -->
+  <sc-if value="{{ isLogin }}" hint-placeholder-val="{{ false }}">
+  <div style="min-height:calc(100vh - 58px);display:flex;align-items:center;justify-content:center;padding:var(--space-8)">
+    <div class="blueprint" style="width:400px;max-width:100%;padding:var(--space-8)">
+      <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+      <div style="font-family:var(--font-heading);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--color-neutral-600)">{{ orgName }}</div>
+      <h2 style="margin:0 0 var(--space-6)">Sign in</h2>
+      <div style="display:flex;flex-direction:column;gap:var(--space-4)">
+        <label style="display:flex;flex-direction:column;gap:var(--space-1);font-size:13px;color:var(--color-neutral-700)">Work email
+          <input class="input" type="email" value="{{ loginEmail }}" onChange="{{ onLoginEmail }}" placeholder="name@nokia.com">
+        </label>
+        <label style="display:flex;flex-direction:column;gap:var(--space-1);font-size:13px;color:var(--color-neutral-700)">Password
+          <input class="input" type="password" value="{{ loginPass }}" onChange="{{ onLoginPass }}" placeholder="••••••••">
+        </label>
+        <sc-if value="{{ loginError }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12px;color:var(--color-text);border-left:2px solid var(--color-text);padding-left:var(--space-3)">{{ loginError }}</div>
+        </sc-if>
+        <button class="btn btn-primary btn-block" onClick="{{ signIn }}">Sign in</button>
+      </div>
+      <div style="margin-top:var(--space-6);padding-top:var(--space-4);border-top:1px solid var(--color-divider);font-size:12px;color:var(--color-neutral-600);text-wrap:pretty">Email and password only — no SSO in this release. Accounts are created by invitation from a project admin; there is no self sign-up.</div>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ══════════ ACCESS ══════════ -->
+  <sc-if value="{{ isAccess }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:1500px;margin:0 auto;padding:var(--space-8)">
+    <div style="margin-bottom:var(--space-6)">
+      <h1 style="margin:0">Access</h1>
+      <div style="color:var(--color-neutral-700);font-size:14px">Super admin onboards an admin. An admin owns projects and can onboard sub-admins, and either can define new roles with any mix of permissions.</div>
+    </div>
+
+    <div style="display:flex;align-items:stretch;border:1px solid var(--color-divider);margin-bottom:var(--space-8)">
+      <sc-for list="{{ hierarchy }}" as="h" hint-placeholder-count="4">
+        <div style="flex:1;padding:var(--space-4);border-right:1px solid var(--color-divider)">
+          <div style="font-family:var(--font-heading);font-size:12px;letter-spacing:.11em;text-transform:uppercase;color:var(--color-neutral-600)">{{ h.level }}</div>
+          <div style="font-family:var(--font-heading);font-weight:600;font-size:19px;margin-top:2px">{{ h.who }}</div>
+          <div style="font-size:12px;color:var(--color-neutral-700);margin-top:var(--space-1);text-wrap:pretty">{{ h.can }}</div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div class="blueprint" style="padding:var(--space-6);margin-bottom:var(--space-8)">
+      <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);margin-bottom:var(--space-4);flex-wrap:wrap">
+        <h4 style="margin:0;letter-spacing:.02em;text-transform:uppercase">Onboard a user</h4>
+        <span style="font-size:12px;color:var(--color-neutral-600)">an invitation email is sent; the user sets their own password</span>
+      </div>
+      <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;align-items:center">
+        <input class="input" value="{{ inviteEmail }}" onChange="{{ onInviteEmail }}" placeholder="name@nokia.com" style="width:220px">
+        <input class="input" value="{{ inviteName }}" onChange="{{ onInviteName }}" placeholder="Display name" style="width:170px">
+        <select class="input" value="{{ inviteRole }}" onChange="{{ onInviteRole }}" style="width:150px">
+          <sc-for list="{{ roleOptions }}" as="r" hint-placeholder-count="7">
+            <option value="{{ r }}">{{ r }}</option>
+          </sc-for>
+        </select>
+        <select class="input" value="{{ inviteScope }}" onChange="{{ onInviteScope }}" style="width:230px">
+          <sc-for list="{{ scopeOptions }}" as="s" hint-placeholder-count="4">
+            <option value="{{ s }}">{{ s }}</option>
+          </sc-for>
+        </select>
+        <button class="btn btn-primary" onClick="{{ sendInvite }}">Send invitation</button>
+      </div>
+      <div style="margin-top:var(--space-3);font-size:12px;color:var(--color-neutral-700);text-wrap:pretty">{{ invitePreview }}</div>
+      <div style="margin-top:var(--space-6);border-top:1px solid var(--color-divider)">
+        <sc-for list="{{ invites }}" as="v" hint-placeholder-count="2">
+          <div style="display:flex;align-items:baseline;gap:var(--space-3);padding:var(--space-2) 0;border-bottom:1px solid var(--color-divider);flex-wrap:wrap">
+            <span style="font-family:ui-monospace,Menlo,monospace;font-size:12px;width:190px;flex:none">{{ v.email }}</span>
+            <span style="font-size:13px;width:110px;flex:none">{{ v.name }}</span>
+            <span class="tag tag-accent" style="flex:none">{{ v.role }}</span>
+            <span style="font-size:12px;color:var(--color-neutral-700);flex:1;min-width:120px">{{ v.scope }}</span>
+            <span style="font-size:12px;color:var(--color-neutral-600);flex:none">{{ v.state }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <div class="blueprint" style="padding:var(--space-6);margin-bottom:var(--space-8)">
+      <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);margin-bottom:var(--space-4);flex-wrap:wrap">
+        <h4 style="margin:0;letter-spacing:.02em;text-transform:uppercase">Roles &amp; permissions</h4>
+        <span style="font-size:12px;color:var(--color-neutral-600)">click a cell to grant or revoke</span>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="table" style="width:100%">
+          <thead>
+            <tr>
+              <th style="min-width:250px">Permission</th>
+              <sc-for list="{{ roleCols }}" as="r" hint-placeholder-count="7">
+                <th style="text-align:center;white-space:nowrap">{{ r.name }}<div style="font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--color-neutral-600)">{{ r.note }}</div></th>
+              </sc-for>
+            </tr>
+          </thead>
+            <sc-for list="{{ permRows }}" as="g" hint-placeholder-count="5">
+              <tbody>
+                <tr>
+                  <td colspan="8" style="font-family:var(--font-heading);font-size:13px;letter-spacing:.11em;text-transform:uppercase;color:var(--color-neutral-600);background:var(--color-accent-100)">{{ g.label }}</td>
+                </tr>
+                <sc-for list="{{ g.rows }}" as="p" hint-placeholder-count="4">
+                  <tr>
+                    <td style="font-size:13px">{{ p.label }}<div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--color-neutral-600)">{{ p.key }}</div></td>
+                    <sc-for list="{{ p.cells }}" as="c" hint-placeholder-count="7">
+                      <td style="text-align:center;padding:var(--space-1)">
+                        <span onClick="{{ c.toggle }}" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;cursor:pointer;font-size:12px;border:1px solid var(--color-neutral-400);background:{{ c.bg }};color:{{ c.fg }}">{{ c.mark }}</span>
+                      </td>
+                    </sc-for>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </sc-for>
+        </table>
+      </div>
+    </div>
+
+    <h4 style="margin:0 0 var(--space-3);letter-spacing:.02em;text-transform:uppercase">Users in this organisation</h4>
+    <div style="border:1px solid var(--color-divider);overflow-x:auto">
+      <table class="table" style="width:100%">
+        <thead>
+          <tr><th>Name</th><th>Email</th><th>Role</th><th>Scope</th></tr>
+        </thead>
+        <tbody>
+          <sc-for list="{{ users }}" as="u" hint-placeholder-count="6">
+            <tr>
+              <td style="white-space:nowrap">{{ u.name }}</td>
+              <td style="font-family:ui-monospace,Menlo,monospace;font-size:12px">{{ u.email }}</td>
+              <td><span class="tag tag-accent">{{ u.role }}</span></td>
+              <td style="font-size:13px;color:var(--color-neutral-700)">{{ u.scope }}</td>
+            </tr>
+          </sc-for>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ══════════ LIBRARY ══════════ -->
+  <sc-if value="{{ isLibrary }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:1440px;margin:0 auto;padding:var(--space-8)">
+    <div style="margin-bottom:var(--space-6)">
+      <h1 style="margin:0">Module library</h1>
+      <div style="color:var(--color-neutral-700);font-size:14px">A module is a node type plus an activity, built once. Clone it into a project and its own tracking starts from scratch — the library entry is not affected.</div>
+    </div>
+    <div style="border:1px solid var(--color-divider);overflow-x:auto">
+      <table class="table" style="width:100%">
+        <thead>
+          <tr><th>Node type</th><th>Activity</th><th>Version</th><th>Subactivities</th><th>Used in</th><th>Here</th><th></th></tr>
+        </thead>
+        <tbody>
+          <sc-for list="{{ library }}" as="m" hint-placeholder-count="8">
+            <tr>
+              <td><span class="tag tag-accent">{{ m.nodeType }}</span></td>
+              <td style="font-size:12px;word-break:break-word;max-width:380px">{{ m.name }}</td>
+              <td style="font-family:ui-monospace,Menlo,monospace;font-size:12px">{{ m.version }}</td>
+              <td style="font-size:12px;color:var(--color-neutral-700);white-space:nowrap">{{ m.subs }}</td>
+              <td style="font-size:12px;color:var(--color-neutral-700);white-space:nowrap">{{ m.projects }}</td>
+              <td style="white-space:nowrap"><span style="font-family:var(--font-heading);font-size:12px;letter-spacing:.08em;text-transform:uppercase;padding:2px 8px;background:{{ m.stBg }};color:{{ m.stFg }};border:1px solid var(--color-neutral-400)">{{ m.state }}</span></td>
+              <td><button class="btn btn-secondary" onClick="{{ m.clone }}">{{ m.action }}</button></td>
+            </tr>
+          </sc-for>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ══════════ PROD ISSUES ══════════ -->
+  <sc-if value="{{ isIssues }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:1500px;margin:0 auto;padding:var(--space-8)">
+    <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:var(--space-6);margin-bottom:var(--space-6);flex-wrap:wrap">
+      <div>
+        <h1 style="margin:0">Defects</h1>
+        <div style="color:var(--color-neutral-700);font-size:14px">Found while testing on staging or preprod, or during a run on production — logged against the module it happened on and linked to its ticket.</div>
+        <div style="display:flex;gap:var(--space-1);margin-top:var(--space-3);flex-wrap:wrap">
+          <sc-for list="{{ phaseFilters }}" as="p" hint-placeholder-count="4">
+            <div onClick="{{ p.go }}" style="padding:var(--space-1) var(--space-3);border:1px solid var(--color-neutral-400);font-family:var(--font-heading);font-size:14px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;background:{{ p.bg }};color:{{ p.fg }}">{{ p.label }}</div>
+          </sc-for>
+        </div>
+      </div>
+      <div style="display:flex;gap:var(--space-6)">
+        <sc-for list="{{ issueFigures }}" as="f" hint-placeholder-count="3">
+          <div>
+            <div style="font-family:var(--font-heading);font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--color-neutral-600)">{{ f.label }}</div>
+            <div style="font-family:var(--font-heading);font-weight:600;font-size:30px;line-height:1.1;font-variant-numeric:tabular-nums">{{ f.value }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <div class="blueprint" style="padding:var(--space-6);margin-bottom:var(--space-6)">
+      <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+      <div style="font-family:var(--font-heading);font-size:12px;letter-spacing:.13em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:var(--space-3)">Log a defect</div>
+      <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;align-items:center">
+        <select class="input" value="{{ issueActivity }}" onChange="{{ onIssueActivity }}" style="width:300px">
+          <sc-for list="{{ activityOptions }}" as="o" hint-placeholder-count="6">
+            <option value="{{ o.id }}">{{ o.name }}</option>
+          </sc-for>
+        </select>
+        <select class="input" value="{{ issuePhase }}" onChange="{{ onIssuePhase }}" style="width:160px">
+          <sc-for list="{{ phaseOptions }}" as="p" hint-placeholder-count="3">
+            <option value="{{ p }}">{{ p }}</option>
+          </sc-for>
+        </select>
+        <input class="input" value="{{ issueRun }}" onChange="{{ onIssueRun }}" placeholder="CHILD_REQ_ID" style="width:130px">
+        <input class="input" value="{{ issueTicket }}" onChange="{{ onIssueTicket }}" placeholder="Ticket, e.g. CRAUT-2291" style="width:180px">
+        <select class="input" value="{{ issueSev }}" onChange="{{ onIssueSev }}" style="width:120px">
+          <sc-for list="{{ sevOptions }}" as="s" hint-placeholder-count="3">
+            <option value="{{ s }}">{{ s }}</option>
+          </sc-for>
+        </select>
+        <input class="input" value="{{ issueText }}" onChange="{{ onIssueText }}" onKeyDown="{{ onIssueKey }}" placeholder="What happened on the node" style="flex:1;min-width:240px">
+        <button class="btn btn-primary" onClick="{{ addIssue }}">Add defect</button>
+      </div>
+    </div>
+
+    <div style="border:1px solid var(--color-divider);overflow-x:auto">
+      <table class="table" style="width:100%">
+        <thead>
+          <tr><th>Severity</th><th>Phase</th><th>Module</th><th>Ticket</th><th>Run</th><th>What happened</th><th>Raised by</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          <sc-for list="{{ issues }}" as="i" hint-placeholder-count="4">
+            <tr>
+              <td style="white-space:nowrap"><span style="font-family:var(--font-heading);font-size:12px;letter-spacing:.1em;text-transform:uppercase;padding:1px 7px;background:{{ i.sevBg }};color:{{ i.sevFg }}">{{ i.sev }}</span></td>
+              <td style="font-size:12px;white-space:nowrap">{{ i.phase }}</td>
+              <td style="font-size:12px;word-break:break-word;max-width:240px">{{ i.activity }}</td>
+              <td style="white-space:nowrap"><a href="{{ i.ticketUrl }}" style="font-family:ui-monospace,Menlo,monospace;font-size:12px">{{ i.ticket }}</a></td>
+              <td style="font-family:ui-monospace,Menlo,monospace;font-size:12px">{{ i.run }}</td>
+              <td style="font-size:13px;text-wrap:pretty">{{ i.text }}</td>
+              <td style="font-size:12px;color:var(--color-neutral-700);white-space:nowrap">{{ i.by }}</td>
+              <td><span onClick="{{ i.cycle }}" style="font-family:var(--font-heading);font-size:13px;letter-spacing:.07em;text-transform:uppercase;padding:2px 8px;cursor:pointer;background:{{ i.stBg }};color:{{ i.stFg }}">{{ i.status }}</span></td>
+            </tr>
+          </sc-for>
+        </tbody>
+      </table>
+    </div>
+    <div style="margin-top:var(--space-3);font-size:12px;color:var(--color-neutral-600)">Click a status to move it Open → Investigating → Fixed.</div>
+  </div>
+  </sc-if>
+
+  <!-- ══════════ MATRIX ══════════ -->
+  <sc-if value="{{ isMatrix }}" hint-placeholder-val="{{ false }}">
+  <div style="padding:var(--space-8) var(--space-6)">
+    <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:var(--space-6);margin-bottom:var(--space-4);flex-wrap:wrap">
+      <div>
+        <h1 style="margin:0">Module matrix</h1>
+        <div style="color:var(--color-neutral-700);font-size:14px">One row per module — a node type plus an activity. Open a module to reach its subactivities; a module cell is a roll-up of them. Every change is stamped with who and when.</div>
+      </div>
+      <div style="display:flex;gap:var(--space-6);align-items:flex-end;flex-wrap:wrap">
+        <div>
+          <div style="font-family:var(--font-heading);font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:var(--space-1)">Node type</div>
+          <div style="display:flex;gap:var(--space-1);flex-wrap:wrap">
+            <sc-for list="{{ typeFilters }}" as="k" hint-placeholder-count="7">
+              <div onClick="{{ k.go }}" style="padding:var(--space-1) var(--space-3);border:1px solid var(--color-neutral-400);font-family:var(--font-heading);font-size:14px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;background:{{ k.bg }};color:{{ k.fg }}">{{ k.label }}</div>
+            </sc-for>
+          </div>
+        </div>
+        <div>
+          <div style="font-family:var(--font-heading);font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:var(--space-1)">Readiness</div>
+          <div style="display:flex;gap:var(--space-1);flex-wrap:wrap">
+            <sc-for list="{{ readyFilters }}" as="k" hint-placeholder-count="4">
+              <div onClick="{{ k.go }}" style="padding:var(--space-1) var(--space-3);border:1px solid var(--color-neutral-400);font-family:var(--font-heading);font-size:14px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;background:{{ k.bg }};color:{{ k.fg }}">{{ k.label }}</div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:var(--space-6);flex-wrap:wrap;margin-bottom:var(--space-4);font-size:12px;color:var(--color-neutral-700)">
+      <sc-for list="{{ legend }}" as="l" hint-placeholder-count="4">
+        <span style="display:flex;align-items:center;gap:var(--space-2)">
+          <span style="width:20px;height:20px;flex:none;display:flex;align-items:center;justify-content:center;font-size:11px;background:{{ l.bg }};color:{{ l.fg }};border:1px solid {{ l.border }}">{{ l.mark }}</span>{{ l.label }}
+        </span>
+      </sc-for>
+    </div>
+
+    <div style="border:1px solid var(--color-divider);overflow:auto;max-height:74vh">
+      <div style="min-width:{{ matrixWidth }}">
+        <div style="display:flex;position:sticky;top:0;z-index:12;background:var(--color-bg);border-bottom:1px solid var(--color-neutral-400)">
+          <div style="width:326px;flex:none;position:sticky;left:0;z-index:13;background:var(--color-bg);padding:var(--space-3) var(--space-4);border-right:1px solid var(--color-divider);font-family:var(--font-heading);font-size:12px;letter-spacing:.11em;text-transform:uppercase;color:var(--color-neutral-600)">Module — node + activity</div>
+          <div style="width:82px;flex:none;padding:var(--space-3) var(--space-2);border-right:1px solid var(--color-divider);font-family:var(--font-heading);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-neutral-600)">Ready</div>
+          <sc-for list="{{ columns }}" as="c" hint-placeholder-count="14">
+            <div title="{{ c.full }}" style="width:76px;flex:none;padding:var(--space-3) var(--space-2);border-right:1px solid var(--color-divider);font-family:var(--font-heading);font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--color-neutral-700);line-height:1.15;word-break:break-word">{{ c.label }}</div>
+          </sc-for>
+          <div style="width:96px;flex:none;padding:var(--space-3) var(--space-2);font-family:var(--font-heading);font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--color-neutral-700)">Target</div>
+        </div>
+
+        <sc-for list="{{ groups }}" as="g" hint-placeholder-count="5">
+          <div>
+            <div style="display:flex;align-items:center;gap:var(--space-3);padding:var(--space-2) var(--space-4);background:var(--color-accent-100);border-bottom:1px solid var(--color-divider);position:sticky;left:0">
+              <span style="font-family:var(--font-heading);font-weight:600;font-size:16px;letter-spacing:.09em;text-transform:uppercase">{{ g.nodeType }}</span>
+              <span style="font-size:12px;color:var(--color-neutral-700)">{{ g.summary }}</span>
+            </div>
+            <sc-for list="{{ g.rows }}" as="r" hint-placeholder-count="4">
+              <div>
+              <div style="display:flex;border-bottom:1px solid var(--color-divider)" style-hover="background:var(--color-accent-100)">
+                <div onClick="{{ r.open }}" style="width:326px;flex:none;position:sticky;left:0;z-index:8;background:var(--color-bg);padding:var(--space-2) var(--space-4);border-right:1px solid var(--color-divider);font-size:12px;line-height:1.3;word-break:break-word;cursor:pointer" style-hover="color:var(--color-accent-800)">
+                  {{ r.name }}
+                  <div style="display:flex;gap:var(--space-2);align-items:baseline;font-size:11px;color:var(--color-neutral-600)">
+                    <span>{{ r.owner }}</span>
+                    <sc-if value="{{ r.hasSubs }}" hint-placeholder-val="{{ false }}">
+                      <span onClick="{{ r.toggle }}" style="color:var(--color-accent-700);cursor:pointer" style-hover="color:var(--color-accent-800)">{{ r.subMark }}</span>
+                    </sc-if>
+                  </div>
+                </div>
+                <div style="width:82px;flex:none;padding:var(--space-2);border-right:1px solid var(--color-divider);display:flex;align-items:center;gap:var(--space-2)">
+                  <span style="flex:1;height:6px;background:var(--color-neutral-200);position:relative;overflow:hidden">
+                    <span style="position:absolute;left:0;top:0;bottom:0;width:{{ r.pct }};background:var(--color-accent)"></span>
+                  </span>
+                  <span style="font-size:11px;font-variant-numeric:tabular-nums;color:var(--color-neutral-700)">{{ r.pctNum }}</span>
+                </div>
+                <sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="14">
+                  <div onClick="{{ c.click }}" title="{{ c.title }}" style="width:76px;flex:none;border-right:1px solid var(--color-divider);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:13px;background:{{ c.bg }};color:{{ c.fg }}" style-hover="outline:2px solid var(--color-accent);outline-offset:-2px">{{ c.mark }}</div>
+                </sc-for>
+                <div style="width:96px;flex:none;padding:var(--space-2);font-size:12px;color:var(--color-neutral-600)">{{ r.target }}</div>
+              </div>
+              <sc-for list="{{ r.subs }}" as="sb" hint-placeholder-count="0">
+                <div style="display:flex;border-bottom:1px solid var(--color-divider);background:var(--color-neutral-100)">
+                  <div style="width:326px;flex:none;position:sticky;left:0;z-index:8;background:var(--color-neutral-100);padding:var(--space-1) var(--space-4) var(--space-1) 34px;border-right:1px solid var(--color-divider);font-size:12px;color:var(--color-neutral-700);line-height:1.3;word-break:break-word">↳ {{ sb.name }}</div>
+                  <div style="width:82px;flex:none;padding:var(--space-2);border-right:1px solid var(--color-divider);display:flex;align-items:center;gap:var(--space-2)">
+                    <span style="flex:1;height:4px;background:var(--color-neutral-200);position:relative;overflow:hidden">
+                      <span style="position:absolute;left:0;top:0;bottom:0;width:{{ sb.pct }};background:var(--color-accent)"></span>
+                    </span>
+                    <span style="font-size:11px;font-variant-numeric:tabular-nums;color:var(--color-neutral-600)">{{ sb.pctNum }}</span>
+                  </div>
+                  <sc-for list="{{ sb.cells }}" as="c" hint-placeholder-count="14">
+                    <div onClick="{{ c.click }}" title="{{ c.title }}" style="width:76px;flex:none;border-right:1px solid var(--color-divider);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:12px;background:{{ c.bg }};color:{{ c.fg }}" style-hover="outline:2px solid var(--color-accent);outline-offset:-2px">{{ c.mark }}</div>
+                  </sc-for>
+                  <div style="width:96px;flex:none"></div>
+                </div>
+              </sc-for>
+              </div>
+            </sc-for>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+    <div style="margin-top:var(--space-3);font-size:12px;color:var(--color-neutral-600)">{{ matrixNote }}</div>
+  </div>
+  </sc-if>
+
+  <!-- ══════════ PIPELINE ══════════ -->
+  <sc-if value="{{ isBoard }}" hint-placeholder-val="{{ false }}">
+  <div style="padding:var(--space-8) var(--space-6)">
+    <div style="margin-bottom:var(--space-6)">
+      <h1 style="margin:0">Pipeline</h1>
+      <div style="color:var(--color-neutral-700);font-size:14px">The same modules, placed by how far their deliverables have got. Stage names come from project configuration.</div>
+    </div>
+    <div style="display:grid;grid-template-columns:{{ boardCols }};gap:1px;background:var(--color-divider);border:1px solid var(--color-divider)">
+      <sc-for list="{{ stages }}" as="s" hint-placeholder-count="6">
+        <div style="background:var(--color-bg);padding-bottom:var(--space-4)">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-2);padding:var(--space-3) var(--space-3);border-bottom:1px solid var(--color-divider)">
+            <span style="font-family:var(--font-heading);font-weight:600;font-size:14px;letter-spacing:.08em;text-transform:uppercase;line-height:1.15">{{ s.label }}</span>
+            <span style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--color-neutral-600)">{{ s.count }}</span>
+          </div>
+          <div style="padding:var(--space-3) var(--space-3) 0;display:flex;flex-direction:column;gap:var(--space-3)">
+            <sc-for list="{{ s.items }}" as="i" hint-placeholder-count="2">
+              <div onClick="{{ i.open }}" style="border:1px solid var(--color-neutral-400);padding:var(--space-3);cursor:pointer" style-hover="border-color:var(--color-accent);background:var(--color-accent-100)">
+                <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-2)">
+                  <span class="tag tag-accent">{{ i.nodeType }}</span>
+                  <span style="font-family:var(--font-heading);font-size:13px;font-variant-numeric:tabular-nums">{{ i.pct }}</span>
+                </div>
+                <div style="margin-top:var(--space-2);font-size:12px;line-height:1.3;word-break:break-word">{{ i.name }}</div>
+                <sc-if value="{{ i.missing }}" hint-placeholder-val="{{ false }}">
+                  <div style="margin-top:var(--space-2);padding-top:var(--space-2);border-top:1px dotted var(--color-neutral-400);font-size:11px;line-height:1.3;color:var(--color-neutral-700)">{{ i.missing }}</div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ══════════ ACTIVITY ══════════ -->
+  <sc-if value="{{ isItem }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:1440px;margin:0 auto;padding:var(--space-8)">
+    <div style="font-size:13px;color:var(--color-neutral-600);margin-bottom:var(--space-2)">{{ projectName }} / {{ item.nodeType }}</div>
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-8);margin-bottom:var(--space-6);flex-wrap:wrap">
+      <div style="min-width:0">
+        <h1 style="margin:0;word-break:break-word">{{ item.name }}</h1>
+        <div style="display:flex;gap:var(--space-3);margin-top:var(--space-2);align-items:center;flex-wrap:wrap">
+          <span class="tag tag-accent">{{ item.nodeType }}</span>
+          <span style="font-size:13px;color:var(--color-neutral-700)">{{ item.readyLabel }}</span>
+          <span style="font-size:13px;color:var(--color-neutral-700)">target {{ item.target }}</span>
+          <span style="display:flex;align-items:center;gap:var(--space-2);font-size:13px;color:var(--color-neutral-700)">owner
+            <select class="input" value="{{ itemOwner }}" onChange="{{ onItemOwner }}" style="width:150px;padding:2px 6px">
+              <sc-for list="{{ ownerOptions }}" as="o" hint-placeholder-count="5">
+                <option value="{{ o }}">{{ o }}</option>
+              </sc-for>
+            </select>
+          </span>
+        </div>
+      </div>
+      <div style="display:flex;gap:var(--space-2);flex:none">
+        <button class="btn btn-secondary">Raise RITM</button>
+        <button class="btn btn-primary">Mark loaded in prod</button>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1.1fr 1fr;gap:var(--space-8);align-items:start">
+      <div>
+        <h4 style="margin:0 0 var(--space-3);letter-spacing:.02em;text-transform:uppercase">Handover &amp; closure</h4>
+        <div class="blueprint" style="padding:var(--space-6);margin-bottom:var(--space-8)">
+          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <sc-for list="{{ handover }}" as="h" hint-placeholder-count="4">
+            <div style="display:flex;align-items:flex-start;gap:var(--space-3);padding:var(--space-3) 0;border-bottom:1px solid var(--color-divider)">
+              <span style="width:20px;height:20px;flex:none;margin-top:2px;display:flex;align-items:center;justify-content:center;font-size:11px;background:{{ h.bg }};color:{{ h.fg }};border:1px solid {{ h.border }}">{{ h.mark }}</span>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13px">{{ h.label }}</div>
+                <div style="font-size:12px;color:var(--color-neutral-600)">{{ h.by }}</div>
+              </div>
+              <span style="font-family:var(--font-heading);font-size:13px;letter-spacing:.07em;text-transform:uppercase;color:var(--color-neutral-700);flex:none">{{ h.state }}</span>
+            </div>
+          </sc-for>
+          <div style="display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap;padding-top:var(--space-4)">
+            <span style="font-size:13px;color:var(--color-neutral-700)">FNI target date</span>
+            <input class="input" type="date" value="{{ fniDate }}" onChange="{{ onFniDate }}" style="width:170px">
+            <button class="btn btn-primary" onClick="{{ markFni }}" disabled="{{ fniBlocked }}" style="{{ fniBtnStyle }}">{{ fniButton }}</button>
+          </div>
+          <sc-if value="{{ fniBlockReason }}" hint-placeholder-val="{{ false }}">
+            <div style="margin-top:var(--space-3);font-size:12px;color:var(--color-neutral-700);text-wrap:pretty">{{ fniBlockReason }}</div>
+          </sc-if>
+          <sc-if value="{{ closedNote }}" hint-placeholder-val="{{ false }}">
+            <div style="margin-top:var(--space-4);padding:var(--space-3) var(--space-4);background:var(--color-accent);color:var(--color-bg);font-family:var(--font-heading);font-size:15px;letter-spacing:.05em;text-transform:uppercase">{{ closedNote }}</div>
+          </sc-if>
+        </div>
+
+        <h4 style="margin:0 0 var(--space-3);letter-spacing:.02em;text-transform:uppercase">Deliverables</h4>
+        <div class="blueprint">
+          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <sc-for list="{{ itemCells }}" as="c" hint-placeholder-count="14">
+            <div style="display:flex;align-items:center;gap:var(--space-3);padding:var(--space-2) var(--space-4);border-bottom:1px solid var(--color-divider)">
+              <span onClick="{{ c.click }}" style="width:22px;height:22px;flex:none;display:flex;align-items:center;justify-content:center;font-size:12px;cursor:pointer;background:{{ c.bg }};color:{{ c.fg }};border:1px solid {{ c.border }}">{{ c.mark }}</span>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13px">{{ c.full }}</div>
+                <div style="font-size:11px;color:var(--color-neutral-600)">{{ c.stamp }}</div>
+              </div>
+              <span style="font-size:12px;color:var(--color-neutral-700);flex:none">{{ c.status }}</span>
+            </div>
+          </sc-for>
+        </div>
+
+        <h4 style="margin:var(--space-8) 0 var(--space-3);letter-spacing:.02em;text-transform:uppercase">Subactivities</h4>
+        <div style="border:1px solid var(--color-divider)">
+          <sc-for list="{{ itemSubs }}" as="s" hint-placeholder-count="3">
+            <div style="display:flex;align-items:center;gap:var(--space-3);padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--color-divider)">
+              <span style="flex:1;font-size:13px">{{ s.name }}</span>
+              <span style="width:110px;flex:none;height:6px;background:var(--color-neutral-200);position:relative;overflow:hidden">
+                <span style="position:absolute;left:0;top:0;bottom:0;width:{{ s.pct }};background:var(--color-accent)"></span>
+              </span>
+              <span style="width:38px;flex:none;text-align:right;font-family:var(--font-heading);font-size:15px;font-variant-numeric:tabular-nums">{{ s.pctNum }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="margin-top:var(--space-2);font-size:12px;color:var(--color-neutral-600);line-height:1.4">{{ itemSubNote }}</div>
+
+        <h4 style="margin:var(--space-8) 0 var(--space-3);letter-spacing:.02em;text-transform:uppercase">Defects on this module</h4>
+        <div style="border:1px solid var(--color-divider)">
+          <sc-for list="{{ itemIssues }}" as="i" hint-placeholder-count="1">
+            <div style="padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--color-divider)">
+              <div style="display:flex;align-items:baseline;gap:var(--space-3)">
+                <span class="tag tag-neutral" style="flex:none">{{ i.sev }}</span>
+                <span style="flex:1;font-size:13px;line-height:1.35;text-wrap:pretty">{{ i.text }}</span>
+                <span style="font-family:var(--font-heading);font-size:12px;letter-spacing:.08em;text-transform:uppercase;flex:none">{{ i.status }}</span>
+              </div>
+              <div style="margin-top:var(--space-1);font-size:12px;color:var(--color-neutral-600)">run {{ i.run }} · {{ i.by }}</div>
+            </div>
+          </sc-for>
+        </div>
+
+        <h4 style="margin:var(--space-8) 0 var(--space-3);letter-spacing:.02em;text-transform:uppercase">Links</h4>
+        <div class="blueprint">
+          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <sc-for list="{{ links }}" as="l" hint-placeholder-count="3">
+            <div style="display:flex;align-items:baseline;gap:var(--space-3);padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--color-divider)">
+              <span class="tag tag-neutral" style="flex:none">{{ l.type }}</span>
+              <div style="flex:1;min-width:0">
+                <a href="{{ l.url }}" style="font-size:13px">{{ l.label }}</a>
+                <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--color-neutral-600);overflow:hidden;text-overflow:ellipsis">{{ l.url }}</div>
+              </div>
+              <span onClick="{{ l.remove }}" style="font-size:12px;color:var(--color-neutral-600);cursor:pointer;flex:none" style-hover="color:var(--color-text)">remove</span>
+            </div>
+          </sc-for>
+          <div style="display:flex;gap:var(--space-2);padding:var(--space-3) var(--space-4);align-items:center;flex-wrap:wrap">
+            <select class="input" value="{{ linkType }}" onChange="{{ onLinkType }}" style="width:130px">
+              <sc-for list="{{ linkTypes }}" as="t" hint-placeholder-count="6">
+                <option value="{{ t }}">{{ t }}</option>
+              </sc-for>
+            </select>
+            <input class="input" value="{{ linkLabel }}" onChange="{{ onLinkLabel }}" placeholder="Label" style="width:140px">
+            <input class="input" value="{{ linkUrl }}" onChange="{{ onLinkUrl }}" onKeyDown="{{ onLinkKey }}" placeholder="https://…" style="flex:1;min-width:160px">
+            <button class="btn btn-primary" onClick="{{ addLink }}">Add link</button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h4 style="margin:0 0 var(--space-3);letter-spacing:.02em;text-transform:uppercase">Change history</h4>
+        <div style="border:1px solid var(--color-divider)">
+          <sc-for list="{{ itemHistory }}" as="h" hint-placeholder-count="5">
+            <div style="display:flex;align-items:baseline;gap:var(--space-3);padding:var(--space-2) var(--space-4);border-bottom:1px solid var(--color-divider);font-size:12px">
+              <span style="font-family:var(--font-heading);letter-spacing:.06em;text-transform:uppercase;width:80px;flex:none">{{ h.col }}</span>
+              <span style="flex:1;color:var(--color-neutral-700);word-break:break-word">{{ h.what }}</span>
+              <span style="color:var(--color-neutral-600);flex:none">{{ h.who }}</span>
+            </div>
+          </sc-for>
+        </div>
+
+        <h4 style="margin:var(--space-8) 0 var(--space-3);letter-spacing:.02em;text-transform:uppercase">Last execution · {{ item.run }}</h4>
+        <div style="border:1px solid var(--color-divider)">
+          <sc-for list="{{ phases }}" as="p" hint-placeholder-count="5">
+            <div style="display:flex;align-items:center;gap:var(--space-3);padding:var(--space-2) var(--space-4);border-bottom:1px solid var(--color-divider)">
+              <span style="width:7px;height:7px;flex:none;background:{{ p.dot }}"></span>
+              <span style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:12px">{{ p.name }}</span>
+              <span style="font-size:12px;color:var(--color-neutral-700)">{{ p.steps }}</span>
+              <span style="font-size:12px;color:var(--color-neutral-600);font-variant-numeric:tabular-nums">{{ p.dur }}</span>
+            </div>
+          </sc-for>
+        </div>
+
+        <h4 style="margin:var(--space-8) 0 var(--space-3);letter-spacing:.02em;text-transform:uppercase">Artifacts</h4>
+        <div style="border:1px solid var(--color-divider)">
+          <sc-for list="{{ artifacts }}" as="a" hint-placeholder-count="5">
+            <div style="display:flex;align-items:baseline;gap:var(--space-3);padding:var(--space-2) var(--space-4);border-bottom:1px solid var(--color-divider)">
+              <span style="font-family:var(--font-heading);font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-600);width:70px;flex:none">{{ a.kind }}</span>
+              <span style="flex:1;font-family:ui-monospace,Menlo,monospace;font-size:12px;word-break:break-all">{{ a.path }}</span>
+              <span style="font-size:12px;color:var(--color-neutral-700);flex:none;font-variant-numeric:tabular-nums">{{ a.size }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ══════════ DRIFT ══════════ -->
+  <sc-if value="{{ isDrift }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:1440px;margin:0 auto;padding:var(--space-8)">
+    <h1 style="margin:0">Drift</h1>
+    <div style="color:var(--color-neutral-700);font-size:14px;margin-bottom:var(--space-6)">"Loaded in prod" is only true if the bytes on prod are the ones that passed preprod. This compares them.</div>
+
+    <div style="border:1px solid var(--color-divider);overflow-x:auto;margin-bottom:var(--space-8)">
+      <table class="table" style="width:100%">
+        <thead>
+          <tr><th>Deliverable</th><th>Scope</th><th>Repo</th><th>Lab</th><th>Preprod</th><th>Prod</th><th>Verdict</th></tr>
+        </thead>
+        <tbody>
+          <sc-for list="{{ driftRows }}" as="d" hint-placeholder-count="6">
+            <tr>
+              <td><span style="font-family:var(--font-heading);font-size:15px;letter-spacing:.05em;text-transform:uppercase">{{ d.layer }}</span><div style="font-size:12px;color:var(--color-neutral-600)">{{ d.cadence }}</div></td>
+              <td><span class="tag tag-outline">{{ d.scope }}</span></td>
+              <td style="font-family:ui-monospace,Menlo,monospace;font-size:12px">{{ d.repo }}</td>
+              <td style="font-family:ui-monospace,Menlo,monospace;font-size:12px">{{ d.lab }}</td>
+              <td style="font-family:ui-monospace,Menlo,monospace;font-size:12px">{{ d.preprod }}</td>
+              <td style="font-family:ui-monospace,Menlo,monospace;font-size:12px">{{ d.prod }}</td>
+              <td><span style="font-family:var(--font-heading);font-size:13px;letter-spacing:.07em;text-transform:uppercase;padding:2px 8px;background:{{ d.bg }};color:{{ d.fg }}">{{ d.verdict }}</span></td>
+            </tr>
+          </sc-for>
+        </tbody>
+      </table>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-8);align-items:start">
+      <div>
+        <h4 style="margin:0 0 var(--space-3);letter-spacing:.02em;text-transform:uppercase">Open warnings</h4>
+        <div style="border:1px solid var(--color-divider)">
+          <sc-for list="{{ warnings }}" as="w" hint-placeholder-count="4">
+            <div style="padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--color-divider)">
+              <div style="display:flex;align-items:baseline;gap:var(--space-3)">
+                <span style="font-family:var(--font-heading);font-size:12px;letter-spacing:.1em;text-transform:uppercase;padding:1px 7px;background:var(--color-text);color:var(--color-bg);flex:none">{{ w.sev }}</span>
+                <span style="flex:1;font-size:13px;line-height:1.35;text-wrap:pretty">{{ w.text }}</span>
+              </div>
+              <div style="margin-top:var(--space-1);font-size:12px;color:var(--color-neutral-600)">{{ w.where }}</div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      <div>
+        <h4 style="margin:0 0 var(--space-3);letter-spacing:.02em;text-transform:uppercase">Promotion gate</h4>
+        <div class="blueprint" style="padding:var(--space-6)">
+          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <div style="font-size:14px;line-height:1.5;margin-bottom:var(--space-4);text-wrap:pretty">Promotion copies hashes; it never rebuilds. Gates are set per project.</div>
+          <sc-for list="{{ gate }}" as="g" hint-placeholder-count="4">
+            <div style="display:flex;align-items:center;gap:var(--space-3);padding:var(--space-2) 0;border-top:1px solid var(--color-divider)">
+              <span style="width:14px;height:14px;flex:none;border:1px solid var(--color-neutral-500);background:{{ g.fill }}"></span>
+              <span style="flex:1;font-size:13px">{{ g.text }}</span>
+              <span style="font-size:12px;color:var(--color-neutral-600)">{{ g.by }}</span>
+            </div>
+          </sc-for>
+          <div style="margin-top:var(--space-6);padding:var(--space-2) var(--space-4);text-align:center;background:var(--color-neutral-300);color:var(--color-neutral-700);font-family:var(--font-heading);font-size:15px;letter-spacing:.06em;text-transform:uppercase">Promote — blocked by 1 gate</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ══════════ CONFIGURE ══════════ -->
+  <sc-if value="{{ isConfig }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:1440px;margin:0 auto;padding:var(--space-8)">
+    <div style="margin-bottom:var(--space-6)">
+      <h1 style="margin:0">Configure — {{ projectName }}</h1>
+      <div style="color:var(--color-neutral-700);font-size:14px">What a project admin sets. Another team stands up its own process here without a code change.</div>
+    </div>
+
+    <div class="blueprint" style="padding:var(--space-6);margin-bottom:var(--space-8)">
+      <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);margin-bottom:var(--space-4);flex-wrap:wrap">
+        <h4 style="margin:0;letter-spacing:.02em;text-transform:uppercase">Deliverable columns</h4>
+        <span style="font-size:12px;color:var(--color-neutral-600)">each column uses its own subset of the shared status vocabulary</span>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="table" style="width:100%">
+          <thead>
+            <tr><th>Column</th><th>What it is</th><th>Statuses it can take</th><th>Counts toward prod</th><th></th></tr>
+          </thead>
+          <tbody>
+            <sc-for list="{{ colConfig }}" as="c" hint-placeholder-count="14">
+              <tr>
+                <td style="font-family:var(--font-heading);font-size:15px;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap">{{ c.label }}</td>
+                <td style="font-size:13px">{{ c.full }}</td>
+                <td>
+                  <div style="display:flex;gap:var(--space-1);flex-wrap:wrap">
+                    <sc-for list="{{ c.statuses }}" as="s" hint-placeholder-count="3">
+                      <span class="tag tag-outline">{{ s }}</span>
+                    </sc-for>
+                  </div>
+                </td>
+                <td style="font-size:13px;color:var(--color-neutral-700)">{{ c.counts }}</td>
+                <td><span onClick="{{ c.remove }}" style="font-size:12px;color:var(--color-neutral-600);cursor:pointer" style-hover="color:var(--color-text)">remove</span></td>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+      </div>
+      <div style="display:flex;gap:var(--space-2);margin-top:var(--space-4);flex-wrap:wrap">
+        <input class="input" value="{{ newColDraft }}" onChange="{{ onNewCol }}" onKeyDown="{{ onNewColKey }}" placeholder="New column, e.g. SMOKE TEST" style="width:240px">
+        <button class="btn btn-secondary" onClick="{{ addCol }}">Add column</button>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-8);align-items:start">
+      <sc-for list="{{ configSets }}" as="c" hint-placeholder-count="4">
+        <div class="blueprint" style="padding:var(--space-6)">
+          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3)">
+            <h4 style="margin:0;letter-spacing:.02em;text-transform:uppercase">{{ c.title }}</h4>
+            <span style="font-size:12px;color:var(--color-neutral-600)">{{ c.hint }}</span>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-4)">
+            <sc-for list="{{ c.values }}" as="v" hint-placeholder-count="5">
+              <div style="display:flex;align-items:center;gap:var(--space-2);padding:var(--space-1) var(--space-3);border:1px solid var(--color-neutral-400);background:var(--color-accent-100);font-size:13px">
+                <span>{{ v.label }}</span>
+                <span onClick="{{ v.remove }}" style="cursor:pointer;color:var(--color-neutral-600);font-family:ui-monospace,Menlo,monospace" style-hover="color:var(--color-text)">×</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:flex;gap:var(--space-2);margin-top:var(--space-4)">
+            <input class="input" value="{{ c.draft }}" onChange="{{ c.onDraft }}" onKeyDown="{{ c.onKey }}" placeholder="{{ c.placeholder }}" style="flex:1">
+            <button class="btn btn-secondary" onClick="{{ c.add }}">Add</button>
+          </div>
+        </div>
+      </sc-for>
+
+      <div class="blueprint" style="padding:var(--space-6);grid-column:1 / -1">
+        <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);margin-bottom:var(--space-4);flex-wrap:wrap">
+          <h4 style="margin:0;letter-spacing:.02em;text-transform:uppercase">Status vocabulary</h4>
+          <span style="font-size:12px;color:var(--color-neutral-600)">shared across the project — columns pick from it</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:var(--space-3)">
+          <sc-for list="{{ vocab }}" as="v" hint-placeholder-count="8">
+            <div style="display:flex;align-items:center;gap:var(--space-3);border:1px solid var(--color-divider);padding:var(--space-2) var(--space-3)">
+              <span style="width:22px;height:22px;flex:none;display:flex;align-items:center;justify-content:center;font-size:12px;background:{{ v.bg }};color:{{ v.fg }};border:1px solid {{ v.border }}">{{ v.mark }}</span>
+              <div style="min-width:0">
+                <div style="font-size:13px">{{ v.label }}</div>
+                <div style="font-size:11px;color:var(--color-neutral-600)">{{ v.tone }}</div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <div style="grid-column:1 / -1;border:1px dashed var(--color-neutral-400);padding:var(--space-6);display:flex;align-items:center;justify-content:space-between;gap:var(--space-6);flex-wrap:wrap">
+        <div>
+          <h4 style="margin:0 0 var(--space-1);letter-spacing:.02em;text-transform:uppercase">Super admin</h4>
+          <div style="font-size:13px;color:var(--color-neutral-700);max-width:70ch;text-wrap:pretty">Creating organisations, onboarding project admins and assigning them to projects sits one level above this screen. Out of scope for the {{ projectName }} release.</div>
+        </div>
+        <span style="font-family:var(--font-heading);font-size:14px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-600);flex:none">Later</span>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;orgName&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Flow One&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;projectName&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;CR_AUTOMATION&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;defaultScreen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dash&quot;,&quot;matrix&quot;,&quot;board&quot;,&quot;item&quot;,&quot;drift&quot;,&quot;config&quot;],&quot;default&quot;:&quot;dash&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+const ACC = "#5980a6", INK = "#1d1f20", DIM = "#d4d4d7", PAPER = "#f2f2f3";
+
+// Shared status vocabulary. tone: done | part | none | blank
+const VOCAB = {
+  blank:      { label: "Not filled",     tone: "blank", mark: "?" },
+  notcreated: { label: "Not Created",    tone: "none",  mark: "○" },
+  created:    { label: "Created",        tone: "done",  mark: "●" },
+  notloaded:  { label: "Not Loaded",     tone: "none",  mark: "○" },
+  lab:        { label: "Loaded in lab",  tone: "part",  mark: "◐" },
+  prod:       { label: "Loaded in prod", tone: "done",  mark: "●" },
+  loaded:     { label: "Loaded",         tone: "done",  mark: "●" },
+  pending:    { label: "Pending",        tone: "part",  mark: "◐" },
+  completed:  { label: "Completed",      tone: "done",  mark: "●" },
+  notraised:  { label: "Not raised",     tone: "none",  mark: "○" },
+  raised:     { label: "Raised",         tone: "done",  mark: "●" }
+};
+
+const TONE = {
+  done:  { bg: ACC, fg: PAPER, border: ACC },
+  part:  { bg: "#d6ebff", fg: "#2c455d", border: "#94bce3" },
+  none:  { bg: "transparent", fg: "#7a7a7d", border: "#d4d4d7" },
+  blank: { bg: "transparent", fg: INK, border: INK }
+};
+
+const CREATE = ["notcreated", "created"];
+const LOAD = ["notloaded", "lab", "prod"];
+const SIMPLE = ["notloaded", "loaded"];
+const SIGN = ["pending", "completed"];
+const RITM = ["notraised", "raised"];
+
+const COLUMNS = [
+  { key: "oh", label: "OH", full: "Order Hub entry created", allowed: CREATE, counts: "yes" },
+  { key: "filecr", label: "FILECR", full: "NEI code for File CR", allowed: LOAD, counts: "yes" },
+  { key: "clicr", label: "CLICR", full: "NEI code for CLICR", allowed: LOAD, counts: "yes" },
+  { key: "nemo", label: "NEMO", full: "OM configuration so BST workflow can call the NEI", allowed: CREATE, counts: "yes" },
+  { key: "html", label: "HTML", full: "HTML report files for File CR and CLICR", allowed: LOAD, counts: "yes" },
+  { key: "json", label: "JSON.Y", full: "json.yaml template — shared by File CR and CLICR", allowed: LOAD, counts: "yes" },
+  { key: "valid", label: "VALID.Y", full: "validation.yaml — File CR", allowed: LOAD, counts: "yes" },
+  { key: "exec", label: "EXEC.Y", full: "execution.yaml — CLICR", allowed: LOAD, counts: "yes" },
+  { key: "bst", label: "BST", full: "BST workflow logic", allowed: SIMPLE, counts: "yes" },
+  { key: "lookup", label: "LOOKUP", full: "Business service logic / application properties for BST", allowed: SIMPLE, counts: "yes" },
+  { key: "email", label: "EMAIL", full: "Email template", allowed: SIMPLE, counts: "no" },
+  { key: "fni", label: "FNI", full: "FNI — final submission", allowed: SIGN, counts: "yes" },
+  { key: "access", label: "ACCESS", full: "Node access granted", allowed: SIGN, counts: "yes" },
+  { key: "ritm", label: "RITM", full: "RITM raised", allowed: RITM, counts: "no" }
+];
+
+// Faithful to the DevOps sheet. "" = cell was left blank.
+const L = "prod", NL = "notloaded", C = "created", NC = "notcreated", LD = "loaded", CP = "completed", PD = "pending", B = "";
+const row = (id, nodeType, name, v) => ({ id, nodeType, name, v });
+const FULL = { oh: C, filecr: L, clicr: L, nemo: C, html: L, json: L, valid: L, exec: L, bst: LD, lookup: LD, email: B, fni: CP, access: CP, ritm: B };
+const FULL_NO_NEMO = Object.assign({}, FULL, { nemo: B });
+const NOT_STARTED = { oh: C, filecr: B, clicr: B, nemo: B, html: NL, json: NL, valid: NL, exec: NL, bst: NL, lookup: B, email: B, fni: B, access: B, ritm: B };
+
+const ACTIVITIES = [
+  row("a1", "MRF", "Announcement Loading", FULL),
+  row("a2", "DLU", "DLU update", FULL),
+  row("a3", "SBC", "5_ADDITION_DELETION_MODIFICATION_OF_SIP_FILTER_MM_IN_SBC", FULL),
+  row("a4", "SBC", "2_ADDITION/DELETION_IN_EMERGENCY_URI_IN_ASBC", FULL_NO_NEMO),
+  row("a5", "SBC", "37_DRA_LINK_SHIFTING_GUI", FULL_NO_NEMO),
+  row("a6", "SBC", "19_FEPHFLOWPOLICY_AND_SG_PROFILE_PARAMETER_MODIFICATION", FULL_NO_NEMO),
+  row("a7", "SBC", "146_SDP_PROFILE_MODIFICATION_&_TG_MODIFICATION_IN_ISBC", FULL_NO_NEMO),
+  row("a8", "SBC", "127_NEW_SUBNET_CREATION_MEDIA_SBC", NOT_STARTED),
+  row("a9", "SBC", "106_REMOVE_EVS_CODEC_FROM_MEDIA_CAPACITY_IN_SBC", NOT_STARTED),
+  row("a10", "SBC", "156_ENUM_PROFILE_AND_TRUNKGROUP_CREATION_IN_PSBC", FULL_NO_NEMO),
+  row("a11", "SBC", "107_NEW_SUBNET_CREATION_IN_SBC", NOT_STARTED),
+  row("a12", "SBC", "33_LIC_LOADING_IN_SBC", Object.assign({}, FULL_NO_NEMO, { fni: PD, access: PD })),
+  row("a13", "SBC", "96_FIXED_LINE_CONFIGURATION_IN_SBC", FULL_NO_NEMO),
+  row("a14", "SBC", "147_IP_POI_CONFIG_ISBC", Object.assign({}, NOT_STARTED, { oh: NC })),
+  row("a15", "EIR", "1029_TAC_LOADING_EIR", Object.assign({}, NOT_STARTED, { nemo: NC })),
+  row("a16", "CFX", "128_TGRP_CONFIGURATION_IN_CFX", { oh: C, filecr: B, clicr: B, nemo: NC, html: L, json: L, valid: L, exec: L, bst: LD, lookup: LD, email: B, fni: PD, access: PD, ritm: B }),
+  row("a17", "DSR", "10006_HOST_NAME_REALM_ROUTING_CREATION_MODIFICATION_DELETION_DSR", Object.assign({}, NOT_STARTED, { oh: NC, nemo: NC })),
+  row("a18", "DSR", "10005_SAPC_CCPC_PREFERENCE_CHANGE_IN_DSR", Object.assign({}, NOT_STARTED, { oh: B }))
+];
+
+// Subactivities live under a module. Each carries its own deliverable row;
+// the module row is a roll-up of them.
+const SUBS = {
+  a1: [{ id: "b1", name: "Load announcement set" }, { id: "b2", name: "Verify playback on node" }],
+  a3: [{ id: "b1", name: "Addition" }, { id: "b2", name: "Deletion" }, { id: "b3", name: "Modification" }],
+  a4: [{ id: "b1", name: "Addition" }, { id: "b2", name: "Deletion" }],
+  a16: [{ id: "b1", name: "Create TGRP" }, { id: "b2", name: "Modify TGRP" }, { id: "b3", name: "Delete TGRP" }],
+  a17: [{ id: "b1", name: "Creation" }, { id: "b2", name: "Modification" }, { id: "b3", name: "Deletion" }]
+};
+
+// The module library: node type + activity, built once, cloned into a project.
+const BLANK_SEED = { oh: NC, filecr: NL, clicr: NL, nemo: NC, html: NL, json: NL, valid: NL, exec: NL, bst: NL, lookup: NL, email: "", fni: PD, access: PD, ritm: "" };
+const LIBRARY = [
+  { nodeType: "MRF", name: "Announcement Loading", version: "v3", projects: 2, subs: 2 },
+  { nodeType: "SBC", name: "5_ADDITION_DELETION_MODIFICATION_OF_SIP_FILTER_MM_IN_SBC", version: "v2", projects: 1, subs: 3 },
+  { nodeType: "CFX", name: "128_TGRP_CONFIGURATION_IN_CFX", version: "v4", projects: 3, subs: 3 },
+  { nodeType: "DSR", name: "10006_HOST_NAME_REALM_ROUTING_CREATION_MODIFICATION_DELETION_DSR", version: "v1", projects: 1, subs: 3 },
+  { nodeType: "CFX", name: "131_CODEC_PROFILE_MODIFICATION_IN_CFX", version: "v2", projects: 1, subs: 2 },
+  { nodeType: "SBC", name: "88_TLS_CERT_RENEWAL_IN_SBC", version: "v1", projects: 2, subs: 0 },
+  { nodeType: "DLU", name: "DLU bulk subscriber move", version: "v1", projects: 1, subs: 0 },
+  { nodeType: "EIR", name: "1030_IMEI_BLACKLIST_LOADING_EIR", version: "v1", projects: 1, subs: 0 }
+];
+
+const SEED_HISTORY = [
+  { id: "a12", col: "FNI", what: "Completed → Pending, waiting on access", who: "A. Iyer, 3 Sep" },
+  { id: "a16", col: "NEMO", what: "set Not Created", who: "S. Nair, 2 Sep" },
+  { id: "a10", col: "EXEC.Y", what: "Not Loaded → Loaded in prod", who: "P. Mahajan, 2 Sep" },
+  { id: "a3", col: "NEMO", what: "Created", who: "R. Kaur, 1 Sep" },
+  { id: "a14", col: "OH", what: "set Not Created", who: "A. Iyer, 29 Aug" }
+];
+
+// Access model. Roles are per tenant and editable; these are the seeded ones.
+const ROLES = [
+  { key: "admin", name: "Admin", note: "owns projects" },
+  { key: "subadmin", name: "Sub-admin", note: "delegated" },
+  { key: "release", name: "Release mgr", note: "" },
+  { key: "devops", name: "DevOps", note: "" },
+  { key: "dev", name: "Developer", note: "" },
+  { key: "qa", name: "QA", note: "" },
+  { key: "viewer", name: "Viewer", note: "read only" }
+];
+
+const PERM_GROUPS = [
+  { label: "Project", keys: [["project.view", "View project"], ["project.create", "Create projects"], ["project.members.manage", "Manage members"], ["project.config", "Configure columns & stages"]] },
+  { label: "Module", keys: [["module.create", "Create modules"], ["module.edit", "Edit module & subactivities"], ["module.clone", "Clone from library"], ["deliverable.update", "Update deliverable status"]] },
+  { label: "Sign-off", keys: [["prod.confirm", "Confirm loaded in prod"], ["fni.date", "Set FNI target date"], ["fni.signoff", "Mark FNI done — close module"]] },
+  { label: "Defects", keys: [["defect.create", "Log a defect"], ["defect.transition", "Change defect status"], ["defect.assign", "Assign defects"]] },
+  { label: "Administration", keys: [["admin.users.manage", "Manage users"], ["admin.roles.manage", "Manage roles"], ["admin.audit.view", "View audit log"]] }
+];
+
+const GRANTS = {
+  admin: "*",
+  subadmin: ["project.view", "project.members.manage", "project.config", "module.create", "module.edit", "module.clone", "deliverable.update", "prod.confirm", "fni.date", "fni.signoff", "defect.create", "defect.transition", "defect.assign", "admin.users.manage", "admin.audit.view"],
+  release: ["project.view", "module.create", "module.edit", "module.clone", "deliverable.update", "prod.confirm", "fni.date", "fni.signoff", "defect.create", "defect.transition", "defect.assign", "admin.audit.view"],
+  devops: ["project.view", "deliverable.update", "prod.confirm", "defect.create", "defect.transition"],
+  dev: ["project.view", "deliverable.update", "defect.create", "defect.transition"],
+  qa: ["project.view", "deliverable.update", "defect.create", "defect.transition", "defect.assign"],
+  viewer: ["project.view"]
+};
+
+const USERS = [
+  { name: "P. Mahajan", email: "parmahaj@nokia.com", role: "admin", scope: "Flow One — all projects" },
+  { name: "A. Iyer", email: "a.iyer@nokia.com", role: "subadmin", scope: "CR_AUTOMATION, CMDB" },
+  { name: "R. Kaur", email: "r.kaur@nokia.com", role: "dev", scope: "CR_AUTOMATION" },
+  { name: "S. Nair", email: "s.nair@nokia.com", role: "qa", scope: "CR_AUTOMATION" },
+  { name: "V. Rao", email: "v.rao@nokia.com", role: "devops", scope: "CR_AUTOMATION, INVENTORY_SYNC" },
+  { name: "K. Menon", email: "k.menon@nokia.com", role: "viewer", scope: "CR_AUTOMATION" }
+];
+
+const PHASES = ["Staging test", "Preprod test", "Prod deployment"];
+
+class Component extends DCLogic {
+  state = {
+    screen: null, projOpen: false, nodeType: "All", ready: "All", itemId: "a16",
+    cells: {}, audit: {},
+    columns: COLUMNS.slice(),
+    nodeTypes: ["MRF", "DLU", "SBC", "EIR", "CFX", "DSR"],
+    stages: [
+      { key: "s1", label: "Not started" }, { key: "s2", label: "Code created" },
+      { key: "s3", label: "In UT" }, { key: "s4", label: "Lab / Preprod" },
+      { key: "s5", label: "Moving to prod" }, { key: "s6", label: "Loaded in prod" }
+    ],
+    owners: ["P. Mahajan", "A. Iyer", "R. Kaur", "S. Nair"],
+    linkTypes: ["RITM", "Jira", "Repo", "Run log", "Report", "Confluence"],
+    drafts: { nodeTypes: "", stages: "", owners: "", linkTypes: "" },
+    newColDraft: "",
+    fniDates: { a12: "2026-09-10", a16: "2026-09-08" }, fniDone: {},
+    issues: [
+      { id: "i1", act: "a16", run: "751", phase: "Prod deployment", ticket: "CRAUT-2291", sev: "High", text: "Comparison report showed 5 false errors — the python script on prod was an older build than the repo copy", by: "P. Mahajan, 2 Sep", status: "Open" },
+      { id: "i2", act: "a1", run: "744", phase: "Preprod test", ticket: "CRAUT-2287", sev: "High", text: "py2 str() on a non-ASCII announcement name aborted the postcheck", by: "S. Nair, 3 Sep", status: "Investigating" },
+      { id: "i3", act: "a12", run: "748", phase: "Prod deployment", ticket: "CRAUT-2301", sev: "Med", text: "Node access expired mid-run, activity had to be re-scheduled", by: "A. Iyer, 3 Sep", status: "Open" },
+      { id: "i4", act: "a2", run: "739", phase: "Staging test", ticket: "CRAUT-2244", sev: "Low", text: "MOP link in the summary report pointed at the previous attempt", by: "R. Kaur, 28 Aug", status: "Fixed" },
+      { id: "i5", act: "a3", run: "—", phase: "Staging test", ticket: "CRAUT-2312", sev: "Med", text: "Deletion subactivity left an orphan SIP filter entry after rollback", by: "S. Nair, just now", status: "Open" }
+    ],
+    issueAct: "a16", issueRun: "", issueSev: "High", issueText: "", issuePhase: "Prod deployment", issueTicket: "", phaseFilter: "All",
+    grants: {},
+    assignee: { a16: "P. Mahajan", a12: "A. Iyer" },
+    open: { a16: true }, cloneTick: 0,
+    loginEmail: "", loginPass: "", loginError: "",
+    inviteEmail: "", inviteName: "", inviteRole: "Developer", inviteScope: "CR_AUTOMATION",
+    invites: [
+      { email: "n.desai@nokia.com", name: "N. Desai", role: "QA", scope: "CR_AUTOMATION", state: "Invited, 2 Sep — not accepted" },
+      { email: "t.bose@nokia.com", name: "T. Bose", role: "Sub-admin", scope: "Flow One — all projects", state: "Accepted, 1 Sep" }
+    ],
+    links: [
+      { type: "RITM", label: "RITM0184221", url: "https://snow.internal/RITM0184221" },
+      { type: "Repo", label: "clicr/templates/yaml", url: "https://git.internal/nei/clicr/tree/main/templates/yaml" },
+      { type: "Run log", label: "751 execution log", url: "/mnt/shared_data/751/LOGS/execution.log" }
+    ],
+    linkType: "RITM", linkLabel: "", linkUrl: ""
+  };
+
+  get screen() { return this.state.screen || this.props.defaultScreen || "dash"; }
+  go = (s) => () => this.setState({ screen: s, projOpen: false });
+  openItem = (id) => () => this.setState({ screen: "item", itemId: id, projOpen: false });
+
+  subsOf(a) { return SUBS[a.id] || []; }
+
+  expand = (id) => (e) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    this.setState(s => ({ open: Object.assign({}, s.open, { [id]: !s.open[id] }) }));
+  };
+
+  statusOf(a, colKey, subId) {
+    const k = a.id + (subId ? "/" + subId : "") + ":" + colKey;
+    if (this.state.cells[k] !== undefined) return this.state.cells[k];
+    if (subId && this.state.cells[a.id + ":" + colKey] !== undefined) return this.state.cells[a.id + ":" + colKey];
+    return a.v[colKey] || "";
+  }
+
+  rollup(a, colKey) {
+    const subs = this.subsOf(a);
+    if (!subs.length) return this.statusOf(a, colKey);
+    const vals = subs.map(s => this.statusOf(a, colKey, s.id));
+    const tones = vals.map(v => (VOCAB[v] || VOCAB.blank).tone);
+    if (tones.indexOf("blank") >= 0) return "";
+    if (tones.indexOf("none") >= 0) return vals[tones.indexOf("none")];
+    if (tones.indexOf("part") >= 0) return vals[tones.indexOf("part")];
+    return vals[0];
+  }
+
+  cycle = (a, col, subId) => () => {
+    const cur = this.statusOf(a, col.key, subId);
+    const i = col.allowed.indexOf(cur);
+    const next = col.allowed[(i + 1) % col.allowed.length];
+    const k = a.id + (subId ? "/" + subId : "") + ":" + col.key;
+    this.setState(s => ({
+      cells: Object.assign({}, s.cells, { [k]: next }),
+      audit: Object.assign({}, s.audit, { [k]: { who: "P. Mahajan", when: "just now", what: (VOCAB[cur] ? VOCAB[cur].label : "Not filled") + " → " + VOCAB[next].label, col: col.label, id: a.id } })
+    }));
+  };
+
+  cellView(a, col, subId) {
+    const isRoll = !subId && this.subsOf(a).length > 0;
+    const stk = isRoll ? this.rollup(a, col.key) : this.statusOf(a, col.key, subId);
+    const v = VOCAB[stk] || VOCAB.blank;
+    const t = TONE[v.tone];
+    const stamp = this.state.audit[a.id + (subId ? "/" + subId : "") + ":" + col.key];
+    return {
+      mark: v.mark, bg: t.bg, fg: t.fg, border: t.border,
+      status: v.label, full: col.full, key: col.key, label: col.label,
+      title: col.full + " — " + v.label + (isRoll ? " · rolled up from " + this.subsOf(a).length + " subactivities, click to open them" : "") + (stamp ? " · " + stamp.who + ", " + stamp.when : ""),
+      stamp: stamp ? stamp.who + " · " + stamp.when : "no change recorded",
+      click: isRoll ? this.expand(a.id) : this.cycle(a, col, subId)
+    };
+  }
+
+  counting() { return this.state.columns.filter(c => c.counts === "yes"); }
+
+  score(a, subId) {
+    const cols = this.counting();
+    let done = 0;
+    cols.forEach(c => {
+      const v = VOCAB[subId ? this.statusOf(a, c.key, subId) : this.rollup(a, c.key)];
+      if (v && v.tone === "done") done++;
+    });
+    return cols.length ? Math.round((done / cols.length) * 100) : 0;
+  }
+
+  cloneModule = (e) => () => {
+    ACTIVITIES.push({ id: "c" + ACTIVITIES.length, nodeType: e.nodeType, name: e.name, v: Object.assign({}, BLANK_SEED) });
+    this.setState(s => ({
+      cloneTick: (s.cloneTick || 0) + 1,
+      nodeTypes: s.nodeTypes.indexOf(e.nodeType) >= 0 ? s.nodeTypes : s.nodeTypes.concat([e.nodeType]),
+      screen: "matrix", nodeType: e.nodeType, ready: "All"
+    }));
+  };
+
+  missingFor(a) {
+    const names = this.counting()
+      .filter(c => { const v = VOCAB[this.rollup(a, c.key)]; return !v || v.tone !== "done"; })
+      .map(c => c.label);
+    return names.length ? "missing " + names.slice(0, 4).join(", ") + (names.length > 4 ? " +" + (names.length - 4) : "") : "";
+  }
+
+  setDraft = (f) => (e) => { const v = e.target.value; this.setState(s => ({ drafts: Object.assign({}, s.drafts, { [f]: v }) })); };
+  addTo = (f) => () => {
+    const v = (this.state.drafts[f] || "").trim();
+    if (!v) return;
+    this.setState(s => ({
+      [f]: f === "stages" ? s.stages.concat([{ key: "x" + s.stages.length, label: v }]) : s[f].concat([v]),
+      drafts: Object.assign({}, s.drafts, { [f]: "" })
+    }));
+  };
+  removeFrom = (f, i) => () => this.setState(s => ({ [f]: s[f].filter((_, j) => j !== i) }));
+
+  addCol = () => {
+    const name = (this.state.newColDraft || "").trim();
+    if (!name) return;
+    this.setState(s => ({
+      columns: s.columns.concat([{ key: "x_" + name.toLowerCase().replace(/[^a-z0-9]+/g, "_"), label: name.toUpperCase().slice(0, 8), full: name, allowed: SIMPLE, counts: "yes" }]),
+      newColDraft: ""
+    }));
+  };
+
+  addLink = () => {
+    const url = (this.state.linkUrl || "").trim();
+    if (!url) return;
+    this.setState(s => ({ links: s.links.concat([{ type: s.linkType, label: (s.linkLabel || "").trim() || url, url }]), linkLabel: "", linkUrl: "" }));
+  };
+
+  addIssue = () => {
+    const t = (this.state.issueText || "").trim();
+    if (!t) return;
+    this.setState(s => ({
+      issues: [{ id: "i" + (s.issues.length + 1), act: s.issueAct, run: s.issueRun || "—", phase: s.issuePhase, ticket: (s.issueTicket || "").trim() || "not linked", sev: s.issueSev, text: t, by: "P. Mahajan, just now", status: "Open" }].concat(s.issues),
+      issueText: "", issueRun: "", issueTicket: ""
+    }));
+  };
+
+  granted(roleKey, permKey) {
+    const k = roleKey + ":" + permKey;
+    if (this.state.grants[k] !== undefined) return this.state.grants[k];
+    const g = GRANTS[roleKey];
+    return g === "*" || (g && g.indexOf(permKey) >= 0);
+  }
+
+  toggleGrant = (roleKey, permKey) => () => {
+    const k = roleKey + ":" + permKey;
+    const cur = this.granted(roleKey, permKey);
+    this.setState(s => ({ grants: Object.assign({}, s.grants, { [k]: !cur }) }));
+  };
+
+  cycleIssue = (id) => () => {
+    const order = ["Open", "Investigating", "Fixed"];
+    this.setState(s => ({
+      issues: s.issues.map(i => i.id === id ? Object.assign({}, i, { status: order[(order.indexOf(i.status) + 1) % order.length] }) : i)
+    }));
+  };
+
+  fniBlockers(item, pct) {
+    const out = [];
+    if (pct !== 100) out.push("DevOps has not confirmed every deliverable loaded in prod");
+    if ((VOCAB[this.statusOf(item, "fni")] || {}).tone !== "done") out.push("FNI final submission is not complete");
+    return out;
+  }
+
+  markFni = () => {
+    const id = this.state.itemId;
+    const item = ACTIVITIES.find(a => a.id === id) || ACTIVITIES[0];
+    if (!this.state.fniDone[id] && this.fniBlockers(item, this.score(item)).length) return;
+    this.setState(s => ({ fniDone: Object.assign({}, s.fniDone, { [id]: !s.fniDone[id] }) }));
+  };
+
+  configSet(title, hint, field, placeholder, labels) {
+    return {
+      title, hint, placeholder, draft: this.state.drafts[field],
+      values: labels.map((label, i) => ({ label, remove: this.removeFrom(field, i) })),
+      onDraft: this.setDraft(field),
+      onKey: e => { if (e.key === "Enter") this.addTo(field)(); },
+      add: this.addTo(field)
+    };
+  }
+
+  renderVals() {
+    const sc = this.screen, st = this.state, cols = st.columns;
+    const scored = ACTIVITIES.map(a => ({ a, pct: this.score(a) }));
+
+    let shown = scored;
+    if (st.nodeType !== "All") shown = shown.filter(x => x.a.nodeType === st.nodeType);
+    if (st.ready === "Loaded in prod") shown = shown.filter(x => x.pct === 100);
+    else if (st.ready === "Partial") shown = shown.filter(x => x.pct > 0 && x.pct < 100);
+    else if (st.ready === "Not started") shown = shown.filter(x => x.pct === 0);
+    else if (st.ready === "Has blanks") shown = shown.filter(x => cols.some(c => !this.rollup(x.a, c.key)));
+
+    const groups = st.nodeTypes.map(nt => {
+      const rows = shown.filter(x => x.a.nodeType === nt);
+      const doneCount = rows.filter(x => x.pct === 100).length;
+      return {
+        nodeType: nt, count: rows.length,
+        summary: rows.length + (rows.length === 1 ? " module · " : " modules · ") + doneCount + " fully in prod",
+        rows: rows.map(x => {
+          const subs = this.subsOf(x.a);
+          const isOpen = !!st.open[x.a.id];
+          return {
+            name: x.a.name, pct: x.pct + "%", pctNum: x.pct,
+            target: st.fniDates[x.a.id] || "not set",
+            owner: st.assignee[x.a.id] || "unassigned",
+            hasSubs: subs.length > 0,
+            subMark: (isOpen ? "−" : "+") + " " + subs.length + " subactivities",
+            toggle: this.expand(x.a.id),
+            open: this.openItem(x.a.id),
+            cells: cols.map(c => this.cellView(x.a, c)),
+            subs: isOpen ? subs.map(s => {
+              const p = this.score(x.a, s.id);
+              return { name: s.name, pct: p + "%", pctNum: p, cells: cols.map(c => this.cellView(x.a, c, s.id)) };
+            }) : []
+          };
+        })
+      };
+    }).filter(g => g.count > 0);
+
+    const blankTotal = scored.reduce((n, x) => n + cols.filter(c => !this.rollup(x.a, c.key)).length, 0);
+    const fullyDone = scored.filter(x => x.pct === 100).length;
+    const notStarted = scored.filter(x => x.pct === 0).length;
+
+    const bottleneck = cols.map(c => {
+      const not = scored.filter(x => { const v = VOCAB[this.statusOf(x.a, c.key)]; return !v || v.tone !== "done"; }).length;
+      const blanks = scored.filter(x => !this.statusOf(x.a, c.key)).length;
+      const known = not - blanks;
+      return {
+        label: c.label, count: not + " of " + scored.length,
+        sort: not,
+        pct: Math.round((known / scored.length) * 100) + "%",
+        blankPct: Math.round((blanks / scored.length) * 100) + "%",
+        go: this.go("matrix")
+      };
+    }).sort((x, y) => y.sort - x.sort);
+
+    const byNodeType = st.nodeTypes.map(nt => {
+      const rows = scored.filter(x => x.a.nodeType === nt);
+      const avg = rows.length ? Math.round(rows.reduce((n, x) => n + x.pct, 0) / rows.length) : 0;
+      return { name: nt, count: rows.length + (rows.length === 1 ? " module" : " modules"), pct: avg + "%", go: () => this.setState({ screen: "matrix", nodeType: nt }) };
+    }).filter(n => n.count.indexOf("0 module") !== 0);
+
+    const nearly = scored.filter(x => x.pct > 0 && x.pct < 100).sort((a, b) => b.pct - a.pct).slice(0, 5)
+      .map(x => ({ nodeType: x.a.nodeType, name: x.a.name, pct: x.pct + "%", missing: this.missingFor(x.a), open: this.openItem(x.a.id) }));
+
+    const liveAudit = Object.keys(st.audit).map(k => st.audit[k]).reverse()
+      .map(e => ({ col: e.col, what: e.what, who: e.who + ", " + e.when, id: e.id }));
+    const auditFeed = liveAudit.concat(SEED_HISTORY).slice(0, 6);
+
+    const item = ACTIVITIES.find(a => a.id === st.itemId) || ACTIVITIES[0];
+    const itemPct = this.score(item);
+    const stageIdx = itemPct === 100 ? st.stages.length - 1 : Math.min(st.stages.length - 2, Math.floor(itemPct / (100 / (st.stages.length - 1))));
+
+    return {
+      orgName: this.props.orgName ?? "Flow One",
+      projectName: this.props.projectName ?? "CR_AUTOMATION",
+      projOpen: st.projOpen,
+      toggleProj: () => this.setState(s => ({ projOpen: !s.projOpen })),
+      projects: [
+        { name: "CR_AUTOMATION", meta: ACTIVITIES.length + " modules · you", pick: this.go("dash") },
+        { name: "CMDB", meta: "not configured", pick: this.go("config") },
+        { name: "INVENTORY_SYNC", meta: "not configured", pick: this.go("config") },
+        { name: "+ New project", meta: "project admin", pick: this.go("config") }
+      ],
+      tabs: [
+        { label: "Dashboard", active: sc === "dash", go: this.go("dash") },
+        { label: "Defects", active: sc === "issues", go: this.go("issues") },
+        { label: "Matrix", active: sc === "matrix", go: this.go("matrix") },
+        { label: "Pipeline", active: sc === "board", go: this.go("board") },
+        { label: "Module", active: sc === "item", go: this.go("item") },
+        { label: "Library", active: sc === "library", go: this.go("library") },
+        { label: "Access", active: sc === "access", go: this.go("access") },
+        { label: "Sign in", active: sc === "login", go: this.go("login") },
+        { label: "Drift", active: sc === "drift", go: this.go("drift") },
+        { label: "Configure", active: sc === "config", go: this.go("config") }
+      ],
+      isDash: sc === "dash", isIssues: sc === "issues", isMatrix: sc === "matrix", isBoard: sc === "board", isLibrary: sc === "library", isAccess: sc === "access", isLogin: sc === "login",
+      loginEmail: st.loginEmail, loginPass: st.loginPass,
+      onLoginEmail: e => this.setState({ loginEmail: e.target.value }),
+      onLoginPass: e => this.setState({ loginPass: e.target.value }),
+      loginError: st.loginError,
+      signIn: () => {
+        const em = (st.loginEmail || "").trim();
+        if (!em || !st.loginPass) { this.setState({ loginError: "Enter your email and password." }); return; }
+        if (em.indexOf("@") < 0) { this.setState({ loginError: "That does not look like an email address." }); return; }
+        this.setState({ loginError: "", screen: "dash" });
+      },
+      inviteEmail: st.inviteEmail, inviteName: st.inviteName, inviteRole: st.inviteRole, inviteScope: st.inviteScope,
+      onInviteEmail: e => this.setState({ inviteEmail: e.target.value }),
+      onInviteName: e => this.setState({ inviteName: e.target.value }),
+      onInviteRole: e => this.setState({ inviteRole: e.target.value }),
+      onInviteScope: e => this.setState({ inviteScope: e.target.value }),
+      roleOptions: ROLES.map(r => r.name),
+      scopeOptions: ["Flow One — all projects", "CR_AUTOMATION", "CMDB", "INVENTORY_SYNC"],
+      invitePreview: (() => {
+        const r = ROLES.find(x => x.name === st.inviteRole) || ROLES[0];
+        const on = [];
+        PERM_GROUPS.forEach(g => g.keys.forEach(k => { if (this.granted(r.key, k[0])) on.push(k[1]); }));
+        return on.length + (on.length === 1 ? " permission: " : " permissions: ") + on.slice(0, 5).join(", ") + (on.length > 5 ? ", +" + (on.length - 5) + " more" : "");
+      })(),
+      invites: st.invites,
+      sendInvite: () => {
+        const em = (st.inviteEmail || "").trim();
+        if (!em) return;
+        this.setState(s => ({
+          invites: [{ email: em, name: (s.inviteName || "").trim() || "—", role: s.inviteRole, scope: s.inviteScope, state: "Invited, just now" }].concat(s.invites),
+          inviteEmail: "", inviteName: ""
+        }));
+      },
+      library: LIBRARY.map(e => {
+        const inProject = ACTIVITIES.filter(a => a.nodeType === e.nodeType && a.name === e.name);
+        return {
+          nodeType: e.nodeType, name: e.name, version: e.version,
+          projects: e.projects + (e.projects === 1 ? " project" : " projects"),
+          subs: e.subs ? e.subs + " subactivities" : "no subactivities",
+          state: inProject.length ? "In this project" : "Not in this project",
+          stBg: inProject.length ? "var(--color-accent-200)" : "transparent",
+          stFg: inProject.length ? "var(--color-accent-800)" : "var(--color-neutral-700)",
+          action: inProject.length ? "Clone again" : "Clone into project",
+          clone: this.cloneModule(e)
+        };
+      }),
+      itemSubs: this.subsOf(item).map(s => {
+        const p = this.score(item, s.id);
+        return { name: s.name, pct: p + "%", pctNum: p };
+      }),
+      itemSubNote: this.subsOf(item).length
+        ? "The module row on the matrix is a roll-up: a column only counts as done when every subactivity is done."
+        : "This module has no subactivities — its deliverable row is tracked directly.",
+      itemIssues: st.issues.filter(i => i.act === item.id).map(i => ({ sev: i.sev, run: i.run, text: i.text, by: i.by, status: i.status })),
+      isItem: sc === "item", isDrift: sc === "drift", isConfig: sc === "config",
+
+      activityCount: ACTIVITIES.length,
+      nodeTypeCount: byNodeType.length,
+      goMatrix: this.go("matrix"),
+
+      figures: [
+        { label: "Fully loaded in prod", value: String(fullyDone), note: "of " + ACTIVITIES.length + " modules", go: () => this.setState({ screen: "matrix", ready: "Loaded in prod" }) },
+        { label: "Part way", value: String(ACTIVITIES.length - fullyDone - notStarted), note: "at least one deliverable short", go: () => this.setState({ screen: "matrix", ready: "Partial" }) },
+        { label: "Not started", value: String(notStarted), note: "nothing in prod yet", go: () => this.setState({ screen: "matrix", ready: "Not started" }) },
+        { label: "Blank cells", value: String(blankTotal), note: "no status recorded either way", go: () => this.setState({ screen: "matrix", ready: "Has blanks" }) }
+      ],
+
+      bottleneck,
+      byNodeType,
+      nearly,
+      auditFeed,
+      gaps: [
+        { n: String(blankTotal), text: "cells with no status at all, so readiness cannot be trusted" },
+        { n: String(ACTIVITIES.filter(a => !st.fniDates[a.id]).length), text: "modules with no target date for prod loading" },
+        { n: String(ACTIVITIES.filter(a => !st.assignee[a.id]).length), text: "modules with no owner recorded" },
+        { n: String(scored.filter(x => !this.rollup(x.a, "ritm")).length), text: "modules where no RITM has been raised" }
+      ],
+
+      typeFilters: ["All"].concat(st.nodeTypes).map(k => ({
+        label: k, go: () => this.setState({ nodeType: k }),
+        bg: st.nodeType === k ? ACC : "transparent", fg: st.nodeType === k ? PAPER : INK
+      })),
+      readyFilters: ["All", "Loaded in prod", "Partial", "Not started", "Has blanks"].map(k => ({
+        label: k, go: () => this.setState({ ready: k }),
+        bg: st.ready === k ? ACC : "transparent", fg: st.ready === k ? PAPER : INK
+      })),
+      legend: ["prod", "lab", "notloaded", "blank"].map(k => {
+        const v = VOCAB[k] || VOCAB.blank, t = TONE[v.tone];
+        return { label: k === "blank" ? "Never filled in" : v.label, mark: v.mark, bg: t.bg, fg: t.fg, border: t.border };
+      }),
+      columns: cols.map(c => ({ label: c.label, full: c.full })),
+      matrixWidth: (326 + 82 + 96 + cols.length * 76) + "px",
+      matrixNote: "Statuses shown as recorded in the DevOps sheet. Target date and owner are not in the sheet yet — both are columns here waiting to be filled.",
+      groups,
+
+      boardCols: "repeat(" + st.stages.length + ",minmax(0,1fr))",
+      stages: st.stages.map((s, i) => {
+        const items = scored.filter(x => {
+          const p = x.pct;
+          const idx = p === 100 ? st.stages.length - 1 : Math.min(st.stages.length - 2, Math.floor(p / (100 / (st.stages.length - 1))));
+          return idx === i;
+        });
+        return {
+          label: s.label, count: items.length,
+          items: items.map(x => ({ nodeType: x.a.nodeType, name: x.a.name, pct: x.pct + "%", missing: this.missingFor(x.a), open: this.openItem(x.a.id) }))
+        };
+      }),
+
+      ownerOptions: ["unassigned"].concat(st.owners),
+      itemOwner: st.assignee[item.id] || "unassigned",
+      onItemOwner: e => { const v = e.target.value; this.setState(s => ({ assignee: Object.assign({}, s.assignee, { [item.id]: v }) })); },
+      item: {
+        name: item.name, nodeType: item.nodeType,
+        target: st.fniDates[item.id] || "not set",
+        owner: st.assignee[item.id] || "unassigned",
+        readyLabel: itemPct + "% of counted deliverables in prod · " + st.stages[stageIdx].label,
+        run: itemPct > 40 ? "CHILD_REQ_ID 751" : "no execution recorded"
+      },
+      itemCells: cols.map(c => this.cellView(item, c)),
+      itemHistory: SEED_HISTORY.filter(h => h.id === item.id).concat(liveAudit.filter(h => h.id === item.id))
+        .concat([{ col: "—", what: "no other changes recorded against this activity", who: "" }]).slice(0, 6),
+      phases: [
+        { name: "PRE_NODE_HEALTH_CHECK", steps: "6 / 6 ok", dur: "00:41", dot: ACC },
+        { name: "BACKUP", steps: "1 / 1 ok", dur: "01:12", dot: ACC },
+        { name: "ACTIVITY_CONFIGURATION", steps: "12 / 12 ok", dur: "03:58", dot: ACC },
+        { name: "POST_NODE_HEALTH_CHECK", steps: "6 / 6 ok", dur: "00:44", dot: ACC },
+        { name: "ROLLBACK_CONFIGURATION", steps: "not required", dur: "—", dot: DIM }
+      ],
+      artifacts: [
+        { kind: "Log", path: "751/LOGS/execution.log", size: "2.1 MB" },
+        { kind: "Precheck", path: "751/Precheck/config.txt", size: "415 KB" },
+        { kind: "Postcheck", path: "751/Postcheck/config.txt", size: "418 KB" },
+        { kind: "Report", path: "751/REPORT/751_CR1_SUMMARY_REPORT.html", size: "6.0 MB" },
+        { kind: "MOP", path: "751/MOP/751-CR1.html", size: "88 KB" }
+      ],
+
+      links: st.links.map((l, i) => ({
+        type: l.type, label: l.label, url: l.url,
+        remove: () => this.setState(s => ({ links: s.links.filter((_, j) => j !== i) }))
+      })),
+      linkTypes: st.linkTypes, linkType: st.linkType, linkLabel: st.linkLabel, linkUrl: st.linkUrl,
+      onLinkType: e => this.setState({ linkType: e.target.value }),
+      onLinkLabel: e => this.setState({ linkLabel: e.target.value }),
+      onLinkUrl: e => this.setState({ linkUrl: e.target.value }),
+      onLinkKey: e => { if (e.key === "Enter") this.addLink(); },
+      addLink: this.addLink,
+
+      handover: (() => {
+        const closed = !!st.fniDone[item.id];
+        const fniDoneCell = (VOCAB[this.statusOf(item, "fni")] || {}).tone === "done";
+        const steps = [
+          { label: "Dev complete, handed to testing", by: "development team", ok: itemPct >= 50 },
+          { label: "Testing signed off on lab / preprod", by: "QA", ok: itemPct >= 75 },
+          { label: "DevOps confirms every deliverable loaded in prod", by: "DevOps", ok: itemPct === 100 },
+          { label: "FNI final submission raised", by: "FNI column on the matrix", ok: fniDoneCell },
+          { label: "PM marks FNI done — closes the node and its subactivities", by: closed ? "P. Mahajan, just now" : "waiting on the PM", ok: closed }
+        ];
+        return steps.map(s => {
+          const t = s.ok ? TONE.done : TONE.none;
+          return { label: s.label, by: s.by, mark: s.ok ? "●" : "○", state: s.ok ? "done" : "pending", bg: t.bg, fg: t.fg, border: t.border };
+        });
+      })(),
+      fniDate: st.fniDates[item.id] || "",
+      onFniDate: e => { const v = e.target.value; this.setState(s => ({ fniDates: Object.assign({}, s.fniDates, { [item.id]: v }) })); },
+      markFni: this.markFni,
+      fniButton: st.fniDone[item.id] ? "Reopen activity" : "Mark FNI done",
+      fniBlocked: !st.fniDone[item.id] && this.fniBlockers(item, itemPct).length > 0,
+      fniBlockReason: this.fniBlockers(item, itemPct).length
+        ? "Blocked — " + this.fniBlockers(item, itemPct).join("; ")
+        : "",
+      fniBtnStyle: (!st.fniDone[item.id] && this.fniBlockers(item, itemPct).length)
+        ? "opacity:.45;cursor:not-allowed" : "",
+      closedNote: st.fniDone[item.id] ? "Closed — prod FNI signed off, our part is complete" : "",
+
+      activityOptions: ACTIVITIES.map(a => ({ id: a.id, name: a.nodeType + " · " + a.name })),
+      sevOptions: ["High", "Med", "Low"],
+      issueAct: st.issueAct, issueRun: st.issueRun, issueSev: st.issueSev, issueText: st.issueText,
+      issueActivity: st.issueAct,
+      onIssueActivity: e => this.setState({ issueAct: e.target.value }),
+      onIssueRun: e => this.setState({ issueRun: e.target.value }),
+      onIssueSev: e => this.setState({ issueSev: e.target.value }),
+      onIssueText: e => this.setState({ issueText: e.target.value }),
+      onIssueKey: e => { if (e.key === "Enter") this.addIssue(); },
+      addIssue: this.addIssue,
+      issueFigures: ["Open", "Investigating", "Fixed"].map(k => ({ label: k, value: String(st.issues.filter(i => i.status === k).length) })),
+      phaseOptions: PHASES,
+      issuePhase: st.issuePhase, issueTicket: st.issueTicket,
+      onIssuePhase: e => this.setState({ issuePhase: e.target.value }),
+      onIssueTicket: e => this.setState({ issueTicket: e.target.value }),
+      phaseFilters: ["All"].concat(PHASES).map(k => ({
+        label: k, go: () => this.setState({ phaseFilter: k }),
+        bg: st.phaseFilter === k ? ACC : "transparent", fg: st.phaseFilter === k ? PAPER : INK
+      })),
+      hierarchy: [
+        { level: "Platform", who: "Super admin", can: "Creates organisations and onboards their first admin. Never touches project data." },
+        { level: "Organisation", who: "Admin", can: "Owns one or more projects, onboards sub-admins, defines roles and their permissions." },
+        { level: "Delegated", who: "Sub-admin", can: "Same powers as the admin, or a narrower set — the admin decides per role." },
+        { level: "Project", who: "Custom roles", can: "Any mix of permissions: who may create modules, update deliverables, sign off FNI, log defects." }
+      ],
+      roleCols: ROLES.map(r => ({ name: r.name, note: r.note })),
+      permRows: PERM_GROUPS.map(g => ({
+        label: g.label,
+        rows: g.keys.map(k => ({
+          label: k[1], key: k[0],
+          cells: ROLES.map(r => {
+            const on = this.granted(r.key, k[0]);
+            return { mark: on ? "✓" : "–", bg: on ? ACC : "transparent", fg: on ? PAPER : "var(--color-neutral-500)", toggle: this.toggleGrant(r.key, k[0]) };
+          })
+        }))
+      })),
+      users: USERS.map(u => {
+        const r = ROLES.find(x => x.key === u.role) || {};
+        return { name: u.name, email: u.email, role: r.name || u.role, scope: u.scope };
+      }),
+      issues: st.issues.filter(i => st.phaseFilter === "All" || i.phase === st.phaseFilter).map(i => {
+        const a = ACTIVITIES.find(x => x.id === i.act);
+        const sevTone = i.sev === "High" ? { bg: INK, fg: PAPER } : i.sev === "Med" ? { bg: "#d6ebff", fg: "#2c455d" } : { bg: "transparent", fg: "#5d5d60" };
+        const stTone = i.status === "Fixed" ? { bg: ACC, fg: PAPER } : i.status === "Investigating" ? { bg: "#d6ebff", fg: "#2c455d" } : { bg: INK, fg: PAPER };
+        return {
+          sev: i.sev, sevBg: sevTone.bg, sevFg: sevTone.fg,
+          activity: a ? a.nodeType + " · " + a.name : "—",
+          run: i.run, text: i.text, by: i.by, status: i.status,
+          phase: i.phase || "—", ticket: i.ticket || "not linked",
+          ticketUrl: (i.ticket && i.ticket !== "not linked") ? "https://tms.internal/browse/" + i.ticket : "",
+          stBg: stTone.bg, stFg: stTone.fg, cycle: this.cycleIssue(i.id)
+        };
+      }),
+
+      driftRows: [
+        { layer: "FILECR", scope: "per flavour", cadence: "changes often", repo: "b71e04", lab: "b71e04", preprod: "b71e04", prod: "b71e04", verdict: "In step", bg: "var(--color-accent-200)", fg: "var(--color-accent-800)" },
+        { layer: "CLICR", scope: "per flavour", cadence: "changes often", repo: "c0d883", lab: "c0d883", preprod: "c0d883", prod: "8e7b03", verdict: "Prod behind", bg: INK, fg: PAPER },
+        { layer: "VALID.Y", scope: "File CR", cadence: "changes very often", repo: "5ac118", lab: "5ac118", preprod: "5ac118", prod: "5ac118", verdict: "In step", bg: "var(--color-accent-200)", fg: "var(--color-accent-800)" },
+        { layer: "EXEC.Y", scope: "CLICR", cadence: "changes very often", repo: "9e2f77", lab: "9e2f77", preprod: "9e2f77", prod: "9e2f77", verdict: "In step", bg: "var(--color-accent-200)", fg: "var(--color-accent-800)" },
+        { layer: "JSON.Y", scope: "shared", cadence: "changes rarely", repo: "40bb6a", lab: "40bb6a", preprod: "40bb6a", prod: "unknown", verdict: "Never verified", bg: INK, fg: PAPER },
+        { layer: "HTML", scope: "shared", cadence: "changes rarely", repo: "d3f902", lab: "d3f902", preprod: "d3f902", prod: "d3f902", verdict: "In step", bg: "var(--color-accent-200)", fg: "var(--color-accent-800)" },
+        { layer: "BST", scope: "workflow", cadence: "changes often", repo: "1c8ad5", lab: "1c8ad5", preprod: "77b3e1", prod: "77b3e1", verdict: "Patched in place", bg: INK, fg: PAPER }
+      ],
+      warnings: [
+        { sev: "High", text: "json.yaml is shared by File CR and CLICR, and prod has no recorded hash for it — a change there lands on both flavours unverified.", where: "prod · jsonTemplate.yaml" },
+        { sev: "High", text: "BST workflow logic on preprod and prod does not match the repo. It was edited in place.", where: "preprod, prod · BST · 77b3e1" },
+        { sev: "Med", text: "CLICR code on prod is an older build than the one preprod verified.", where: "prod · macro_CLICR_ANY_V1 · 8e7b03" },
+        { sev: "Med", text: "Ten activities show a deliverable as loaded while the cell for its dependency is blank.", where: "matrix · NEMO, EMAIL, RITM columns" }
+      ],
+      gate: [
+        { text: "Every counted deliverable is Loaded in prod", by: itemPct + "%", fill: itemPct === 100 ? ACC : "transparent" },
+        { text: "Preprod hash matches the prod hash", by: "1 mismatch", fill: "transparent" },
+        { text: "FNI final submission complete", by: "pending", fill: "transparent" },
+        { text: "Node access granted", by: "pending", fill: "transparent" }
+      ],
+
+      colConfig: cols.map((c, i) => ({
+        label: c.label, full: c.full, counts: c.counts === "yes" ? "counts" : "informational",
+        statuses: c.allowed.map(k => VOCAB[k].label),
+        remove: () => this.setState(s => ({ columns: s.columns.filter((_, j) => j !== i) }))
+      })),
+      newColDraft: st.newColDraft,
+      onNewCol: e => this.setState({ newColDraft: e.target.value }),
+      onNewColKey: e => { if (e.key === "Enter") this.addCol(); },
+      addCol: this.addCol,
+      configSets: [
+        this.configSet("Node types", "more will come", "nodeTypes", "e.g. HSS", st.nodeTypes),
+        this.configSet("Pipeline stages", "board columns", "stages", "New stage name", st.stages.map(s => s.label)),
+        this.configSet("Owners", "who can be assigned", "owners", "Name", st.owners),
+        this.configSet("Link types", "attachable to an activity", "linkTypes", "e.g. Test report", st.linkTypes)
+      ],
+      vocab: Object.keys(VOCAB).map(k => {
+        const v = VOCAB[k], t = TONE[v.tone];
+        return { label: v.label, mark: v.mark, tone: v.tone === "done" ? "counts as done" : v.tone === "part" ? "in progress" : v.tone === "blank" ? "nothing recorded" : "not done", bg: t.bg, fg: t.fg, border: t.border };
+      })
+    };
+  }
+}
+</script>
+</body>
+</html>
