@@ -379,3 +379,89 @@ A static export has an HTML file per module, generated from the seed. A module *
 during the demo** has no page of its own, so `moduleHref()` sends it to the matrix rather
 than to a 404 on the client's host. Everything else about that module — its row, its
 cells, its readiness — is fully live.
+
+---
+
+## Part 5 — the Drift agent
+
+Drift stopped being a screen with fixtures behind it. Hashes are now **reported per file,
+per environment**, and every row, verdict, warning and gate is derived from them.
+
+### The model
+
+`DriftRow` is gone. In its place:
+
+| Entity | What it is |
+|---|---|
+| `DriftObservation` | one file, on one environment, at one moment: path, **sha256**, size, `built_at` / `source_modified_at`, `in_packinglist`, who reported it and when |
+| `DriftDeliverable` | which matrix column a file belongs to, and which of the four layers (java / python / yaml / config) it is |
+| `DriftReport` | one agent submission, so "when did anyone last look at prod" has an answer |
+| `DriftPromotion` | a promoted hash set, and whether prod has confirmed it |
+
+Store version → **3**; a store written by an older build reseeds.
+
+**Identity is `content_hash`; `path` is metadata.** A deliverable made of several files
+gets a composite hash over the sorted `path\0hash` pairs, so changing any file in the set
+changes the deliverable and the order files arrive in does not.
+
+### Rules, each traceable to a real failure in `NEI_CONTEXT.md`
+
+| Rule | The failure it catches |
+|---|---|
+| `Prod behind` | §7.3 — run 511's five false errors: prod ran an older build than preprod verified, and nothing in the output said so |
+| `Patched in place` | servers agree with each other and not the repo — edited in place, so the next deploy silently reverts it |
+| `Never verified` | §7.1 — no hash from prod at all. Raised **High** when the deliverable is shared, because a change there lands on every flavour |
+| `Not deployed` | in the repo and on no server |
+| `stale_compile` | §7.2 — a jar built before its source last changed. This is the "Cannot create property 'category'" day lost to blaming YAML indentation. Grouped per file, so one stale jar on four environments is one warning |
+| `not_in_packinglist` | §9 — a file can be correct, committed, and never reach a server |
+| `claimed_but_drifted` | the join that makes the screen matter: modules recording a deliverable as done in prod while its prod hash has drifted. *"Those cells are not evidence."* |
+| `stale_report` | an agent that stopped reporting looks exactly like an environment that stopped changing — say which it is |
+
+### The promotion gate
+
+All five checks computed, none a placeholder, in `lib/shared/promotion.ts` so the static
+demo recomputes the same rule. **A check that cannot be evaluated reads as closed, not as
+unknown.**
+
+`promoteDrift` records the promoted hash set and writes **no observation on the target**.
+Promotion is an intent; only an agent report from prod turns it into a fact. Writing the
+hashes forward would make the screen agree with itself and with nothing else — which is
+the habit it exists to break.
+
+### The agent — `agent/report_hashes.py`
+
+Runs on each environment and posts to `POST /api/v1/drift/reports`.
+
+- **Python 2.6+ and 3.** `optparse` not `argparse`, `urllib2` with a py3 fallback,
+  `time.gmtime` not the deprecated `datetime.utcfromtimestamp`. The servers run py2 and
+  `str()` on non-ASCII has already aborted a postcheck in production.
+- **Streams in 64 KB blocks.** A comparison report is ~6 MB and the inline transport
+  ceiling elsewhere is ~96 KB; nothing is read whole.
+- **Reads `.packinglist`** for what actually deploys, and reports `in_packinglist` per file
+  rather than guessing.
+- **Never sends file content**, and excludes `mds.rc*` and `nemo_parameters.properties`
+  outright — §7.7, those hold plaintext CMM/M2M/repo passwords.
+
+Ingest authenticates with a bearer `DRIFT_INGEST_TOKEN` (agents have no session); a
+signed-in user with `prod.confirm` may also post, which is what makes it testable by hand.
+
+### Verified
+
+28 new tests (**169 total**), plus an end-to-end run against the built server:
+
+| Check | Result |
+|---|---|
+| Agent against a real package tree | 7 files, each classified to the right column and layer |
+| `.packinglist` omission | the html template correctly reported `in_packinglist=false` |
+| `mds.rc.add` (holds passwords) | never hashed, never named — confirmed absent from the payload |
+| Agent → live app, valid token | `{"accepted":7,"ignored":[]}` |
+| Agent → live app, wrong token | `401`, "This endpoint needs the drift ingest token." |
+| Report prod+preprod identical, repo seeded | all seven → **Patched in place** |
+| Then report the same tree as repo+lab | all seven → **In step**, warnings 16 → 1 |
+| The one survivor | `not_in_packinglist` — exactly the finding that should survive |
+| Gate after those reports | hash checks **PASS**; readiness and sign-off checks still **FAIL** correctly |
+| Audit | `DRIFT — reported 7 hashes from lab by mtms-agent/<host>` |
+| Promotion | writes no prod observation; stays unconfirmed; confirmed only by a matching report |
+
+Also fixed while here: `scripts/build-demo.mjs` now retries `EBUSY`/`EPERM` on Windows,
+the same way `store.ts` does.

@@ -4,8 +4,11 @@ import type {
   Cell,
   Defect,
   DeliverableColumn,
-  DriftRow,
-  DriftWarning,
+  DriftDeliverable,
+  DriftEnvironment,
+  DriftLayer,
+  DriftObservation,
+  DriftReport,
   Invitation,
   Link,
   Membership,
@@ -18,6 +21,7 @@ import type {
   Subactivity,
   UserWithSecret,
 } from '../shared/domain';
+import { DRIFT_ENVIRONMENTS } from '../shared/domain';
 import { SEEDED_ROLES } from '../shared/permissions';
 import { STATUS_SETS } from '../shared/vocabulary';
 import { hashPassword } from './auth';
@@ -458,23 +462,143 @@ export async function buildSeed(): Promise<StoreData> {
     },
   ];
 
-  // Hashes are reported by an environment agent; the tracker only compares them.
-  const drift_rows: DriftRow[] = [
-    { column_key: 'filecr', layer: 'FILECR', scope: 'per flavour', cadence: 'changes often', repo: 'b71e04', lab: 'b71e04', preprod: 'b71e04', prod: 'b71e04' },
-    { column_key: 'clicr', layer: 'CLICR', scope: 'per flavour', cadence: 'changes often', repo: 'c0d883', lab: 'c0d883', preprod: 'c0d883', prod: '8e7b03' },
-    { column_key: 'valid', layer: 'VALID.Y', scope: 'File CR', cadence: 'changes very often', repo: '5ac118', lab: '5ac118', preprod: '5ac118', prod: '5ac118' },
-    { column_key: 'exec', layer: 'EXEC.Y', scope: 'CLICR', cadence: 'changes very often', repo: '9e2f77', lab: '9e2f77', preprod: '9e2f77', prod: '9e2f77' },
-    { column_key: 'json', layer: 'JSON.Y', scope: 'shared', cadence: 'changes rarely', repo: '40bb6a', lab: '40bb6a', preprod: '40bb6a', prod: 'unknown' },
-    { column_key: 'html', layer: 'HTML', scope: 'shared', cadence: 'changes rarely', repo: 'd3f902', lab: 'd3f902', preprod: 'd3f902', prod: 'd3f902' },
-    { column_key: 'bst', layer: 'BST', scope: 'workflow', cadence: 'changes often', repo: '1c8ad5', lab: '1c8ad5', preprod: '77b3e1', prod: '77b3e1' },
-  ].map((row) => ({ ...row, id: id(`drift:${row.column_key}`), project_id: PROJECT_ID }));
+  // -------------------------------------------------------------------------
+  // Drift
+  //
+  // What each deliverable is made of. Layer matters because the four layers in one NEI
+  // package change at different rates and fail in different ways.
+  // -------------------------------------------------------------------------
 
-  const drift_warnings: DriftWarning[] = [
-    { severity: 'High' as const, text: 'json.yaml is shared by File CR and CLICR, and prod has no recorded hash for it — a change there lands on both flavours unverified.', where: 'prod · jsonTemplate.yaml' },
-    { severity: 'High' as const, text: 'BST workflow logic on preprod and prod does not match the repo. It was edited in place.', where: 'preprod, prod · BST · 77b3e1' },
-    { severity: 'Med' as const, text: 'CLICR code on prod is an older build than the one preprod verified.', where: 'prod · macro_CLICR_ANY_V1 · 8e7b03' },
-    { severity: 'Med' as const, text: 'Ten activities show a deliverable as loaded while the cell for its dependency is blank.', where: 'matrix · NEMO, EMAIL, RITM columns' },
-  ].map((warning, index) => ({ ...warning, id: id(`warning:${index}`), project_id: PROJECT_ID }));
+  const drift_deliverables: DriftDeliverable[] = (
+    [
+      { column_key: 'filecr', layer: 'java', scope: 'per flavour', cadence: 'changes often' },
+      { column_key: 'clicr', layer: 'python', scope: 'per flavour', cadence: 'changes often' },
+      { column_key: 'valid', layer: 'yaml', scope: 'File CR', cadence: 'changes very often' },
+      { column_key: 'exec', layer: 'yaml', scope: 'CLICR', cadence: 'changes very often' },
+      { column_key: 'json', layer: 'config', scope: 'shared', cadence: 'changes rarely' },
+      { column_key: 'html', layer: 'config', scope: 'shared', cadence: 'changes rarely' },
+      { column_key: 'bst', layer: 'yaml', scope: 'workflow', cadence: 'changes often' },
+    ] as const
+  ).map((entry) => ({ ...entry, project_id: PROJECT_ID }));
+
+  /**
+   * Observations from the agents. Full sha256, because the identity is the hash — the
+   * six characters on screen are a display convenience and nothing keys on them.
+   *
+   * The set below reproduces the failures the engineer actually hit, so the screen has
+   * something true to show before any agent has run:
+   *
+   * - `json`  — nothing on prod. Never verified, and it is shared by File CR and CLICR.
+   * - `clicr` — prod is an older build than the one preprod verified (run 511's 5 false
+   *             errors came from exactly this).
+   * - `bst`   — preprod and prod agree with each other but not with the repo: edited in
+   *             place on the server.
+   * - `filecr`— the compiled jar is older than its source, which is how a stale
+   *             `NodeDefinition.class` turned into a day of blaming YAML indentation.
+   * - `html`  — present in the repo, absent from `.packinglist`, so it does not deploy.
+   */
+  function hash(seed: string): string {
+    return createHash('sha256').update(seed).digest('hex');
+  }
+
+  const observationSeed: {
+    column: string;
+    layer: DriftLayer;
+    path: string;
+    size: number;
+    perEnvironment: Partial<Record<DriftEnvironment, string | null>>;
+    builtAt?: string;
+    sourceModifiedAt?: string;
+    notInPackinglist?: DriftEnvironment[];
+  }[] = [
+    {
+      column: 'filecr',
+      layer: 'java',
+      path: 'CLICR/ANY/V1/macro_CLICR_ANY_V1.jar',
+      size: 4_312_880,
+      perEnvironment: { repo: 'filecr-1', lab: 'filecr-1', preprod: 'filecr-1', prod: 'filecr-1' },
+      // Built before the source it claims to compile — §7.2.
+      builtAt: daysAgo(9),
+      sourceModifiedAt: daysAgo(4),
+    },
+    {
+      column: 'clicr',
+      layer: 'python',
+      path: 'CLICR/ANY/V1/script/python/netconf_compare_xml.py',
+      size: 41_204,
+      perEnvironment: { repo: 'clicr-2', lab: 'clicr-2', preprod: 'clicr-2', prod: 'clicr-1' },
+    },
+    {
+      column: 'valid',
+      layer: 'yaml',
+      path: 'CLICR/ANY/V1/templates/yaml/validation.yaml',
+      size: 18_662,
+      perEnvironment: { repo: 'valid-1', lab: 'valid-1', preprod: 'valid-1', prod: 'valid-1' },
+    },
+    {
+      column: 'exec',
+      layer: 'yaml',
+      path: 'CLICR/ANY/V1/templates/yaml/execution.yaml',
+      size: 26_015,
+      perEnvironment: { repo: 'exec-1', lab: 'exec-1', preprod: 'exec-1', prod: 'exec-1' },
+    },
+    {
+      column: 'json',
+      layer: 'config',
+      path: 'CLICR/ANY/V1/templates/jsonTemplate/jsonTemplate.yaml',
+      size: 9_884,
+      // Nobody has ever reported this one from prod.
+      perEnvironment: { repo: 'json-1', lab: 'json-1', preprod: 'json-1', prod: null },
+    },
+    {
+      column: 'html',
+      layer: 'config',
+      path: 'CLICR/ANY/V1/templates/html/summary_report.html',
+      size: 62_190,
+      perEnvironment: { repo: 'html-1', lab: 'html-1', preprod: 'html-1', prod: 'html-1' },
+      notInPackinglist: ['repo'],
+    },
+    {
+      column: 'bst',
+      layer: 'yaml',
+      path: 'CLICR/ANY/V1/templates/yaml/bst_workflow.yaml',
+      size: 33_471,
+      // Servers agree with each other and not with the repo: patched in place.
+      perEnvironment: { repo: 'bst-1', lab: 'bst-1', preprod: 'bst-2', prod: 'bst-2' },
+    },
+  ];
+
+  const drift_observations: DriftObservation[] = [];
+  for (const entry of observationSeed) {
+    for (const environment of DRIFT_ENVIRONMENTS) {
+      const seedValue = entry.perEnvironment[environment];
+      if (!seedValue) continue;
+      drift_observations.push({
+        id: id(`observation:${entry.column}:${environment}`),
+        project_id: PROJECT_ID,
+        environment,
+        column_key: entry.column,
+        layer: entry.layer,
+        path: entry.path,
+        content_hash: hash(seedValue),
+        size_bytes: entry.size,
+        built_at: entry.builtAt ?? null,
+        source_modified_at: entry.sourceModifiedAt ?? null,
+        in_packinglist: !(entry.notInPackinglist ?? []).includes(environment),
+        observed_at: daysAgo(environment === 'prod' ? 2 : 1),
+        reported_by: `mtms-agent/${environment}`,
+      });
+    }
+  }
+
+  const drift_reports: DriftReport[] = DRIFT_ENVIRONMENTS.map((environment) => ({
+    id: id(`drift-report:${environment}`),
+    project_id: PROJECT_ID,
+    environment,
+    agent: `mtms-agent/${environment}`,
+    at: daysAgo(environment === 'prod' ? 2 : 1),
+    observation_count: drift_observations.filter((row) => row.environment === environment).length,
+  }));
 
   const invitations: Invitation[] = [
     {
@@ -521,7 +645,9 @@ export async function buildSeed(): Promise<StoreData> {
     defects,
     links,
     runs,
-    drift_rows,
-    drift_warnings,
+    drift_deliverables,
+    drift_observations,
+    drift_reports,
+    drift_promotions: [],
   };
 }

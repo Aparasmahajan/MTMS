@@ -6,8 +6,10 @@ import type {
   Cell,
   Defect,
   DeliverableColumn,
-  DriftRow,
-  DriftWarning,
+  DriftDeliverable,
+  DriftObservation,
+  DriftPromotion,
+  DriftReport,
   Invitation,
   Link,
   Membership,
@@ -54,12 +56,18 @@ export interface StoreData {
   defects: Defect[];
   links: Link[];
   runs: Run[];
-  drift_rows: DriftRow[];
-  drift_warnings: DriftWarning[];
+  drift_deliverables: DriftDeliverable[];
+  drift_observations: DriftObservation[];
+  drift_reports: DriftReport[];
+  drift_promotions: DriftPromotion[];
 }
 
-/** 2: `cell_audit` became `audit`, carrying structural changes as well as cell changes. */
-export const STORE_VERSION = 2;
+/**
+ * 2: `cell_audit` became `audit`, carrying structural changes as well as cell changes.
+ * 3: drift stopped being pre-computed rows. Hashes are now observations reported per
+ *    file per environment, and every row, verdict and warning is derived from them.
+ */
+export const STORE_VERSION = 3;
 
 function dataDir(): string {
   return process.env.TRACKER_DATA_DIR ?? path.join(process.cwd(), 'data');

@@ -25,10 +25,28 @@ const parkedDirectory = path.join(root, '.api-parked');
 const exportDirectory = path.join(root, 'out');
 const demoDirectory = path.join(root, 'demo');
 
+/**
+ * Windows holds directories open briefly — a sync client, an indexer, an editor that
+ * still has the folder listed. Retrying clears it. `lib/server/store.ts` does the same
+ * thing for the same reason; the alternative is a build that fails one time in five.
+ */
+const TRANSIENT = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOTEMPTY']);
+
+async function withRetry(action, attempts = 6) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await action();
+    } catch (error) {
+      if (attempt >= attempts || !TRANSIENT.has(error.code)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, attempt * 150));
+    }
+  }
+}
+
 async function restoreApiRoutes() {
   if (existsSync(parkedDirectory)) {
-    await rm(apiDirectory, { recursive: true, force: true });
-    await rename(parkedDirectory, apiDirectory);
+    await withRetry(() => rm(apiDirectory, { recursive: true, force: true }));
+    await withRetry(() => rename(parkedDirectory, apiDirectory));
   }
 }
 
@@ -37,11 +55,11 @@ async function main() {
   await restoreApiRoutes();
 
   const storePath = path.join(mkdtempSync(path.join(os.tmpdir(), 'mtms-demo-')), 'tracker.json');
-  await rm(exportDirectory, { recursive: true, force: true });
-  await rm(demoDirectory, { recursive: true, force: true });
+  await withRetry(() => rm(exportDirectory, { recursive: true, force: true }));
+  await withRetry(() => rm(demoDirectory, { recursive: true, force: true }));
 
   console.log('[demo] parking the API routes — a static export cannot carry them');
-  await rename(apiDirectory, parkedDirectory);
+  await withRetry(() => rename(apiDirectory, parkedDirectory));
 
   try {
     const result = spawnSync('npx', ['next', 'build'], {
@@ -61,7 +79,7 @@ async function main() {
     console.log('[demo] API routes restored');
   }
 
-  await rename(exportDirectory, demoDirectory);
+  await withRetry(() => rename(exportDirectory, demoDirectory));
   console.log(`\n[demo] static site written to ${path.relative(process.cwd(), demoDirectory)}/`);
   console.log('[demo] serve it with any static host, e.g.  npx serve demo');
 }
