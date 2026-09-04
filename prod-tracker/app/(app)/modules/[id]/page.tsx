@@ -18,6 +18,18 @@ import { cellPresentation, formatStamp, type ModuleView, type Snapshot } from '@
  * server recomputes them from the store before it will close anything.
  */
 
+/** The quiet inline actions on a subactivity row — same weight as "remove" on a link. */
+function subactivityActionStyle(enabled: boolean) {
+  return {
+    fontSize: 12,
+    color: 'var(--color-neutral-600)',
+    border: 0,
+    background: 'transparent',
+    cursor: enabled ? 'pointer' : 'not-allowed',
+    padding: 0,
+  } as const;
+}
+
 function blockersFor(module: ModuleView): string[] {
   const blockers: string[] = [];
   if (module.readiness !== 100) {
@@ -36,6 +48,8 @@ export default function ModulePage() {
   const [linkType, setLinkType] = useState(snapshot.config.link_types[0] ?? 'RITM');
   const [linkLabel, setLinkLabel] = useState('');
   const [linkUrl, setLinkUrl] = useState('');
+  const [newSubactivity, setNewSubactivity] = useState('');
+  const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
 
   if (!module) notFound();
 
@@ -376,40 +390,160 @@ export default function ModulePage() {
 
           <SectionHeading>Subactivities</SectionHeading>
           <div className="bordered">
-            {module.subactivities.map((subactivity) => (
-              <div
-                key={subactivity.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 'var(--space-3)',
-                  padding: 'var(--space-3) var(--space-4)',
-                  borderBottom: '1px solid var(--color-divider)',
-                }}
-              >
-                <span style={{ flex: 1, fontSize: 13 }}>{subactivity.name}</span>
-                <span className="bar" style={{ width: 110, flex: 'none', height: 6 }} aria-hidden>
-                  <span style={{ width: `${subactivity.readiness}%` }} />
-                </span>
-                <span
-                  className="tabular"
+            {module.subactivities.map((subactivity) => {
+              const editing = renaming?.id === subactivity.id;
+              return (
+                <div
+                  key={subactivity.id}
                   style={{
-                    width: 38,
-                    flex: 'none',
-                    textAlign: 'right',
-                    fontFamily: 'var(--font-heading)',
-                    fontSize: 15,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 'var(--space-3)',
+                    padding: 'var(--space-3) var(--space-4)',
+                    borderBottom: '1px solid var(--color-divider)',
                   }}
                 >
-                  {subactivity.readiness}
-                </span>
-              </div>
-            ))}
+                  {editing ? (
+                    <form
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        const value = renaming.value.trim();
+                        if (!value || value === subactivity.name) {
+                          setRenaming(null);
+                          return;
+                        }
+                        void apply(null, () =>
+                          send<Snapshot>(
+                            `/api/v1/modules/${module.id}/subactivities/${subactivity.id}`,
+                            'PATCH',
+                            { name: value },
+                          ),
+                        ).then(() => setRenaming(null));
+                      }}
+                      style={{ flex: 1, display: 'flex', gap: 'var(--space-2)' }}
+                    >
+                      <input
+                        className="input"
+                        autoFocus
+                        style={{ flex: 1 }}
+                        value={renaming.value}
+                        onChange={(event) => setRenaming({ id: subactivity.id, value: event.target.value })}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Escape') setRenaming(null);
+                        }}
+                        aria-label={`Rename ${subactivity.name}`}
+                      />
+                      <button type="submit" className="btn btn-secondary">
+                        Save
+                      </button>
+                    </form>
+                  ) : (
+                    <span style={{ flex: 1, fontSize: 13 }}>{subactivity.name}</span>
+                  )}
+
+                  {editing ? null : (
+                    <>
+                      <span className="bar" style={{ width: 110, flex: 'none', height: 6 }} aria-hidden>
+                        <span style={{ width: `${subactivity.readiness}%` }} />
+                      </span>
+                      <span
+                        className="tabular"
+                        style={{
+                          width: 38,
+                          flex: 'none',
+                          textAlign: 'right',
+                          fontFamily: 'var(--font-heading)',
+                          fontSize: 15,
+                        }}
+                      >
+                        {subactivity.readiness}
+                      </span>
+                      <div style={{ display: 'flex', gap: 'var(--space-2)', flex: 'none' }}>
+                        <button
+                          type="button"
+                          disabled={!canEdit}
+                          title={canEdit ? undefined : reasonFor('module.edit')}
+                          onClick={() => setRenaming({ id: subactivity.id, value: subactivity.name })}
+                          style={subactivityActionStyle(canEdit)}
+                        >
+                          rename
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!canEdit}
+                          title={
+                            canEdit
+                              ? module.subactivities.length === 1
+                                ? 'Removing the last subactivity gives the module its own row back, keeping what it currently shows'
+                                : `Remove ${subactivity.name} and its deliverable row`
+                              : reasonFor('module.edit')
+                          }
+                          onClick={() =>
+                            void apply(null, () =>
+                              send<Snapshot>(
+                                `/api/v1/modules/${module.id}/subactivities/${subactivity.id}`,
+                                'DELETE',
+                              ),
+                            )
+                          }
+                          style={subactivityActionStyle(canEdit)}
+                        >
+                          remove
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })}
             {module.subactivities.length === 0 ? (
               <div style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 13, color: 'var(--color-neutral-600)' }}>
                 None.
               </div>
             ) : null}
+
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!newSubactivity.trim()) return;
+                void apply(null, () =>
+                  send<Snapshot>(`/api/v1/modules/${module.id}/subactivities`, 'POST', {
+                    name: newSubactivity.trim(),
+                  }),
+                ).then((result) => {
+                  if (result) setNewSubactivity('');
+                });
+              }}
+              style={{
+                display: 'flex',
+                gap: 'var(--space-2)',
+                padding: 'var(--space-3) var(--space-4)',
+                alignItems: 'center',
+              }}
+            >
+              <input
+                className="input"
+                style={{ flex: 1 }}
+                value={newSubactivity}
+                onChange={(event) => setNewSubactivity(event.target.value)}
+                placeholder="New subactivity, e.g. Deletion"
+                aria-label="New subactivity name"
+              />
+              <button
+                type="submit"
+                className="btn btn-secondary"
+                disabled={!canEdit || module.closed}
+                title={
+                  canEdit
+                    ? module.closed
+                      ? 'This module is closed. Reopen it before changing its subactivities.'
+                      : undefined
+                    : reasonFor('module.edit')
+                }
+              >
+                Add
+              </button>
+            </form>
           </div>
           <div
             style={{
@@ -417,11 +551,12 @@ export default function ModulePage() {
               fontSize: 12,
               color: 'var(--color-neutral-600)',
               lineHeight: 1.4,
+              textWrap: 'pretty',
             }}
           >
             {module.subactivities.length
               ? 'The module row on the matrix is a roll-up: a column only counts as done when every subactivity is done. Edit the subactivity cells on the matrix.'
-              : 'This module has no subactivities — its deliverable row is tracked directly.'}
+              : 'This module has no subactivities — its deliverable row is tracked directly. Adding the first one turns that row into a roll-up and carries the deliverables it already holds onto that subactivity.'}
           </div>
 
           <SectionHeading>Defects on this module</SectionHeading>
@@ -613,7 +748,7 @@ export default function ModulePage() {
                       flex: 'none',
                     }}
                   >
-                    {entry.column_label}
+                    {entry.label}
                   </span>
                   <span style={{ flex: 1, color: 'var(--color-neutral-700)', wordBreak: 'break-word' }}>
                     {entry.what}

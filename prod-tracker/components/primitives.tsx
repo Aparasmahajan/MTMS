@@ -206,6 +206,63 @@ export function Notice({ message, onDismiss }: { message: string; onDismiss: () 
   );
 }
 
+/**
+ * What a project with no deliverable columns shows instead of an empty grid.
+ *
+ * This is the first screen a second team ever sees, and an empty matrix reads as
+ * breakage rather than as "nothing configured yet". It says what a column is for and
+ * points at the one screen that can create one.
+ */
+export function NotConfigured({
+  projectKey,
+  canConfigure,
+  reason,
+}: {
+  projectKey: string;
+  canConfigure: boolean;
+  reason: string;
+}) {
+  return (
+    <div className="page page-narrow">
+      <Blueprint style={{ marginTop: 'var(--space-8)' }}>
+        <div className="kicker" style={{ letterSpacing: '.13em' }}>
+          {projectKey}
+        </div>
+        <h1 style={{ marginTop: 'var(--space-2)' }}>This project has no deliverable columns yet</h1>
+        <div className="lede" style={{ maxWidth: '62ch' }}>
+          The matrix is generated from the columns a project admin defines: one per thing that has
+          to exist and be loaded in production before an activity can go live. Until there is at
+          least one, there is nothing to track against.
+        </div>
+        <div
+          style={{
+            marginTop: 'var(--space-6)',
+            display: 'flex',
+            gap: 'var(--space-3)',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+          }}
+        >
+          {canConfigure ? (
+            <a href="/configure" className="btn btn-primary">
+              Set up the columns
+            </a>
+          ) : (
+            <button type="button" className="btn btn-primary" disabled title={reason}>
+              Set up the columns
+            </button>
+          )}
+          <span style={{ fontSize: 12, color: 'var(--color-neutral-700)', textWrap: 'pretty' }}>
+            {canConfigure
+              ? 'Node types, pipeline stages and owners are set on the same screen.'
+              : reason}
+          </span>
+        </div>
+      </Blueprint>
+    </div>
+  );
+}
+
 export function EmptyRow({ children }: { children: ReactNode }) {
   return (
     <div

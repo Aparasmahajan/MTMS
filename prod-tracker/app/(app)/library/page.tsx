@@ -1,8 +1,9 @@
 'use client';
 
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTracker } from '@/components/TrackerProvider';
-import { PageTitle } from '@/components/primitives';
+import { Blueprint, PageTitle } from '@/components/primitives';
 import { send } from '@/lib/client/api';
 import type { Snapshot } from '@/lib/shared/views';
 
@@ -10,16 +11,44 @@ import type { Snapshot } from '@/lib/shared/views';
  * The module library — a module is a node type plus an activity, built once. Cloning
  * copies the definition and starts fresh tracking; the library entry is unaffected, so
  * the same module can exist in several projects at once with its own status data.
+ *
+ * Creating one directly lives here too: this is where modules come from, and the
+ * "add to the library" checkbox only makes sense next to the catalogue it adds to.
  */
 export default function LibraryPage() {
-  const { snapshot, apply, can, reasonFor } = useTracker();
+  const { snapshot, apply, can, reasonFor, setNotice } = useTracker();
   const router = useRouter();
   const canClone = can('module.clone');
+  const canCreate = can('module.create');
+
+  const nodeTypes = snapshot.config.node_types;
+  const [nodeType, setNodeType] = useState(nodeTypes[0] ?? '');
+  const [name, setName] = useState('');
+  const [addToLibrary, setAddToLibrary] = useState(false);
 
   async function clone(entryId: string) {
     const meta = await apply(null, () => send<Snapshot>(`/api/v1/library/${entryId}/clone`, 'POST'));
     if (meta?.node_type) {
       router.push(`/matrix?node=${encodeURIComponent(String(meta.node_type))}`);
+    }
+  }
+
+  async function create() {
+    if (!name.trim()) return;
+    if (!nodeType) {
+      setNotice('This project has no node types yet. Add one on the Configure screen first.');
+      return;
+    }
+    const meta = await apply(null, () =>
+      send<Snapshot>('/api/v1/modules', 'POST', {
+        node_type: nodeType,
+        name: name.trim(),
+        add_to_library: addToLibrary,
+      }),
+    );
+    if (meta) {
+      setName('');
+      router.push(`/matrix?node=${encodeURIComponent(nodeType)}`);
     }
   }
 
@@ -29,6 +58,71 @@ export default function LibraryPage() {
         title="Module library"
         lede="A module is a node type plus an activity, built once. Clone it into a project and its own tracking starts from scratch — the library entry is not affected."
       />
+
+      <Blueprint style={{ marginBottom: 'var(--space-6)' }}>
+        <div className="kicker" style={{ letterSpacing: '.13em', marginBottom: 'var(--space-3)' }}>
+          Not in the library — create it directly
+        </div>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void create();
+          }}
+          style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', alignItems: 'center' }}
+        >
+          <select
+            className="input"
+            style={{ width: 130 }}
+            value={nodeType}
+            onChange={(event) => setNodeType(event.target.value)}
+            aria-label="Node type"
+          >
+            {nodeTypes.map((type) => (
+              <option key={type} value={type}>
+                {type}
+              </option>
+            ))}
+            {nodeTypes.length === 0 ? <option value="">No node types</option> : null}
+          </select>
+          <input
+            className="input"
+            style={{ flex: 1, minWidth: 280 }}
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="Activity, e.g. 131_CODEC_PROFILE_MODIFICATION_IN_CFX"
+            aria-label="Activity name"
+          />
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-2)',
+              fontSize: 13,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={addToLibrary}
+              onChange={(event) => setAddToLibrary(event.target.checked)}
+            />
+            Add to the library
+          </label>
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={!canCreate}
+            title={canCreate ? undefined : reasonFor('module.create')}
+          >
+            Create module
+          </button>
+        </form>
+        <div style={{ marginTop: 'var(--space-3)', fontSize: 12, color: 'var(--color-neutral-700)', textWrap: 'pretty' }}>
+          {canCreate
+            ? 'Every cell starts blank. The node type and the activity name together are the module’s identity, so the same pair cannot be tracked twice in one project. Tick the box only if other projects should be able to clone it.'
+            : reasonFor('module.create')}
+        </div>
+      </Blueprint>
 
       <div className="bordered" style={{ overflowX: 'auto' }}>
         <table className="table">

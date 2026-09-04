@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import type {
+  AuditEntry,
   Cell,
-  CellAudit,
   Defect,
   DeliverableColumn,
   DriftRow,
@@ -49,7 +49,7 @@ export interface StoreData {
   modules: Module[];
   subactivities: Subactivity[];
   cells: Cell[];
-  cell_audit: CellAudit[];
+  audit: AuditEntry[];
   library: ModuleLibraryEntry[];
   defects: Defect[];
   links: Link[];
@@ -58,7 +58,8 @@ export interface StoreData {
   drift_warnings: DriftWarning[];
 }
 
-export const STORE_VERSION = 1;
+/** 2: `cell_audit` became `audit`, carrying structural changes as well as cell changes. */
+export const STORE_VERSION = 2;
 
 function dataDir(): string {
   return process.env.TRACKER_DATA_DIR ?? path.join(process.cwd(), 'data');
@@ -98,7 +99,25 @@ async function writeToDisk(data: StoreData): Promise<void> {
   const temporary = `${file}.tmp`;
   await fsp.writeFile(temporary, JSON.stringify(data, null, 2), 'utf8');
   // Rename is atomic on the same volume, so a crash mid-write cannot truncate the store.
-  await fsp.rename(temporary, file);
+  await renameWithRetry(temporary, file);
+}
+
+/** Transient Windows failures: a scanner or an indexer holding the destination open
+ *  for a moment makes rename-over-existing fail, and retrying clears it. Losing a
+ *  write here would lose an audited status change, so it is worth waiting out. */
+const TRANSIENT_RENAME_CODES = new Set(['EPERM', 'EACCES', 'EBUSY']);
+
+async function renameWithRetry(from: string, to: string, attempts = 5): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await fsp.rename(from, to);
+      return;
+    } catch (error) {
+      const { code } = error as NodeJS.ErrnoException;
+      if (attempt >= attempts || !code || !TRANSIENT_RENAME_CODES.has(code)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, attempt * 10));
+    }
+  }
 }
 
 /**

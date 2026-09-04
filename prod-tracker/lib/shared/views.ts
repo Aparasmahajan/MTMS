@@ -1,5 +1,6 @@
 import type {
   Artifact,
+  AuditScope,
   DefectPhase,
   DefectSeverity,
   DefectStatus,
@@ -69,8 +70,13 @@ export interface ModuleView {
 
 export interface AuditView {
   id: string;
-  module_id: string;
-  column_label: string;
+  scope: AuditScope;
+  /** null for a project-level change, such as a column being added. */
+  module_id: string | null;
+  /** "CFX · 128_TGRP…", or "—" when the change was not about one module. */
+  module_label: string;
+  /** Column label for a cell change; otherwise MODULE, CONFIG or ACCESS. */
+  label: string;
   what: string;
   who: string;
   at: string;
@@ -119,6 +125,26 @@ export interface OrgUserView {
   status: string;
 }
 
+/** One person's access to the project currently open. */
+export interface MemberView {
+  /** The membership row, which is what gets changed or removed. */
+  membership_id: string;
+  user_id: string;
+  display_name: string;
+  email: string;
+  role_id: string;
+  role_name: string;
+  /** True when the access comes from an organisation-wide membership. */
+  org_wide: boolean;
+  status: string;
+  /**
+   * Org-wide access cannot be edited from a project screen, and nobody may remove their
+   * own access. The reason is carried so the disabled control can state it.
+   */
+  editable: boolean;
+  locked_reason: string;
+}
+
 export interface InvitationView {
   id: string;
   email: string;
@@ -140,8 +166,19 @@ export interface DriftRowView {
   verdict: DriftVerdict;
 }
 
+/**
+ * A column plus what the Configure screen needs to warn about it. Editing a column's
+ * allowed statuses never rewrites cells already filled in — doing so would destroy the
+ * record of what was actually loaded — so a cell can outlive its column's vocabulary.
+ * Those cells keep their own tone and are counted here so Configure can say so.
+ */
+export interface ColumnView extends DeliverableColumn {
+  /** Stored cells holding a status this column no longer allows. Blanks never count. */
+  off_vocabulary: number;
+}
+
 export interface ConfigView {
-  columns: DeliverableColumn[];
+  columns: ColumnView[];
   node_types: string[];
   stages: { id: string; label: string }[];
   owners: string[];
@@ -167,6 +204,7 @@ export interface Snapshot {
   library: LibraryView[];
   roles: RoleView[];
   users: OrgUserView[];
+  members: MemberView[];
   invitations: InvitationView[];
   drift: {
     rows: DriftRowView[];

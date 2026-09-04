@@ -4,7 +4,7 @@ import { useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTracker } from '@/components/TrackerProvider';
-import { Blueprint, PageTitle, SectionHeading } from '@/components/primitives';
+import { Blueprint, NotConfigured, PageTitle, SectionHeading } from '@/components/primitives';
 import { formatStamp, missingLine } from '@/lib/shared/views';
 
 /**
@@ -15,7 +15,7 @@ import { formatStamp, missingLine } from '@/lib/shared/views';
  * why a cell click changes this screen too.
  */
 export default function DashboardPage() {
-  const { snapshot } = useTracker();
+  const { snapshot, can, reasonFor } = useTracker();
   const router = useRouter();
   const { modules, config } = snapshot;
 
@@ -37,6 +37,19 @@ export default function DashboardPage() {
       }).length,
     };
   }, [modules]);
+
+  // Every figure below counts over the deliverable columns. With none configured they
+  // would all read zero, which looks like a project in trouble rather than one not yet
+  // set up — so say which it is.
+  if (config.columns.length === 0) {
+    return (
+      <NotConfigured
+        projectKey={snapshot.project.key}
+        canConfigure={can('project.config')}
+        reason={reasonFor('project.config')}
+      />
+    );
+  }
 
   const byNodeType = config.node_types
     .map((nodeType) => {
@@ -300,7 +313,24 @@ export default function DashboardPage() {
             ))}
           </div>
 
-          <SectionHeading>Recent changes</SectionHeading>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'baseline',
+              justifyContent: 'space-between',
+              gap: 'var(--space-3)',
+            }}
+          >
+            <SectionHeading>Recent changes</SectionHeading>
+            {can('admin.audit.view') ? (
+              <Link
+                href="/audit"
+                style={{ fontSize: 12, color: 'var(--color-neutral-700)', flex: 'none' }}
+              >
+                See every change →
+              </Link>
+            ) : null}
+          </div>
           <div className="bordered">
             {snapshot.audit.slice(0, 6).map((entry) => (
               <div
@@ -323,7 +353,7 @@ export default function DashboardPage() {
                     flex: 'none',
                   }}
                 >
-                  {entry.column_label}
+                  {entry.label}
                 </span>
                 <span style={{ flex: 1, color: 'var(--color-neutral-700)', wordBreak: 'break-word' }}>
                   {entry.what}
