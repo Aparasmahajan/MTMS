@@ -120,13 +120,22 @@ export function withoutAuth(
   };
 }
 
+/**
+ * An absent body is `{}`, not an error: a PATCH that sends no fields is asking for the
+ * default behaviour, which is how the defects table cycles a status. A body that is
+ * present but not JSON is still a bad request, and a `{}` that the schema requires
+ * fields from still fails validation on its own terms.
+ */
 export async function parseBody<S extends ZodTypeAny>(
   request: NextRequest,
   schema: S,
 ): Promise<output<S>> {
+  const text = (await request.text()).trim();
+  if (!text) return schema.parse({}) as output<S>;
+
   let raw: unknown;
   try {
-    raw = await request.json();
+    raw = JSON.parse(text);
   } catch {
     throw new ServiceError('bad_request', 'Expected a JSON body');
   }

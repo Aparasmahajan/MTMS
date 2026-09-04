@@ -1,7 +1,10 @@
 # Pending — Flow One Prod Tracker
 
-**Handoff document.** Written to be read cold, with no prior conversation. Part 1 is
-built, runs and is verified; Parts 2–6 below are not started.
+**Handoff document.** Written to be read cold, with no prior conversation. Parts 1–3 are
+built, run and are verified, and Part 4 is all but two items; Parts 5–6 are not started.
+
+The part numbers are stable identifiers — a finished part keeps its number, so that every
+cross-reference in this file and in the code comments keeps resolving.
 
 ---
 
@@ -20,6 +23,7 @@ built, runs and is verified; Parts 2–6 below are not started.
 cd tracker/prod-tracker
 npm install
 npm run dev          # http://localhost:3100
+npm test             # 141 tests — run this before and after any change to the rules
 ```
 
 Sign in `parmahaj@nokia.com` / `tracker` (Admin), or `k.menon@nokia.com` / `tracker`
@@ -31,6 +35,8 @@ Sign in `parmahaj@nokia.com` / `tracker` (Admin), or `k.menon@nokia.com` / `trac
 lib/shared/     vocabulary · permissions · domain · views   ← pure, imported by both sides
 lib/server/     store · seed · auth · api · errors · service · session
 lib/client/     api · optimistic
+lib/**/__tests__/   vocabulary · service · columns · modules · projects · audit · api
+                    plus harness.ts   ← npm test
 components/     AppShell · TrackerProvider · primitives
 app/(app)/      page(dashboard) matrix defects pipeline modules/[id] library access drift configure
 app/api/v1/     18 route handlers
@@ -72,6 +78,10 @@ These are not style preferences; each one is load-bearing.
   queues, rolls back on failure and surfaces the server's own message.
 - **Optimistic updates** must recompute derived fields with the shared pure functions —
   see `lib/client/optimistic.ts` and `withDerived`. Never hand-roll the maths.
+- **A new rule needs a test in both places**: the pure function in
+  `lib/shared/__tests__/vocabulary.test.ts`, and its effect on the projection in
+  `lib/server/__tests__/service.test.ts`. A rule proved only in isolation can still be
+  wired up wrongly — that is exactly what the roll-up precedence case showed.
 
 ### Gotchas that will cost you an hour each
 
@@ -83,142 +93,96 @@ These are not style preferences; each one is load-bearing.
 - **The session cookie is `Secure` in production**, so `next start` over plain HTTP will
   not keep a browser session. Use `npm run dev` locally.
 - **Delete `data/tracker.json` to reseed.** Bumping `STORE_VERSION` in `lib/server/store.ts`
-  forces the same thing on next start.
+  forces the same thing on next start. It is at **2** — `cell_audit` became `audit`.
+- **Every mutation that changes what the matrix shows must call `record()`** in
+  `lib/server/service.ts`. A change nobody can attribute is the failure this app exists to
+  fix, and `/audit` is only as good as the calls into it.
 - The store is a single JSON document held in memory with serialised writes. Correct for a
   pilot, wrong for more than one process — see Part 6.
+- **`writeToDisk` retries the rename** on `EPERM`/`EACCES`/`EBUSY`. On Windows a scanner or
+  indexer holding the destination open makes rename-over-existing fail intermittently. Do
+  not simplify that back to a bare `fsp.rename` — it fails roughly 40% of test runs.
 
 ---
 
-# Part 2 — Tests
+# Part 2 — Tests · **done**
 
-Nothing is tested. Vitest is installed and configured as a dependency but there is no test
-file and no `vitest.config.ts`. Do this first: every later part changes the rules below,
-and without tests you will not know what you broke.
+56 tests, `npm test`. See [completed.md](completed.md) for what they cover, how they were
+mutation-checked, and the Windows `EPERM` bug in `store.ts` they turned up.
 
-### 2.1 The pure rules — `lib/shared/vocabulary.ts`
+What matters for the parts below:
 
-Create `lib/shared/__tests__/vocabulary.test.ts`.
-
-- `rollUp` truth table, in precedence order: **blank beats not-done beats in-progress beats
-  done**. Assert it returns the *actual status* of the first subactivity at the governing
-  tone (not a synthetic one), and returns `BLANK` for an empty list.
-- `readiness` — done ÷ counted, rounded; `0` when there are no counted columns; blanks and
-  in-progress both count against.
-- `stageIndex` — at 0, 1, 49, 50, 99, 100, across 2, 6 and 8 stages. 100% must always land
-  on the last stage and nothing else may.
-- `nextStatus` — wraps at the end; returns `current` for an empty allowed list; starts the
-  cycle correctly from `BLANK` (a blank is not in any column's allowed list, so
-  `indexOf` is `-1` and the first status must come out).
-
-### 2.2 The service rules — `lib/server/service.ts`
-
-Create `lib/server/__tests__/service.test.ts`. Point the store at a temp file per test with
-`TRACKER_STORE_PATH` and call `resetStoreCache()` between tests.
-
-- **FNI gate**: refused below 100%; refused at 100% with the FNI column not done; permitted
-  when both hold; the blocking reasons come back verbatim.
-- **Roll-up guard**: writing a module cell that has subactivities is refused.
-- **Closed module**: `advanceCell` and `confirmLoadedInProd` are refused; reopening allows
-  them again.
-- **Permissions**: a Viewer is refused every mutation; DevOps may `confirmLoadedInProd` but
-  not `signOffFni`.
-- **`toggleGrant`** refuses to grant a permission the actor does not hold themselves.
-- **`inviteUser`** refuses a role holding permissions the actor lacks.
-- **`removeColumn`** deletes the column's cells with it, and only in that project.
-- **`cloneFromLibrary`** does not mutate the library entry's definition, creates the module
-  with every cell blank, and adds the node type to the project if missing.
-
-### 2.3 Regression fixture
-
-Assert the seeded projection against known-good numbers, so a change to the rules is caught
-loudly: **18 modules, 14 columns, 3 fully in prod, 3 not started, 86 blank cells**, and
-`128_TGRP_CONFIGURATION_IN_CFX` at **58%** with 3 subactivities. These match the design
-prototype's own maths and were verified by hand.
-
-**Done when:** `npm test` passes and `package.json`'s `test` script runs it.
+- **Run `npm test` before and after touching a rule.** The regression fixture pins the
+  seeded projection to hand-verified numbers, so a rule change that shifts what the
+  dashboard reports fails loudly instead of quietly.
+- Adding a service test: `beforeEach(useSeededStore)` from `lib/server/__tests__/harness.ts`
+  gives a fresh store at a temp path. Look things up by name (`moduleId`, `roleId`,
+  `libraryId`) rather than by seeded id. `refused(call, 'forbidden')` asserts the code and
+  hands back the error so you can check the message the user would actually read.
+- To set up a case the seed does not contain, `mutate()` the store directly in the test —
+  `refuses to grant a permission the actor does not hold` does this to strip a permission
+  from the admin's own role.
+- **The seed under-covers the roll-up rule**: all five modules with subactivities give them
+  identical rows, so the projection never resolves mixed tones. `applies the precedence rule
+  when subactivities disagree` constructs that case. Keep it.
 
 ---
 
-# Part 3 — Finish "generic without a code change"
+# Part 3 — "generic without a code change" · **done**
 
-This is the largest *product* gap. The app is configurable in most respects but not all,
-and the unconfigurable parts are the ones the design bundle is most emphatic about.
+52 tests added (108 total), 3 new routes. See [completed.md](completed.md) for the detail,
+including the second real bug the work turned up (`parseBody` rejecting an empty body, which
+broke the defects table's status cycling).
 
-### 3.1 Editable column status subsets — the priority
+Two decisions were taken with the user and are now load-bearing:
 
-Today a column's allowed statuses are fixed at creation: the seed sets them per column, and
-`addColumn` always uses `STATUS_SETS.simple` (Not Loaded / Loaded). Configure *displays*
-them as outline tags but cannot change them.
+- **Editing a column's allowed statuses never rewrites cells.** A cell holding a status its
+  column no longer allows keeps it, still counts toward readiness if its tone is done, and
+  is counted into `ColumnView.off_vocabulary` so Configure reports it. Do not add a
+  "clean up" path that rewrites them — the record of what was actually loaded is the one
+  thing the app exists to protect.
+- **Creating a module adds a library entry only when asked.** Direct creation is the
+  exception path; the normal path is clone-from-library. The checkbox defaults to off.
 
-- Extend `PATCH /api/v1/config/columns/[key]` — it currently accepts only `{ counts }` — to
-  accept `{ allowed: string[] }`. Validate every key against `STATUS_VOCABULARY` and
-  require at least one.
-- Add `setColumnStatuses` to `lib/server/service.ts` behind `project.config`.
-- On the Configure screen, make the statuses cell a multi-select over the shared vocabulary.
-- **The hard part, and the reason this needs care:** decide what happens to cells already
-  holding a status the column no longer allows. Recommended — leave the stored value, let
-  it render with its own tone, and show a warning count on Configure ("3 cells hold a
-  status this column no longer allows"). Silently rewriting them destroys audit truth.
-  Whatever you choose, write it down here and test it.
+Structural rules worth knowing before touching modules:
 
-### 3.2 Column ordering
-
-`DeliverableColumn.order_index` exists and is respected by `columnsFor()`. Nothing sets it
-after the seed. Add reordering on Configure (up/down buttons are enough — do not add a
-drag-and-drop dependency for this) and a route to persist it.
-
-### 3.3 Create a module directly
-
-`module.create` is defined, granted to Admin/Sub-admin/Release manager, and has **no route
-and no UI**. Only cloning from the library adds a module. The Dashboard's "Add a module"
-button currently points at the library as a stopgap.
-
-- `POST /api/v1/modules` — node type (from the project's configured list) plus activity
-  name; creates every cell blank.
-- Reject a duplicate node-type + name pair in the same project: that pair *is* the module's
-  identity.
-- Decide whether creating a module should also create a library entry. The design says the
-  library is "built once, then cloned", which implies yes — confirm with the user.
-
-### 3.4 Edit subactivities
-
-Add, rename, remove — covered by `module.edit`, no route or UI today. Note that removing
-the last subactivity turns the module's row from derived back to directly editable, so its
-cells must be materialised at that point or the row will read as all-blank.
-
-### 3.5 Defect assignment
-
-`defect.assign` is defined and granted to QA; `Defect.assignee` exists in the schema and is
-always `null`; there is no UI. Assign from the defects table, choosing from the project's
-configured owners.
-
-### 3.6 Cleanup
-
-`lib/server/service.ts` ends with a stray `export { isStatusKey }` re-export that nothing
-imports. Delete it.
+- Adding the **first** subactivity moves the module's own cells onto it; removing the
+  **last** one materialises the module's row from the roll-up. Both directions preserve
+  readiness — there are round-trip tests for it.
+- Add and remove are refused on a closed module; rename is allowed, because it changes no
+  status.
 
 ---
 
-# Part 4 — The deferred product surface
+# Part 4 — The deferred product surface · **mostly done**
 
-Everything here is modelled but has no screen. Check scope with the user before building:
-the design bundle explicitly defers some of it.
+Project creation and the set-up prompt, project members, a generalised audit trail and the
+`/audit` screen are built — see [completed.md](completed.md). Two things remain.
 
-- **Create a project.** `project.create` has no route. CMDB and INVENTORY_SYNC are seeded
-  as "not configured" and the switcher reaches them, but a project with no columns renders
-  an empty matrix instead of a set-up prompt. At minimum, add that prompt — it is the first
-  thing a second team would hit.
-- **Project members screen.** `project.members.manage` is defined with nothing behind it.
-  Membership rows already support org-wide (`project_id: null`) or per-project scope.
-- **Mail transport.** Invitations work end to end — single-use expiring token, acceptance
-  page, password set by the invited user — but there is no mailer, so the acceptance link
-  comes back in the API response for an admin to copy. Wire to SMTP, or emit
-  `user.invited` and let a consumer send it (see Part 6).
-- **Project-wide audit screen.** `admin.audit.view` is granted, and the feed appears on the
-  dashboard and module detail, but there is no searchable project-wide view.
-- **Super admin** — organisation creation and first-admin onboarding. The model is built
-  (`Tenant`, org-wide `Membership`). **The user explicitly deferred the screen.** Do not
-  build it without asking.
+### 4.a Mail transport — a seam exists, nothing sends
+
+`lib/server/mailer.ts` is the single delivery point. The default transport logs and does not
+send; `MAIL_TRANSPORT=webhook` with `MAIL_WEBHOOK_URL` posts to a relay. **What is missing is
+a real endpoint**, which needs the user's mail server or an internal relay URL — ask before
+picking one. Wiring SMTP directly would add a dependency (`nodemailer`) and credentials
+handling, and was deliberately not done on a guess.
+
+The invitation is committed before delivery is attempted, and delivery failure must never
+fail the request — the account and its single-use link already exist. Keep that.
+
+### 4.b Super admin — **do not build without asking**
+
+Organisation creation and first-admin onboarding. The model is built (`Tenant`, org-wide
+`Membership`) and the Configure screen carries a deferral note. The user explicitly deferred
+the screen, twice. Confirm before touching it.
+
+### Worth knowing
+
+- **Members are visible to anyone with `project.view`**, as the organisation user list
+  already was. If that becomes a concern it is a projection change in `buildSnapshot`, not a
+  screen change.
+- **Audit filtering is client-side** over the snapshot. Correct for a few hundred rows;
+  becomes a paged endpoint alongside the Postgres move in Part 6.
 
 ---
 
@@ -289,3 +253,11 @@ Each was a judgement call. Revisit any of them with the user; do not silently "f
 4. **`Stage` and `ProjectConfig` replaced the per-entity `NodeType`/`Stage` tables** the
    design's data notes imply. The four Configure sets carry no data of their own, so they
    are ordered lists on one config record per project. Revisit if stages ever need fields.
+5. **Creating a module lives on the Library screen**, not the Dashboard. That is where
+   modules come from, and the "add to the library" checkbox only means anything next to the
+   catalogue it adds to. It makes the Dashboard's "Add a module" button correct rather than
+   the stopgap it was.
+6. **Project members is a section on Access, and the audit log is a linked page.** Neither
+   is a nav tab: the design bundle's nine tabs are the shape of the app, and adding tabs for
+   things you look up rather than work in would dilute it. `/audit` is reached from the
+   dashboard's "Recent changes"; members sit under the org-wide access they qualify.

@@ -193,19 +193,29 @@ export const Cell = z.object({
 });
 export type Cell = z.infer<typeof Cell>;
 
-export const CellAudit = z.object({
+/**
+ * What kind of thing changed. A deliverable status is only part of the record: who
+ * created a module, who broke it into subactivities and who changed the columns are all
+ * things a release manager has to be able to answer months later.
+ */
+export const AuditScope = z.enum(['cell', 'module', 'project']);
+export type AuditScope = z.infer<typeof AuditScope>;
+
+export const AuditEntry = z.object({
   id: uuid,
   project_id: uuid,
-  module_id: uuid,
+  /** null for a project-level change, such as a column being added. */
+  module_id: uuid.nullable().default(null),
   subactivity_id: uuid.nullable().default(null),
-  column_key: z.string(),
-  column_label: z.string(),
+  scope: AuditScope,
+  /** The column label for a cell change; otherwise a short tag: MODULE, CONFIG, ACCESS. */
+  label: z.string(),
   /** "Not Loaded → Loaded in prod" — rendered verbatim in the change feeds. */
   what: z.string(),
   who: z.string(),
   at: isoDateTime,
 });
-export type CellAudit = z.infer<typeof CellAudit>;
+export type AuditEntry = z.infer<typeof AuditEntry>;
 
 /** A module built once, then cloned into a project. Cloning never touches the entry. */
 export const ModuleLibraryEntry = z.object({

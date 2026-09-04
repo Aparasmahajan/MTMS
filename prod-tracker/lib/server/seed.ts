@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type {
+  AuditEntry,
   Cell,
-  CellAudit,
   Defect,
   DeliverableColumn,
   DriftRow,
@@ -368,13 +368,13 @@ export async function buildSeed(): Promise<StoreData> {
     { ref: 'a14', column: 'oh', what: 'set Not Created', who: 'A. Iyer', days: 6 },
   ];
 
-  const cell_audit: CellAudit[] = auditSeed.map((entry, index) => ({
+  const audit: AuditEntry[] = auditSeed.map((entry, index) => ({
     id: id(`audit:${index}`),
     project_id: PROJECT_ID,
     module_id: id(`module:${entry.ref}`),
     subactivity_id: null,
-    column_key: entry.column,
-    column_label: columnLabel(entry.column),
+    scope: 'cell' as const,
+    label: columnLabel(entry.column),
     what: entry.what,
     who: entry.who,
     at: daysAgo(entry.days),
@@ -516,7 +516,7 @@ export async function buildSeed(): Promise<StoreData> {
     modules,
     subactivities,
     cells,
-    cell_audit,
+    audit,
     library,
     defects,
     links,
