@@ -35,6 +35,18 @@ For `npm run build && npm start` you must set `JWT_SECRET` (see `.env.example`) 
 refuses to sign tokens without it in production. Note the session cookie is `Secure` there,
 so serve it over HTTPS or a browser will not keep the session.
 
+## Tests
+
+```bash
+npm test
+```
+
+141 tests over the two things worth pinning down: the pure rules in `lib/shared/vocabulary.ts`
+— the subactivity roll-up, readiness, stage bucketing — and the rules the server refuses to
+break in `lib/server/service.ts`, chiefly the FNI gate and the permission checks. A
+regression fixture holds the seeded projection to its hand-verified numbers, so a change to
+a rule that would shift what the dashboard reports fails loudly.
+
 ## The store
 
 One JSON document at `data/tracker.json`, seeded on first run from `lib/server/seed.ts`.

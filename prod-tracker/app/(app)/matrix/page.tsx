@@ -4,7 +4,7 @@ import { Suspense, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTracker } from '@/components/TrackerProvider';
-import { Chip, StatusMarker } from '@/components/primitives';
+import { Chip, NotConfigured, StatusMarker } from '@/components/primitives';
 import { send } from '@/lib/client/api';
 import { optimisticAdvance } from '@/lib/client/optimistic';
 import { STATUS_VOCABULARY, TONE_STYLE } from '@/lib/shared/vocabulary';
@@ -541,6 +541,20 @@ function MatrixScreen() {
 }
 
 export default function MatrixPage() {
+  const { snapshot, can, reasonFor } = useTracker();
+
+  // The grid is generated from the configured columns, so with none there is no grid —
+  // checked out here, above `MatrixScreen`'s hooks, rather than short-circuiting inside it.
+  if (snapshot.config.columns.length === 0) {
+    return (
+      <NotConfigured
+        projectKey={snapshot.project.key}
+        canConfigure={can('project.config')}
+        reason={reasonFor('project.config')}
+      />
+    );
+  }
+
   return (
     <Suspense fallback={null}>
       <MatrixScreen />

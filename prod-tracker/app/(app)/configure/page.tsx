@@ -5,8 +5,14 @@ import { useTracker } from '@/components/TrackerProvider';
 import { Blueprint, PageTitle } from '@/components/primitives';
 import { send } from '@/lib/client/api';
 import type { ConfigList } from '@/lib/shared/domain';
-import { statusEntry, STATUS_VOCABULARY, TONE_DESCRIPTION, TONE_STYLE } from '@/lib/shared/vocabulary';
-import type { Snapshot } from '@/lib/shared/views';
+import {
+  isStatusKey,
+  statusEntry,
+  STATUS_VOCABULARY,
+  TONE_DESCRIPTION,
+  TONE_STYLE,
+} from '@/lib/shared/vocabulary';
+import type { ColumnView, Snapshot } from '@/lib/shared/views';
 
 /**
  * Configure — everything a project admin sets, and the reason the app is generic.
@@ -130,6 +136,93 @@ function ConfigSet({
   );
 }
 
+/**
+ * The statuses a column may take, as a toggle per entry in the shared vocabulary.
+ *
+ * Turning one off never rewrites cells that already hold it — see `setColumnStatuses`.
+ * Those cells keep their recorded status and are counted back here, so the consequence
+ * of the change is visible on the screen that made it.
+ */
+function StatusSubset({ column }: { column: ColumnView }) {
+  const { apply, can, reasonFor, setNotice } = useTracker();
+  const canConfig = can('project.config');
+  const selectable = Object.keys(STATUS_VOCABULARY).filter(isStatusKey);
+
+  function toggle(key: string) {
+    if (!canConfig) {
+      setNotice(reasonFor('project.config'));
+      return;
+    }
+    const next = column.allowed.includes(key)
+      ? column.allowed.filter((entry) => entry !== key)
+      : [...column.allowed, key];
+
+    if (next.length === 0) {
+      setNotice(`${column.label} needs at least one status it can take.`);
+      return;
+    }
+    void apply(null, () =>
+      send<Snapshot>(`/api/v1/config/columns/${column.key}`, 'PATCH', { allowed: next }),
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', gap: 'var(--space-1)', flexWrap: 'wrap' }}>
+      {selectable.map((key) => {
+        const on = column.allowed.includes(key);
+        const entry = statusEntry(key);
+        return (
+          <button
+            key={key}
+            type="button"
+            aria-pressed={on}
+            disabled={!canConfig}
+            title={
+              canConfig
+                ? `${on ? 'Remove' : 'Add'} ${entry.label} ${on ? 'from' : 'to'} ${column.label}`
+                : reasonFor('project.config')
+            }
+            onClick={() => toggle(key)}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              fontSize: 12,
+              padding: '1px 7px',
+              borderRadius: 0,
+              border: `1px solid ${on ? 'var(--color-text)' : 'var(--color-neutral-300)'}`,
+              background: on ? 'var(--color-accent-100)' : 'transparent',
+              color: on ? 'var(--color-text)' : 'var(--color-neutral-600)',
+              cursor: canConfig ? 'pointer' : 'not-allowed',
+              opacity: canConfig ? 1 : 0.6,
+            }}
+          >
+            <span aria-hidden className="mono">
+              {entry.mark}
+            </span>
+            {entry.label}
+          </button>
+        );
+      })}
+      {column.off_vocabulary > 0 ? (
+        <div
+          style={{
+            width: '100%',
+            marginTop: 'var(--space-1)',
+            fontSize: 11,
+            color: 'var(--color-neutral-700)',
+            textWrap: 'pretty',
+          }}
+        >
+          {column.off_vocabulary} {column.off_vocabulary === 1 ? 'cell holds' : 'cells hold'} a status
+          this column no longer allows. They keep what was recorded — clicking one moves it into the
+          list above.
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function ConfigurePage() {
   const { snapshot, apply, can, reasonFor } = useTracker();
   const { config, project } = snapshot;
@@ -166,6 +259,7 @@ export default function ConfigurePage() {
           <table className="table">
             <thead>
               <tr>
+                <th>Order</th>
                 <th>Column</th>
                 <th>What it is</th>
                 <th>Statuses it can take</th>
@@ -174,8 +268,52 @@ export default function ConfigurePage() {
               </tr>
             </thead>
             <tbody>
-              {config.columns.map((column) => (
+              {config.columns.map((column, index) => (
                 <tr key={column.key}>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    <div style={{ display: 'flex', gap: 2 }}>
+                      {(['up', 'down'] as const).map((direction) => {
+                        const stuck =
+                          direction === 'up' ? index === 0 : index === config.columns.length - 1;
+                        return (
+                          <button
+                            key={direction}
+                            type="button"
+                            className="mono"
+                            disabled={!canConfig || stuck}
+                            title={
+                              canConfig
+                                ? `Move ${column.label} ${direction === 'up' ? 'earlier' : 'later'} on the matrix`
+                                : reasonFor('project.config')
+                            }
+                            aria-label={`Move ${column.label} ${direction === 'up' ? 'earlier' : 'later'}`}
+                            onClick={() =>
+                              void apply(null, () =>
+                                send<Snapshot>(`/api/v1/config/columns/${column.key}`, 'PATCH', {
+                                  move: direction,
+                                }),
+                              )
+                            }
+                            style={{
+                              width: 20,
+                              height: 20,
+                              padding: 0,
+                              fontSize: 11,
+                              lineHeight: 1,
+                              borderRadius: 0,
+                              border: '1px solid var(--color-neutral-400)',
+                              background: 'transparent',
+                              color: 'var(--color-neutral-700)',
+                              cursor: canConfig && !stuck ? 'pointer' : 'not-allowed',
+                              opacity: canConfig && !stuck ? 1 : 0.35,
+                            }}
+                          >
+                            {direction === 'up' ? '←' : '→'}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </td>
                   <td
                     style={{
                       fontFamily: 'var(--font-heading)',
@@ -188,14 +326,8 @@ export default function ConfigurePage() {
                     {column.label}
                   </td>
                   <td style={{ fontSize: 13 }}>{column.full}</td>
-                  <td>
-                    <div style={{ display: 'flex', gap: 'var(--space-1)', flexWrap: 'wrap' }}>
-                      {column.allowed.map((key) => (
-                        <span key={key} className="tag tag-outline">
-                          {statusEntry(key).label}
-                        </span>
-                      ))}
-                    </div>
+                  <td style={{ minWidth: 260 }}>
+                    <StatusSubset column={column} />
                   </td>
                   <td>
                     <button
@@ -295,7 +427,7 @@ export default function ConfigurePage() {
             }}
           >
             A new column starts blank on every module, taking Not Loaded / Loaded and counting toward
-            prod.
+            prod. Change any of that here — cells already filled in keep what they hold.
           </span>
         </form>
       </Blueprint>
