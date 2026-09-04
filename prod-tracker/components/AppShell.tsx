@@ -37,10 +37,12 @@ function tabsFor(snapshot: Snapshot): { label: string; href: string; match: stri
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { snapshot, pending, error, clearError, notice, setNotice, apply, signOut } = useTracker();
+  const { snapshot, pending, error, clearError, notice, setNotice, apply, can, signOut } =
+    useTracker();
   const pathname = usePathname();
   const router = useRouter();
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [newProjectKey, setNewProjectKey] = useState('');
 
   const tabs = tabsFor(snapshot);
   const isActive = (match: string) =>
@@ -51,6 +53,19 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (projectId === snapshot.project.id) return;
     await apply(null, () => send<Snapshot>('/api/v1/projects/select', 'POST', { project_id: projectId }));
     router.push('/');
+  }
+
+  /** A new project has no columns, so the only useful place to land is Configure. */
+  async function createProject() {
+    const key = newProjectKey.trim();
+    if (!key) return;
+    const meta = await apply(null, () => send<Snapshot>('/api/v1/projects', 'POST', { key }));
+    if (meta) {
+      setNewProjectKey('');
+      setSwitcherOpen(false);
+      setNotice(`${key} created. It has no deliverable columns yet — set them up here.`);
+      router.push('/configure');
+    }
   }
 
   return (
@@ -175,6 +190,33 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </span>
               </button>
             ))}
+            {can('project.create') ? (
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void createProject();
+                }}
+                style={{
+                  display: 'flex',
+                  gap: 'var(--space-2)',
+                  padding: 'var(--space-3) var(--space-4)',
+                  borderBottom: '1px solid var(--color-divider)',
+                }}
+              >
+                <input
+                  className="input"
+                  style={{ flex: 1, minWidth: 0 }}
+                  value={newProjectKey}
+                  onChange={(event) => setNewProjectKey(event.target.value.toUpperCase())}
+                  placeholder="NEW_PROJECT_KEY"
+                  aria-label="New project key"
+                />
+                <button type="submit" className="btn btn-secondary" style={{ flex: 'none' }}>
+                  Create
+                </button>
+              </form>
+            ) : null}
+
             <div
               style={{
                 display: 'flex',

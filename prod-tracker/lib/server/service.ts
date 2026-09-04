@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type {
+  AuditScope,
   Cell,
   DefectPhase,
   DefectSeverity,
@@ -8,8 +9,10 @@ import type {
   DriftVerdict,
   Module,
   ProjectConfig,
+  Role,
+  Subactivity,
 } from '../shared/domain';
-import { DEFECT_STATUS_ORDER } from '../shared/domain';
+import { DEFECT_STATUS_ORDER, projectKeySchema } from '../shared/domain';
 import {
   hasPermission,
   isPermissionKey,
@@ -33,12 +36,13 @@ import type {
   DefectView,
   DriftRowView,
   LibraryView,
+  MemberView,
   ModuleView,
   Snapshot,
   SubactivityView,
 } from '../shared/views';
 import type { Actor } from './auth';
-import { badRequest, forbidden, notFound, validationFailed } from './errors';
+import { badRequest, conflict, forbidden, notFound, validationFailed } from './errors';
 import { mutate, nowIso, type StoreData } from './store';
 
 /**
@@ -85,6 +89,36 @@ function require_(access: Access, key: PermissionKey, what: string): void {
   }
 }
 
+/**
+ * Records a change. Every mutation that alters what the matrix shows goes through here:
+ * a deliverable status is only part of the record, and "who created this module" or "who
+ * dropped that column" are questions a release manager has to answer months later.
+ */
+function record(
+  store: StoreData,
+  projectId: string,
+  actor: Actor,
+  entry: {
+    scope: AuditScope;
+    label: string;
+    what: string;
+    moduleId?: string | null;
+    subactivityId?: string | null;
+  },
+): void {
+  store.audit.push({
+    id: randomUUID(),
+    project_id: projectId,
+    module_id: entry.moduleId ?? null,
+    subactivity_id: entry.subactivityId ?? null,
+    scope: entry.scope,
+    label: entry.label,
+    what: entry.what,
+    who: actor.displayName,
+    at: nowIso(),
+  });
+}
+
 /** The default project a user lands on: the first they can see. */
 export function defaultProjectId(store: StoreData, actor: Actor): string {
   const configured = store.projects.find(
@@ -109,6 +143,30 @@ function columnsFor(store: StoreData, projectId: string): DeliverableColumn[] {
   return store.columns
     .filter((column) => column.project_id === projectId)
     .sort((a, b) => a.order_index - b.order_index);
+}
+
+/**
+ * Cells holding a status their column no longer allows. Editing a column's vocabulary
+ * leaves filled-in cells alone rather than rewriting them, so this is how the Configure
+ * screen tells someone what they left behind. Blanks are never counted — a blank is not
+ * a status, so it cannot be off-vocabulary.
+ */
+function offVocabularyCount(
+  store: StoreData,
+  projectId: string,
+  column: DeliverableColumn,
+): number {
+  const modules = new Set(
+    store.modules.filter((module) => module.project_id === projectId).map((module) => module.id),
+  );
+  const allowed = new Set(column.allowed);
+  return store.cells.filter(
+    (cell) =>
+      cell.column_key === column.key &&
+      modules.has(cell.module_id) &&
+      cell.status !== BLANK &&
+      !allowed.has(cell.status),
+  ).length;
 }
 
 function cellKey(moduleId: string, subactivityId: string | null, columnKey: string): string {
@@ -252,13 +310,15 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
     return module ? `${module.node_type} · ${module.name}` : '—';
   };
 
-  const audit: AuditView[] = store.cell_audit
+  const audit: AuditView[] = store.audit
     .filter((entry) => entry.project_id === projectId)
     .sort((a, b) => (a.at < b.at ? 1 : -1))
     .map((entry) => ({
       id: entry.id,
+      scope: entry.scope,
       module_id: entry.module_id,
-      column_label: entry.column_label,
+      module_label: entry.module_id ? moduleLabel(entry.module_id) : '—',
+      label: entry.label,
       what: entry.what,
       who: entry.who,
       at: entry.at,
@@ -319,6 +379,41 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
       };
     });
 
+  /**
+   * Who can see the project currently open — the per-project memberships plus the
+   * organisation-wide ones, which apply everywhere and are therefore listed but not
+   * editable from here.
+   */
+  const members: MemberView[] = store.memberships
+    .filter(
+      (membership) =>
+        membership.tenant_id === actor.tenantId &&
+        (membership.project_id === projectId || membership.project_id === null),
+    )
+    .map((membership) => {
+      const user = store.users.find((candidate) => candidate.id === membership.user_id);
+      const role = roleById.get(membership.role_id);
+      const orgWide = membership.project_id === null;
+      const self = membership.user_id === actor.userId;
+      return {
+        membership_id: membership.id,
+        user_id: membership.user_id,
+        display_name: user?.display_name ?? 'unknown user',
+        email: user?.email ?? '',
+        role_id: membership.role_id,
+        role_name: role?.name ?? '—',
+        org_wide: orgWide,
+        status: user?.status ?? 'unknown',
+        editable: !orgWide && !self,
+        locked_reason: orgWide
+          ? 'Organisation-wide access — change it on the Access screen'
+          : self
+            ? 'You cannot change your own access'
+            : '',
+      };
+    })
+    .sort((a, b) => a.display_name.localeCompare(b.display_name));
+
   const invitations = store.invitations
     .filter((invitation) => invitation.tenant_id === actor.tenantId)
     .sort((a, b) => (a.invited_at < b.invited_at ? 1 : -1))
@@ -367,7 +462,10 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
         module_count: store.modules.filter((module) => module.project_id === candidate.id).length,
       })),
     config: {
-      columns,
+      columns: columns.map((column) => ({
+        ...column,
+        off_vocabulary: offVocabularyCount(store, projectId, column),
+      })),
       node_types: config.node_types,
       stages: config.stages,
       owners: config.owners,
@@ -388,6 +486,7 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
         permissions: role.permissions,
       })),
     users,
+    members,
     invitations,
     drift: {
       rows: driftRows,
@@ -495,16 +594,12 @@ export async function advanceCell(
       });
     }
 
-    store.cell_audit.push({
-      id: randomUUID(),
-      project_id: projectId,
-      module_id: module.id,
-      subactivity_id: input.subactivityId,
-      column_key: column.key,
-      column_label: column.label,
+    record(store, projectId, actor, {
+      scope: 'cell',
+      label: column.label,
       what: `${statusEntry(current).label} → ${statusEntry(next).label}`,
-      who: actor.displayName,
-      at,
+      moduleId: module.id,
+      subactivityId: input.subactivityId,
     });
   });
 }
@@ -558,11 +653,25 @@ export async function setModuleFields(
 
     if (input.owner !== undefined) {
       require_(access, 'module.edit', 'change the owner');
+      const before = module.owner ?? 'unassigned';
       module.owner = input.owner || null;
+      record(store, projectId, actor, {
+        scope: 'module',
+        label: 'MODULE',
+        what: `owner ${before} → ${module.owner ?? 'unassigned'}`,
+        moduleId: module.id,
+      });
     }
     if (input.fniTargetDate !== undefined) {
       require_(access, 'fni.date', 'set the FNI target date');
+      const before = module.fni_target_date ?? 'not set';
       module.fni_target_date = input.fniTargetDate || null;
+      record(store, projectId, actor, {
+        scope: 'module',
+        label: 'MODULE',
+        what: `FNI target date ${before} → ${module.fni_target_date ?? 'not set'}`,
+        moduleId: module.id,
+      });
     }
   });
 }
@@ -594,6 +703,13 @@ export async function signOffFni(
       module.fni_closed_at = null;
       module.fni_closed_by = null;
     }
+
+    record(store, projectId, actor, {
+      scope: 'module',
+      label: 'FNI',
+      what: close ? 'FNI signed off — module closed' : 'module reopened',
+      moduleId: module.id,
+    });
   });
 }
 
@@ -649,22 +765,309 @@ export async function confirmLoadedInProd(
           });
         }
 
-        store.cell_audit.push({
-          id: randomUUID(),
-          project_id: projectId,
-          module_id: module.id,
-          subactivity_id: target,
-          column_key: column.key,
-          column_label: column.label,
+        record(store, projectId, actor, {
+          scope: 'cell',
+          label: column.label,
           what: `${statusEntry(current).label} → ${statusEntry(done).label} (prod confirmation)`,
-          who: actor.displayName,
-          at,
+          moduleId: module.id,
+          subactivityId: target,
         });
         changed++;
       }
     }
 
     return { changed };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Modules
+// ---------------------------------------------------------------------------
+
+/** Every cell blank, so a new module's gaps are conspicuous from the moment it exists. */
+function fillBlankCells(store: StoreData, moduleId: string, projectId: string, target: string | null): void {
+  for (const column of columnsFor(store, projectId)) {
+    store.cells.push({
+      module_id: moduleId,
+      subactivity_id: target,
+      column_key: column.key,
+      status: BLANK,
+      changed_by: null,
+      changed_at: null,
+    });
+  }
+}
+
+/**
+ * Creates a module directly, for the activity that is not in the library. The normal
+ * path is still cloning — `addToLibrary` is how a genuinely reusable one gets catalogued
+ * at the moment it is created, rather than every project one-off polluting the library.
+ */
+export async function createModule(
+  actor: Actor,
+  projectId: string,
+  input: { nodeType: string; name: string; addToLibrary: boolean },
+): Promise<{ moduleId: string }> {
+  return mutate((store) => {
+    const access = resolveAccess(store, actor, projectId);
+    require_(access, 'module.create', 'create a module');
+
+    const nodeType = input.nodeType.trim();
+    const name = input.name.trim();
+    if (!nodeType) throw validationFailed('A module needs a node type.');
+    if (!name) throw validationFailed('A module needs an activity name.');
+
+    const config = configFor(store, projectId);
+    if (!config.node_types.includes(nodeType)) {
+      throw validationFailed(
+        `${nodeType} is not a node type on this project. Add it on the Configure screen first.`,
+      );
+    }
+
+    // The node type and the activity name together are the module's identity: the same
+    // activity on two node types is two modules, tracked separately.
+    const duplicate = store.modules.some(
+      (module) =>
+        module.project_id === projectId && module.node_type === nodeType && module.name === name,
+    );
+    if (duplicate) {
+      throw conflict(`${nodeType} · ${name} is already tracked on this project.`);
+    }
+
+    const moduleId = randomUUID();
+    store.modules.push({
+      id: moduleId,
+      project_id: projectId,
+      node_type: nodeType,
+      name,
+      library_entry_id: null,
+      owner: null,
+      fni_target_date: null,
+      fni_closed_at: null,
+      fni_closed_by: null,
+      created_at: nowIso(),
+    });
+    fillBlankCells(store, moduleId, projectId, null);
+    record(store, projectId, actor, {
+      scope: 'module',
+      label: 'MODULE',
+      what: `created ${nodeType} · ${name}${input.addToLibrary ? ', added to the library' : ''}`,
+      moduleId,
+    });
+
+    if (input.addToLibrary) {
+      const existing = store.library.find(
+        (entry) =>
+          entry.tenant_id === actor.tenantId &&
+          entry.node_type === nodeType &&
+          entry.name === name,
+      );
+      if (existing) {
+        existing.used_in_projects += 1;
+        store.modules.find((module) => module.id === moduleId)!.library_entry_id = existing.id;
+      } else {
+        const entryId = randomUUID();
+        store.library.push({
+          id: entryId,
+          tenant_id: actor.tenantId,
+          node_type: nodeType,
+          name,
+          version: 'v1',
+          subactivity_names: [],
+          used_in_projects: 1,
+        });
+        store.modules.find((module) => module.id === moduleId)!.library_entry_id = entryId;
+      }
+    }
+
+    return { moduleId };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Subactivities
+// ---------------------------------------------------------------------------
+
+function subactivitiesOf(store: StoreData, moduleId: string): Subactivity[] {
+  return store.subactivities
+    .filter((subactivity) => subactivity.module_id === moduleId)
+    .sort((a, b) => a.order_index - b.order_index);
+}
+
+/**
+ * Adding a subactivity turns the module's row from directly editable into a roll-up.
+ *
+ * The first one inherits the module's own cells rather than starting blank: the row
+ * already recorded real work, and stranding it would make the module read as untouched
+ * the moment somebody broke it into parts. Removing the last one reverses this.
+ */
+export async function addSubactivity(
+  actor: Actor,
+  projectId: string,
+  moduleId: string,
+  name: string,
+): Promise<{ subactivityId: string }> {
+  return mutate((store) => {
+    const access = resolveAccess(store, actor, projectId);
+    require_(access, 'module.edit', 'add a subactivity');
+
+    const module = findModule(store, projectId, moduleId);
+    if (module.fni_closed_at) {
+      throw badRequest('This module is closed. Reopen it before changing its subactivities.');
+    }
+
+    const label = name.trim();
+    if (!label) throw validationFailed('A subactivity needs a name.');
+
+    const existing = subactivitiesOf(store, moduleId);
+    if (existing.some((subactivity) => subactivity.name === label)) {
+      throw conflict(`This module already has a subactivity called ${label}.`);
+    }
+
+    const subactivityId = randomUUID();
+    store.subactivities.push({
+      id: subactivityId,
+      module_id: moduleId,
+      name: label,
+      order_index: existing.length,
+    });
+
+    if (existing.length === 0) {
+      // Carry the module's own row down onto the first subactivity, then drop it — the
+      // module's cells are derived from here on.
+      const ownCells = store.cells.filter(
+        (cell) => cell.module_id === moduleId && cell.subactivity_id === null,
+      );
+      for (const cell of ownCells) cell.subactivity_id = subactivityId;
+    } else {
+      fillBlankCells(store, moduleId, projectId, subactivityId);
+    }
+
+    record(store, projectId, actor, {
+      scope: 'module',
+      label: 'SUBACT',
+      what:
+        existing.length === 0
+          ? `added subactivity ${label} — the module row is now a roll-up, carrying what it already held`
+          : `added subactivity ${label}, starting blank`,
+      moduleId,
+      subactivityId,
+    });
+
+    return { subactivityId };
+  });
+}
+
+export async function renameSubactivity(
+  actor: Actor,
+  projectId: string,
+  moduleId: string,
+  subactivityId: string,
+  name: string,
+): Promise<void> {
+  await mutate((store) => {
+    const access = resolveAccess(store, actor, projectId);
+    require_(access, 'module.edit', 'rename a subactivity');
+    findModule(store, projectId, moduleId);
+
+    const label = name.trim();
+    if (!label) throw validationFailed('A subactivity needs a name.');
+
+    const subactivity = store.subactivities.find(
+      (candidate) => candidate.id === subactivityId && candidate.module_id === moduleId,
+    );
+    if (!subactivity) throw notFound('That subactivity is not on this module.');
+
+    // A rename changes no status, so it is allowed even on a closed module.
+    const before = subactivity.name;
+    subactivity.name = label;
+    record(store, projectId, actor, {
+      scope: 'module',
+      label: 'SUBACT',
+      what: `renamed subactivity ${before} → ${label}`,
+      moduleId,
+      subactivityId,
+    });
+  });
+}
+
+/**
+ * Removing the last subactivity hands the module its row back. The cells are
+ * materialised from the roll-up as it stood a moment before, so the row shows what the
+ * module was already showing rather than resetting to blank.
+ */
+export async function removeSubactivity(
+  actor: Actor,
+  projectId: string,
+  moduleId: string,
+  subactivityId: string,
+): Promise<void> {
+  await mutate((store) => {
+    const access = resolveAccess(store, actor, projectId);
+    require_(access, 'module.edit', 'remove a subactivity');
+
+    const module = findModule(store, projectId, moduleId);
+    if (module.fni_closed_at) {
+      throw badRequest('This module is closed. Reopen it before changing its subactivities.');
+    }
+
+    const existing = subactivitiesOf(store, moduleId);
+    const going = existing.find((subactivity) => subactivity.id === subactivityId);
+    if (!going) throw notFound('That subactivity is not on this module.');
+
+    const columns = columnsFor(store, projectId);
+    const index = indexCells(store.cells);
+    const lastOne = existing.length === 1;
+
+    // Capture the roll-up before anything is deleted.
+    const rolledUp = new Map<string, string>();
+    if (lastOne) {
+      for (const column of columns) {
+        rolledUp.set(
+          column.key,
+          rollUp(
+            existing.map(
+              (subactivity) =>
+                index.get(cellKey(moduleId, subactivity.id, column.key))?.status ?? BLANK,
+            ),
+          ),
+        );
+      }
+    }
+
+    store.subactivities = store.subactivities.filter(
+      (candidate) => candidate.id !== subactivityId,
+    );
+    store.cells = store.cells.filter(
+      (cell) => !(cell.module_id === moduleId && cell.subactivity_id === subactivityId),
+    );
+
+    if (lastOne) {
+      const at = nowIso();
+      for (const column of columns) {
+        store.cells.push({
+          module_id: moduleId,
+          subactivity_id: null,
+          column_key: column.key,
+          status: rolledUp.get(column.key) ?? BLANK,
+          changed_by: actor.displayName,
+          changed_at: at,
+        });
+      }
+    } else {
+      subactivitiesOf(store, moduleId).forEach((subactivity, position) => {
+        subactivity.order_index = position;
+      });
+    }
+
+    record(store, projectId, actor, {
+      scope: 'module',
+      label: 'SUBACT',
+      what: lastOne
+        ? `removed the last subactivity ${going.name} — the module row is directly tracked again, keeping what it showed`
+        : `removed subactivity ${going.name} and its deliverable row`,
+      moduleId,
+    });
   });
 }
 
@@ -721,12 +1124,64 @@ export async function transitionDefect(
     );
     if (!defect) throw notFound('That defect does not exist.');
 
+    const before = defect.status;
     if (status) {
       defect.status = status;
     } else {
       const index = DEFECT_STATUS_ORDER.indexOf(defect.status);
       defect.status = DEFECT_STATUS_ORDER[(index + 1) % DEFECT_STATUS_ORDER.length] as DefectStatus;
     }
+
+    record(store, projectId, actor, {
+      scope: 'module',
+      label: 'DEFECT',
+      what: `${defect.ticket_key || 'defect'} ${before} → ${defect.status}`,
+      moduleId: defect.module_id,
+    });
+  });
+}
+
+/**
+ * Assigns a defect to one of the project's configured owners. `null` unassigns. The
+ * owner list is project configuration, so this stays generic — another project assigns
+ * to its own people without a code change.
+ */
+export async function assignDefect(
+  actor: Actor,
+  projectId: string,
+  defectId: string,
+  assignee: string | null,
+): Promise<void> {
+  await mutate((store) => {
+    const access = resolveAccess(store, actor, projectId);
+    require_(access, 'defect.assign', 'assign a defect');
+
+    const defect = store.defects.find(
+      (candidate) => candidate.id === defectId && candidate.project_id === projectId,
+    );
+    if (!defect) throw notFound('That defect does not exist.');
+
+    const before = defect.assignee ?? 'unassigned';
+
+    if (assignee === null) {
+      defect.assignee = null;
+    } else {
+      const owner = assignee.trim();
+      const owners = configFor(store, projectId).owners;
+      if (!owners.includes(owner)) {
+        throw validationFailed(
+          `${owner} is not an owner on this project. Add them on the Configure screen first.`,
+        );
+      }
+      defect.assignee = owner;
+    }
+
+    record(store, projectId, actor, {
+      scope: 'module',
+      label: 'DEFECT',
+      what: `${defect.ticket_key || 'defect'} assigned ${before} → ${defect.assignee ?? 'unassigned'}`,
+      moduleId: defect.module_id,
+    });
   });
 }
 
@@ -771,6 +1226,70 @@ export async function removeLink(actor: Actor, projectId: string, linkId: string
 }
 
 // ---------------------------------------------------------------------------
+// Projects
+// ---------------------------------------------------------------------------
+
+/**
+ * Stands up a second project in the same organisation. It starts with no columns, no
+ * node types and no stages — deliberately: the whole claim of the app is that a team
+ * defines its own process on the Configure screen rather than inheriting this one's.
+ *
+ * No membership row is created. `project.create` is an organisation-level permission, so
+ * whoever holds it holds it org-wide (`project_id: null`), which already covers every
+ * project including this one.
+ */
+export async function createProject(
+  actor: Actor,
+  currentProjectId: string,
+  input: { key: string; name: string; description: string },
+): Promise<{ projectId: string }> {
+  return mutate((store) => {
+    const access = resolveAccess(store, actor, currentProjectId);
+    require_(access, 'project.create', 'create a project');
+
+    const key = input.key.trim().toUpperCase();
+    const parsed = projectKeySchema.safeParse(key);
+    if (!parsed.success) {
+      throw validationFailed(
+        'A project key is uppercase letters, digits and underscores, starting with a letter — for example INVENTORY_SYNC.',
+      );
+    }
+
+    if (store.projects.some((project) => project.tenant_id === actor.tenantId && project.key === key)) {
+      throw conflict(`${key} already exists in this organisation.`);
+    }
+
+    const projectId = randomUUID();
+    store.projects.push({
+      id: projectId,
+      tenant_id: actor.tenantId,
+      key,
+      name: input.name.trim() || key,
+      description: input.description.trim(),
+      configured: false,
+      archived: false,
+      created_at: nowIso(),
+    });
+    store.project_config.push({
+      project_id: projectId,
+      node_types: [],
+      stages: [],
+      owners: [],
+      link_types: [],
+    });
+
+    // Recorded against the new project, which is where someone would look for it.
+    record(store, projectId, actor, {
+      scope: 'project',
+      label: 'PROJECT',
+      what: `created the project ${key}`,
+    });
+
+    return { projectId };
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Project configuration
 // ---------------------------------------------------------------------------
 
@@ -802,6 +1321,17 @@ export async function addColumn(
       counts: true,
       order_index: columns.length,
     });
+
+    // A project with columns has been stood up; that is what `configured` means, and it
+    // is what stops the screens showing the set-up prompt.
+    const project = store.projects.find((candidate) => candidate.id === projectId);
+    if (project && !project.configured) project.configured = true;
+
+    record(store, projectId, actor, {
+      scope: 'project',
+      label: 'CONFIG',
+      what: `added the deliverable column ${full}`,
+    });
   });
 }
 
@@ -815,6 +1345,12 @@ export async function removeColumn(actor: Actor, projectId: string, columnKey: s
     );
     if (index < 0) throw notFound('That column is not configured on this project.');
 
+    const going = store.columns[index] as DeliverableColumn;
+    record(store, projectId, actor, {
+      scope: 'project',
+      label: 'CONFIG',
+      what: `removed the deliverable column ${going.full}, and every cell in it`,
+    });
     store.columns.splice(index, 1);
     // The cells go with it: a column that is not configured has no meaning, and
     // leaving orphans behind would quietly resurrect them if the name were reused.
@@ -834,7 +1370,106 @@ export async function setColumnCounts(
   await mutate((store) => {
     const access = resolveAccess(store, actor, projectId);
     require_(access, 'project.config', 'change whether a column counts toward prod');
-    findColumn(store, projectId, columnKey).counts = counts;
+    const column = findColumn(store, projectId, columnKey);
+    column.counts = counts;
+    record(store, projectId, actor, {
+      scope: 'project',
+      label: 'CONFIG',
+      what: `${column.label} now ${counts ? 'counts toward prod' : 'is informational only'}`,
+    });
+  });
+}
+
+/**
+ * Sets the subset of the shared vocabulary a column may take.
+ *
+ * Cells already holding a status that is no longer in the subset are **left exactly as
+ * they are**. Rewriting them would be a lie: the record says a deliverable was loaded in
+ * prod, and a configuration change is not evidence that it was not. They keep their own
+ * tone, still count toward readiness if that tone is done, and are counted by
+ * `offVocabularyCount` so Configure can report them. The next person to click such a
+ * cell moves it into the new subset, because `nextStatus` starts the cycle over when the
+ * current status is not in the list.
+ */
+export async function setColumnStatuses(
+  actor: Actor,
+  projectId: string,
+  columnKey: string,
+  allowed: readonly string[],
+): Promise<void> {
+  await mutate((store) => {
+    const access = resolveAccess(store, actor, projectId);
+    require_(access, 'project.config', 'change the statuses a column can take');
+
+    const unknown = allowed.filter((key) => !isStatusKey(key));
+    if (unknown.length > 0) {
+      throw validationFailed(
+        `Not a status in the shared vocabulary: ${unknown.join(', ')}. A column picks from the vocabulary rather than defining its own.`,
+      );
+    }
+
+    // Order is meaningful — it is the order clicking a cell advances through.
+    const deduped = [...new Set(allowed)];
+    if (deduped.length === 0) {
+      throw validationFailed('A column needs at least one status it can take.');
+    }
+
+    const column = findColumn(store, projectId, columnKey);
+    const before = column.allowed.map((key) => statusEntry(key).label).join(', ');
+    column.allowed = deduped;
+
+    const stranded = offVocabularyCount(store, projectId, column);
+    record(store, projectId, actor, {
+      scope: 'project',
+      label: 'CONFIG',
+      what:
+        `${column.label} statuses ${before} → ${deduped.map((key) => statusEntry(key).label).join(', ')}` +
+        (stranded > 0
+          ? ` — ${stranded} ${stranded === 1 ? 'cell keeps a status' : 'cells keep a status'} no longer in the list`
+          : ''),
+    });
+  });
+}
+
+/**
+ * Moves a column one place left or right on the matrix. `order_index` is rewritten for
+ * the whole project so the sequence stays dense however the columns arrived.
+ */
+export async function moveColumn(
+  actor: Actor,
+  projectId: string,
+  columnKey: string,
+  direction: 'up' | 'down',
+): Promise<void> {
+  await mutate((store) => {
+    const access = resolveAccess(store, actor, projectId);
+    require_(access, 'project.config', 'reorder the deliverable columns');
+
+    const ordered = columnsFor(store, projectId);
+    const index = ordered.findIndex((column) => column.key === columnKey);
+    if (index < 0) throw notFound('That column is not configured on this project.');
+
+    const target = direction === 'up' ? index - 1 : index + 1;
+    if (target < 0 || target >= ordered.length) {
+      throw badRequest(
+        direction === 'up'
+          ? 'That column is already first.'
+          : 'That column is already last.',
+      );
+    }
+
+    const moving = ordered[index] as DeliverableColumn;
+    ordered[index] = ordered[target] as DeliverableColumn;
+    ordered[target] = moving;
+    ordered.forEach((column, position) => {
+      column.order_index = position;
+    });
+
+    record(store, projectId, actor, {
+      scope: 'project',
+      label: 'CONFIG',
+      what: `moved ${moving.label} ${direction === 'up' ? 'earlier' : 'later'} on the matrix`,
+    });
   });
 }
 
@@ -946,6 +1581,13 @@ export async function cloneFromLibrary(
       config.node_types.push(entry.node_type);
     }
 
+    record(store, projectId, actor, {
+      scope: 'module',
+      label: 'MODULE',
+      what: `cloned ${entry.node_type} · ${entry.name} ${entry.version} from the library`,
+      moduleId,
+    });
+
     return { moduleId, nodeType: entry.node_type };
   });
 }
@@ -982,6 +1624,144 @@ export async function toggleGrant(
     if (!granted && held) {
       role.permissions = role.permissions.filter((key) => key !== permission);
     }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Project members
+// ---------------------------------------------------------------------------
+
+/**
+ * Nobody may hand out a role that holds more than they do themselves. The same rule
+ * guards invitations; it lives here so adding a member cannot be used to route around it.
+ */
+function requireGrantableRole(store: StoreData, access: Access, roleId: string): Role {
+  const role = store.roles.find(
+    (candidate) => candidate.id === roleId && candidate.tenant_id === access.actor.tenantId,
+  );
+  if (!role) throw notFound('That role does not exist.');
+
+  const excess = role.permissions.filter((key) => !access.permissions.has(key));
+  if (excess.length > 0) {
+    throw forbidden(
+      `You cannot give someone ${role.name} — that role holds ${excess.join(', ')}, which you do not.`,
+    );
+  }
+  return role;
+}
+
+export async function addProjectMember(
+  actor: Actor,
+  projectId: string,
+  input: { userId: string; roleId: string },
+): Promise<void> {
+  await mutate((store) => {
+    const access = resolveAccess(store, actor, projectId);
+    require_(access, 'project.members.manage', 'add someone to this project');
+
+    const user = store.users.find(
+      (candidate) => candidate.id === input.userId && candidate.tenant_id === actor.tenantId,
+    );
+    if (!user) throw notFound('That user is not in this organisation.');
+
+    const role = requireGrantableRole(store, access, input.roleId);
+
+    const already = store.memberships.some(
+      (membership) =>
+        membership.user_id === user.id &&
+        (membership.project_id === projectId || membership.project_id === null),
+    );
+    if (already) {
+      throw conflict(`${user.display_name} already has access to this project.`);
+    }
+
+    store.memberships.push({
+      id: randomUUID(),
+      tenant_id: actor.tenantId,
+      user_id: user.id,
+      project_id: projectId,
+      role_id: role.id,
+      created_at: nowIso(),
+    });
+
+    record(store, projectId, actor, {
+      scope: 'project',
+      label: 'ACCESS',
+      what: `added ${user.display_name} as ${role.name}`,
+    });
+  });
+}
+
+export async function setMemberRole(
+  actor: Actor,
+  projectId: string,
+  membershipId: string,
+  roleId: string,
+): Promise<void> {
+  await mutate((store) => {
+    const access = resolveAccess(store, actor, projectId);
+    require_(access, 'project.members.manage', 'change what someone may do on this project');
+
+    const membership = store.memberships.find(
+      (candidate) => candidate.id === membershipId && candidate.tenant_id === actor.tenantId,
+    );
+    if (!membership) throw notFound('That membership does not exist.');
+    if (membership.project_id !== projectId) {
+      throw badRequest(
+        'That access is organisation-wide, so it cannot be changed from a project screen. Edit it on the Access screen.',
+      );
+    }
+
+    // Checked before the role is validated: changing your own access is refused whatever
+    // you are changing it to, and saying so is more use than a message about the role.
+    if (membership.user_id === actor.userId) {
+      throw badRequest('You cannot change your own access. Ask another admin to do it.');
+    }
+    const role = requireGrantableRole(store, access, roleId);
+
+    const before = store.roles.find((candidate) => candidate.id === membership.role_id)?.name ?? '—';
+    membership.role_id = role.id;
+
+    const user = store.users.find((candidate) => candidate.id === membership.user_id);
+    record(store, projectId, actor, {
+      scope: 'project',
+      label: 'ACCESS',
+      what: `${user?.display_name ?? 'a user'} ${before} → ${role.name}`,
+    });
+  });
+}
+
+export async function removeProjectMember(
+  actor: Actor,
+  projectId: string,
+  membershipId: string,
+): Promise<void> {
+  await mutate((store) => {
+    const access = resolveAccess(store, actor, projectId);
+    require_(access, 'project.members.manage', 'remove someone from this project');
+
+    const membership = store.memberships.find(
+      (candidate) => candidate.id === membershipId && candidate.tenant_id === actor.tenantId,
+    );
+    if (!membership) throw notFound('That membership does not exist.');
+    if (membership.project_id !== projectId) {
+      throw badRequest(
+        'That access is organisation-wide, so it cannot be removed from a project screen. Edit it on the Access screen.',
+      );
+    }
+    if (membership.user_id === actor.userId) {
+      throw badRequest('You cannot remove your own access. Ask another admin to do it.');
+    }
+
+    const user = store.users.find((candidate) => candidate.id === membership.user_id);
+    const role = store.roles.find((candidate) => candidate.id === membership.role_id);
+    store.memberships = store.memberships.filter((candidate) => candidate.id !== membershipId);
+
+    record(store, projectId, actor, {
+      scope: 'project',
+      label: 'ACCESS',
+      what: `removed ${user?.display_name ?? 'a user'} (${role?.name ?? '—'}) from this project`,
+    });
   });
 }
 
@@ -1059,5 +1839,3 @@ export async function inviteUser(
     return { inviteToken: invite.token, email };
   });
 }
-
-export { isStatusKey };

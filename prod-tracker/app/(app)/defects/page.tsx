@@ -40,6 +40,7 @@ export default function DefectsPage() {
 
   const canCreate = can('defect.create');
   const canTransition = can('defect.transition');
+  const canAssign = can('defect.assign');
 
   const shown = defects.filter((defect) => phaseFilter === 'All' || defect.phase === phaseFilter);
   const counts = DEFECT_STATUS_ORDER.map((status) => ({
@@ -91,6 +92,15 @@ export default function DefectsPage() {
         ),
       }),
       () => send<Snapshot>(`/api/v1/defects/${defectId}`, 'PATCH'),
+    );
+  }
+
+  /** Owners come from project configuration, so another project assigns to its own people. */
+  function assign(defectId: string, assignee: string) {
+    void apply(null, () =>
+      send<Snapshot>(`/api/v1/defects/${defectId}`, 'PATCH', {
+        assignee: assignee === 'unassigned' ? null : assignee,
+      }),
     );
   }
 
@@ -246,6 +256,7 @@ export default function DefectsPage() {
               <th>Run</th>
               <th>What happened</th>
               <th>Raised by</th>
+              <th>Assigned to</th>
               <th>Status</th>
             </tr>
           </thead>
@@ -297,6 +308,29 @@ export default function DefectsPage() {
                   {defect.raised_by}, {formatStamp(defect.created_at)}
                 </td>
                 <td>
+                  <select
+                    className="input"
+                    style={{ width: 132, padding: '2px 6px', fontSize: 12 }}
+                    value={defect.assignee ?? 'unassigned'}
+                    disabled={!canAssign}
+                    title={canAssign ? 'Assign this defect' : reasonFor('defect.assign')}
+                    aria-label={`Assignee for ${defect.ticket_key || 'this defect'}`}
+                    onChange={(event) => assign(defect.id, event.target.value)}
+                  >
+                    <option value="unassigned">unassigned</option>
+                    {config.owners.map((owner) => (
+                      <option key={owner} value={owner}>
+                        {owner}
+                      </option>
+                    ))}
+                    {/* An owner removed from the project since the defect was assigned
+                        still has to be shown, or the select would silently misreport. */}
+                    {defect.assignee && !config.owners.includes(defect.assignee) ? (
+                      <option value={defect.assignee}>{defect.assignee} (no longer an owner)</option>
+                    ) : null}
+                  </select>
+                </td>
+                <td>
                   <button
                     type="button"
                     onClick={() => cycle(defect.id)}
@@ -322,7 +356,7 @@ export default function DefectsPage() {
             ))}
             {shown.length === 0 ? (
               <tr>
-                <td colSpan={8} style={{ fontSize: 13, color: 'var(--color-neutral-600)' }}>
+                <td colSpan={9} style={{ fontSize: 13, color: 'var(--color-neutral-600)' }}>
                   No defects in this phase.
                 </td>
               </tr>

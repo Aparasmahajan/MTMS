@@ -40,15 +40,22 @@ const HIERARCHY = [
 
 export default function AccessPage() {
   const { snapshot, apply, can, reasonFor, setNotice } = useTracker();
-  const { roles, users, invitations, projects, org } = snapshot;
+  const { roles, users, members, invitations, projects, org } = snapshot;
 
   const [email, setEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [roleId, setRoleId] = useState(roles[0]?.id ?? '');
   const [scope, setScope] = useState('org');
+  const [memberUserId, setMemberUserId] = useState('');
+  const [memberRoleId, setMemberRoleId] = useState(roles[0]?.id ?? '');
 
   const canManageRoles = can('admin.roles.manage');
   const canManageUsers = can('admin.users.manage');
+  const canManageMembers = can('project.members.manage');
+
+  // Only people who cannot already reach the project — an org-wide membership covers it.
+  const alreadyHere = new Set(members.map((member) => member.user_id));
+  const addable = users.filter((user) => !alreadyHere.has(user.id));
 
   const selectedRole = roles.find((role) => role.id === roleId);
   const previewLabels = selectedRole
@@ -73,9 +80,13 @@ export default function AccessPage() {
     if (meta?.accept_url) {
       setEmail('');
       setDisplayName('');
-      // No mail transport in this release — surface the link so an admin can pass it on.
+      // The link is surfaced whatever the transport did: it is single-use and it works,
+      // and a delivery that only logged would otherwise leave the admin with nothing.
+      const link = `${window.location.origin}${meta.accept_url}`;
       setNotice(
-        `Invitation created. There is no mail transport yet, so send them this single-use link: ${window.location.origin}${meta.accept_url}`,
+        meta.delivery_state === 'sent'
+          ? `Invitation sent. ${String(meta.delivery_detail)} The link, if you need it: ${link}`
+          : `Invitation created. ${String(meta.delivery_detail)} Send them this single-use link: ${link}`,
       );
     }
   }
@@ -386,6 +397,167 @@ export default function AccessPage() {
           </table>
         </div>
       </Blueprint>
+
+      <SectionHeading first>Members of {snapshot.project.key}</SectionHeading>
+      <div style={{ marginBottom: 'var(--space-3)', fontSize: 12, color: 'var(--color-neutral-700)', textWrap: 'pretty' }}>
+        Who can open this project. Organisation-wide access applies to every project, so it is
+        listed here but changed above. Nobody can give out a role holding more than they do
+        themselves, and nobody can change their own access.
+      </div>
+
+      <div className="bordered" style={{ overflowX: 'auto', marginBottom: 'var(--space-4)' }}>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Email</th>
+              <th>Role on this project</th>
+              <th>Scope</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {members.map((member) => (
+              <tr key={member.membership_id}>
+                <td style={{ whiteSpace: 'nowrap' }}>{member.display_name}</td>
+                <td className="mono" style={{ fontSize: 12 }}>
+                  {member.email}
+                </td>
+                <td>
+                  <select
+                    className="input"
+                    style={{ width: 150, padding: '2px 6px', fontSize: 12 }}
+                    value={member.role_id}
+                    disabled={!canManageMembers || !member.editable}
+                    title={
+                      canManageMembers
+                        ? member.locked_reason || `Change what ${member.display_name} may do here`
+                        : reasonFor('project.members.manage')
+                    }
+                    aria-label={`Role for ${member.display_name}`}
+                    onChange={(event) =>
+                      void apply(null, () =>
+                        send<Snapshot>(`/api/v1/projects/members/${member.membership_id}`, 'PATCH', {
+                          role_id: event.target.value,
+                        }),
+                      )
+                    }
+                  >
+                    {roles.map((role) => (
+                      <option key={role.id} value={role.id}>
+                        {role.name}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td style={{ fontSize: 12, color: 'var(--color-neutral-700)' }}>
+                  {member.org_wide ? `${org.name} — all projects` : snapshot.project.key}
+                </td>
+                <td>
+                  <button
+                    type="button"
+                    disabled={!canManageMembers || !member.editable}
+                    title={
+                      canManageMembers
+                        ? member.locked_reason || `Remove ${member.display_name} from this project`
+                        : reasonFor('project.members.manage')
+                    }
+                    onClick={() =>
+                      void apply(null, () =>
+                        send<Snapshot>(
+                          `/api/v1/projects/members/${member.membership_id}`,
+                          'DELETE',
+                        ),
+                      )
+                    }
+                    style={{
+                      fontSize: 12,
+                      color: 'var(--color-neutral-600)',
+                      border: 0,
+                      background: 'transparent',
+                      cursor: canManageMembers && member.editable ? 'pointer' : 'not-allowed',
+                    }}
+                  >
+                    remove
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {members.length === 0 ? (
+              <tr>
+                <td colSpan={5} style={{ fontSize: 13, color: 'var(--color-neutral-600)' }}>
+                  Nobody has access to this project yet.
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!memberUserId) return;
+          void apply(null, () =>
+            send<Snapshot>('/api/v1/projects/members', 'POST', {
+              user_id: memberUserId,
+              role_id: memberRoleId,
+            }),
+          );
+        }}
+        style={{
+          display: 'flex',
+          gap: 'var(--space-2)',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          marginBottom: 'var(--space-8)',
+        }}
+      >
+        <select
+          className="input"
+          style={{ width: 230 }}
+          value={memberUserId}
+          onChange={(event) => setMemberUserId(event.target.value)}
+          aria-label="User to add to this project"
+        >
+          <option value="">Someone already in {org.name}…</option>
+          {addable.map((user) => (
+            <option key={user.id} value={user.id}>
+              {user.display_name} — {user.email}
+            </option>
+          ))}
+        </select>
+        <select
+          className="input"
+          style={{ width: 150 }}
+          value={memberRoleId}
+          onChange={(event) => setMemberRoleId(event.target.value)}
+          aria-label="Role for the new member"
+        >
+          {roles.map((role) => (
+            <option key={role.id} value={role.id}>
+              {role.name}
+            </option>
+          ))}
+        </select>
+        <button
+          type="submit"
+          className="btn btn-secondary"
+          disabled={!canManageMembers || addable.length === 0}
+          title={
+            canManageMembers
+              ? addable.length === 0
+                ? 'Everyone in the organisation already has access to this project'
+                : undefined
+              : reasonFor('project.members.manage')
+          }
+        >
+          Add to project
+        </button>
+        <span style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>
+          Someone not in {org.name} yet is invited above instead.
+        </span>
+      </form>
 
       <SectionHeading first>Users in this organisation</SectionHeading>
       <div className="bordered" style={{ overflowX: 'auto' }}>
