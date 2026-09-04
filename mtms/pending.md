@@ -1,8 +1,8 @@
 # Pending — MTMS (Mahajan Ticket Management System)
 
-**Handoff document.** Written to be read cold, with no prior conversation. Parts 1–3 are
-built, run and are verified; Part 4 is all but two items; the rename to MTMS and the static
-client demo are done. Parts 5–6 are not started.
+**Handoff document.** Written to be read cold, with no prior conversation. Parts 1–3 and 5
+are built, run and verified; Part 4 is all but two items; the rename to MTMS and the static
+client demo are done. Part 6 is not started.
 
 The part numbers are stable identifiers — a finished part keeps its number, so that every
 cross-reference in this file and in the code comments keeps resolving.
@@ -24,7 +24,7 @@ cross-reference in this file and in the code comments keeps resolving.
 cd tracker/mtms
 npm install
 npm run dev          # http://localhost:3100
-npm test             # 141 tests — run this before and after any change to the rules
+npm test             # 169 tests — run this before and after any change to the rules
 npm run build:demo   # writes demo/ — the static client demo, no server needed
 ```
 
@@ -34,16 +34,17 @@ Sign in `parmahaj@nokia.com` / `tracker` (Admin), or `k.menon@nokia.com` / `trac
 ### Where things are
 
 ```
-lib/shared/     vocabulary · permissions · domain · views   ← pure, imported by both sides
-lib/server/     store · seed · auth · api · errors · service · session · mailer · demo-snapshot
+lib/shared/     vocabulary · permissions · promotion · domain · views  ← pure, both sides
+lib/server/     store · seed · auth · api · errors · service · session · mailer · drift · demo-snapshot
 lib/client/     api · optimistic
 lib/demo/       config · runtime                            ← the static demo's stand-in server
-lib/**/__tests__/   vocabulary · service · columns · modules · projects · audit · api
+lib/**/__tests__/   vocabulary · service · columns · modules · projects · audit · drift · api
                     plus harness.ts   ← npm test
 components/     AppShell · TrackerProvider · primitives · screens/ModuleScreen
 app/(app)/      page(dashboard) matrix defects pipeline modules/[id] library access audit drift configure
-app/api/v1/     25 route handlers
+app/api/v1/     27 route handlers
 scripts/        build-demo.mjs
+agent/          report_hashes.py    ← runs on each environment, py2.6+ and py3
 ```
 
 ---
@@ -102,7 +103,7 @@ These are not style preferences; each one is load-bearing.
 - **The session cookie is `Secure` in production**, so `next start` over plain HTTP will
   not keep a browser session. Use `npm run dev` locally.
 - **Delete `data/tracker.json` to reseed.** Bumping `STORE_VERSION` in `lib/server/store.ts`
-  forces the same thing on next start. It is at **2** — `cell_audit` became `audit`.
+  forces the same thing on next start. It is at **3** — drift became reported observations.
 - **Every mutation that changes what the matrix shows must call `record()`** in
   `lib/server/service.ts`. A change nobody can attribute is the failure this app exists to
   fix, and `/audit` is only as good as the calls into it.
@@ -195,29 +196,46 @@ the screen, twice. Confirm before touching it.
 
 ---
 
-# Part 5 — The Drift agent
+# Part 5 — The Drift agent · **done**
 
-The Drift screen renders and derives its verdicts correctly from the hashes it holds — but
-those hashes are seeded. Nothing reports them. This is the largest genuinely new moving
-part and the design bundle rightly puts it last.
+28 tests, 2 routes, and `agent/report_hashes.py`. See [completed.md](completed.md) for the
+detail and the end-to-end verification.
 
-**Read `../NEI_CONTEXT.md` before starting.** The agent must respect the platform as it is:
+What matters before you touch it:
 
-- **Java 8 and Python 2** on the servers. Not a typo, and not negotiable.
-- **`.packinglist` is the source of truth** for what actually deploys.
-- **Strict YAML binding** against the compiled bean.
-- **~96 KB inline transport ceiling** — anything larger goes over SFTP.
-- **Identity is content hash, never path.** The same file exists in many places with
-  different contents; compiled artifacts go stale against source; the deployed copy drifts
-  from the repo copy. A run must reference the exact hashes that executed.
+- **Identity is `content_hash`, never `path`.** Nothing may key on a path. A deliverable
+  made of several files uses a composite hash over the sorted `path\0hash` pairs.
+- **Promotion writes no observation on the target.** It records intent; only an agent
+  report from prod confirms it. Do not "helpfully" copy the hashes forward — that makes the
+  screen agree with itself and with nothing else.
+- **A gate check that cannot be evaluated reads as closed, not unknown.** Promotion puts
+  bytes on production; "we could not tell" is not a reason to let it through.
+- **Absence of data must never render as agreement.** There is a test for exactly this
+  (`never reads as In step on the strength of a missing prod hash`). Keep it.
+- **The agent never sends file content**, and excludes `mds.rc*` and
+  `nemo_parameters.properties`. Those hold plaintext CMM/M2M/repo passwords. An ingest that
+  accepted content would pull them into the store and onto a screen.
 
-Work:
+### Still open in this area
 
-- An ingest endpoint that upserts `DriftRow` per environment (repo / lab / preprod / prod).
-- Derive the warnings instead of seeding them. `driftVerdict()` in `lib/server/service.ts`
-  already derives the verdict; the four warnings are still fixtures in `lib/server/seed.ts`.
-- Make the promotion gate real. It currently computes two of its four checks from live data
-  (lowest module readiness, hash mismatch count) and hard-codes the other two as "pending".
+- [ ] **`agent/report_hashes.py`'s `RULES` table is project-specific.** It maps a file on
+      disk to a deliverable column, and it is the one place that knows that mapping. A
+      second project needs its own table, or the mapping needs to move into project
+      configuration and be fetched by the agent.
+- [ ] **Nothing schedules the agent.** It is a script; it needs a cron entry or a hook in
+      the deploy, per environment.
+- [ ] **The `.packinglist` parser assumes the source path is the first whitespace-separated
+      field.** That matched the observed file; confirm against the real one before relying
+      on `in_packinglist` in anger.
+- [ ] **`Run → Deployment` is still not built** — and `NEI_CONTEXT.md` §7.5 calls it "the
+      join that matters and does not exist today". A run records `CHILD_REQ_ID` and phases,
+      but nothing ties it to the exact hashes that executed. Drift now knows what is on each
+      environment; runs still cannot say which of those they ran against. This is the
+      single most valuable thing left in the whole plan.
+- [ ] **Artifacts are not per-attempt** (§7.6). Run directories are reused across re-runs,
+      so artifacts from different executions can mix in one tree.
+- [ ] **The CIQ is not modelled** (§6). Nothing consumes `nodeGroups → configSequences →
+      tables → records`, and the schema varies more than the CFX shape suggests.
 
 ---
 

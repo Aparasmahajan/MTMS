@@ -305,36 +305,117 @@ export type Run = z.infer<typeof Run>;
 // Drift
 // ---------------------------------------------------------------------------
 
-export const DriftVerdict = z.enum(['In step', 'Prod behind', 'Patched in place', 'Never verified']);
+export const DriftVerdict = z.enum([
+  'In step',
+  'Prod behind',
+  'Patched in place',
+  'Never verified',
+  'Not deployed',
+]);
 export type DriftVerdict = z.infer<typeof DriftVerdict>;
 
+export const DriftEnvironment = z.enum(['repo', 'lab', 'preprod', 'prod']);
+export type DriftEnvironment = z.infer<typeof DriftEnvironment>;
+
+export const DRIFT_ENVIRONMENTS: DriftEnvironment[] = ['repo', 'lab', 'preprod', 'prod'];
+
 /**
- * Identity is content hash, never path — the same file exists in many places with
- * different contents. Hashes are reported by an environment agent; the tracker only
- * compares them.
+ * The four independently-changing layers inside one NEI package. They ship together and
+ * drift apart: YAML changes very often and fails loudly at parse, Java changes rarely and
+ * fails obscurely at runtime, config changes rarely and fails silently or never.
+ * Treating the package as one versioned blob misses the failures that actually happen.
  */
-export const DriftRow = z.object({
-  id: uuid,
+export const DriftLayer = z.enum(['java', 'python', 'yaml', 'config']);
+export type DriftLayer = z.infer<typeof DriftLayer>;
+
+/** What a deliverable column is made of, so drift can be joined to the matrix. */
+export const DriftDeliverable = z.object({
   project_id: uuid,
+  /** The matrix column this maps to. */
   column_key: z.string(),
-  layer: z.string(),
+  layer: DriftLayer,
+  /** "per flavour" / "shared" / "File CR" — how widely a change here lands. */
   scope: z.string(),
   cadence: z.string(),
-  repo: z.string(),
-  lab: z.string(),
-  preprod: z.string(),
-  prod: z.string(),
 });
-export type DriftRow = z.infer<typeof DriftRow>;
+export type DriftDeliverable = z.infer<typeof DriftDeliverable>;
 
-export const DriftWarning = z.object({
+/**
+ * One file, as observed on one environment, at one moment.
+ *
+ * **Identity is `content_hash`; `path` is metadata.** The same script has been found at
+ * five paths with five different contents, and a day was lost to a bug that was already
+ * fixed — in a copy that was not the deployed one. Nothing here may key on a path.
+ *
+ * Observations are only ever *reported*, never inferred: the tracker compares hashes, it
+ * does not decide what is on a server.
+ */
+export const DriftObservation = z.object({
   id: uuid,
   project_id: uuid,
-  severity: DefectSeverity,
-  text: z.string(),
-  where: z.string(),
+  environment: DriftEnvironment,
+  column_key: z.string(),
+  layer: DriftLayer,
+  /** Where the agent found it. Metadata — never identity. */
+  path: z.string(),
+  /** Lowercase hex sha256 of the file's bytes. */
+  content_hash: z.string().regex(/^[0-9a-f]{64}$/, 'Expected a lowercase hex sha256'),
+  size_bytes: z.number().int().nonnegative().default(0),
+  /**
+   * Compiled artifacts only. SnakeYAML binds against the compiled bean, so a `.class`
+   * older than its source is a first-class fault, not a curiosity.
+   */
+  built_at: isoDateTime.nullable().default(null),
+  source_modified_at: isoDateTime.nullable().default(null),
+  /**
+   * `.packinglist` is the source of truth for what deploys. A file in the repo and absent
+   * from the packing list will never reach a server, however correct it is.
+   */
+  in_packinglist: z.boolean().default(true),
+  observed_at: isoDateTime,
+  reported_by: z.string(),
 });
-export type DriftWarning = z.infer<typeof DriftWarning>;
+export type DriftObservation = z.infer<typeof DriftObservation>;
+
+/** One agent submission, so "when did anyone last look at prod" is answerable. */
+export const DriftReport = z.object({
+  id: uuid,
+  project_id: uuid,
+  environment: DriftEnvironment,
+  agent: z.string(),
+  at: isoDateTime,
+  observation_count: z.number().int().nonnegative(),
+});
+export type DriftReport = z.infer<typeof DriftReport>;
+
+/**
+ * Promotion copies hashes; it never rebuilds. Recording one does **not** write prod
+ * observations — that would assert something nobody verified. It records the exact set
+ * of hashes that were promoted, and the next agent report either confirms it or does not.
+ */
+export const DriftPromotion = z.object({
+  id: uuid,
+  project_id: uuid,
+  from_environment: DriftEnvironment,
+  to_environment: DriftEnvironment,
+  /** column_key → content_hash, as it stood on the source environment. */
+  hashes: z.record(z.string()),
+  promoted_by: z.string(),
+  at: isoDateTime,
+  confirmed_at: isoDateTime.nullable().default(null),
+});
+export type DriftPromotion = z.infer<typeof DriftPromotion>;
+
+export const DriftWarningKind = z.enum([
+  'never_verified',
+  'prod_behind',
+  'patched_in_place',
+  'stale_compile',
+  'not_in_packinglist',
+  'claimed_but_drifted',
+  'stale_report',
+]);
+export type DriftWarningKind = z.infer<typeof DriftWarningKind>;
 
 // ---------------------------------------------------------------------------
 // Invitations

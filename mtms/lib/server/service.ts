@@ -6,13 +6,21 @@ import type {
   DefectSeverity,
   DefectStatus,
   DeliverableColumn,
-  DriftVerdict,
+  DriftEnvironment,
+  DriftLayer,
   Module,
   ProjectConfig,
   Role,
   Subactivity,
 } from '../shared/domain';
-import { DEFECT_STATUS_ORDER, projectKeySchema } from '../shared/domain';
+import { DEFECT_STATUS_ORDER, DRIFT_ENVIRONMENTS, projectKeySchema } from '../shared/domain';
+import {
+  buildPromotion,
+  confirmPromotions,
+  driftRows,
+  driftWarnings,
+  promotionGate,
+} from './drift';
 import {
   hasPermission,
   isPermissionKey,
@@ -181,12 +189,6 @@ function indexCells(cells: readonly Cell[]): Map<string, Cell> {
   return index;
 }
 
-function driftVerdict(row: { repo: string; lab: string; preprod: string; prod: string }): DriftVerdict {
-  if (row.prod === 'unknown' || !row.prod) return 'Never verified';
-  if (row.preprod === row.prod && row.repo !== row.prod) return 'Patched in place';
-  if (row.preprod !== row.prod) return 'Prod behind';
-  return 'In step';
-}
 
 /**
  * Assembles everything the ten screens read, in one pass. The whole project is a few
@@ -428,19 +430,24 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
         : `Invited, ${shortDate(invitation.invited_at)} — not accepted`,
     }));
 
-  const driftRows: DriftRowView[] = store.drift_rows
-    .filter((row) => row.project_id === projectId)
-    .map((row) => ({
-      id: row.id,
-      layer: row.layer,
-      scope: row.scope,
-      cadence: row.cadence,
-      repo: row.repo,
-      lab: row.lab,
-      preprod: row.preprod,
-      prod: row.prod,
-      verdict: driftVerdict(row),
-    }));
+  // Drift is derived end to end from the reported hashes — see lib/server/drift.ts.
+  const driftRowViews = driftRows(store, projectId);
+  const driftWarningViews = driftWarnings(store, projectId, modules);
+  const gate = promotionGate(store, projectId, modules, driftRowViews);
+
+  const latestReports = DRIFT_ENVIRONMENTS.map((environment) => {
+    const report = store.drift_reports
+      .filter((candidate) => candidate.project_id === projectId && candidate.environment === environment)
+      .sort((a, b) => (a.at < b.at ? 1 : -1))[0];
+    return report
+      ? {
+          environment,
+          agent: report.agent,
+          at: report.at,
+          observation_count: report.observation_count,
+        }
+      : { environment, agent: 'no agent', at: '', observation_count: 0 };
+  });
 
   return {
     me: {
@@ -489,15 +496,23 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
     members,
     invitations,
     drift: {
-      rows: driftRows,
-      warnings: store.drift_warnings
-        .filter((warning) => warning.project_id === projectId)
-        .map((warning) => ({
-          id: warning.id,
-          severity: warning.severity,
-          text: warning.text,
-          where: warning.where,
+      rows: driftRowViews,
+      gate,
+      reports: latestReports,
+      promotions: store.drift_promotions
+        .filter((promotion) => promotion.project_id === projectId)
+        .sort((a, b) => (a.at < b.at ? 1 : -1))
+        .slice(0, 5)
+        .map((promotion) => ({
+          id: promotion.id,
+          from_environment: promotion.from_environment,
+          to_environment: promotion.to_environment,
+          promoted_by: promotion.promoted_by,
+          at: promotion.at,
+          confirmed_at: promotion.confirmed_at,
+          column_count: Object.keys(promotion.hashes).length,
         })),
+      warnings: driftWarningViews,
     },
   };
 }
@@ -1837,5 +1852,160 @@ export async function inviteUser(
     // No mail transport in this release — the caller surfaces the link so an admin can
     // pass it on. A Kafka `user.invited` event replaces this.
     return { inviteToken: invite.token, email };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Drift
+// ---------------------------------------------------------------------------
+
+export interface DriftEntryInput {
+  column_key: string;
+  layer: DriftLayer;
+  path: string;
+  content_hash: string;
+  size_bytes?: number;
+  built_at?: string | null;
+  source_modified_at?: string | null;
+  in_packinglist?: boolean;
+}
+
+/**
+ * Accepts one agent's report for one environment.
+ *
+ * The environment's observations are **replaced**, not merged: a file deleted from a
+ * server matters as much as one that changed, and a merge cannot see a deletion.
+ *
+ * Entries naming a column the project does not track are dropped rather than rejected —
+ * an agent walking `.packinglist` will legitimately find more than the project chose to
+ * track, and failing its whole report over that would train people to stop running it.
+ */
+export async function ingestDriftReport(
+  projectId: string,
+  input: { environment: DriftEnvironment; agent: string; entries: DriftEntryInput[] },
+): Promise<{ accepted: number; ignored: string[]; confirmed_promotions: number }> {
+  return mutate((store) => {
+    const project = store.projects.find((candidate) => candidate.id === projectId);
+    if (!project) throw notFound('That project does not exist.');
+
+    const tracked = new Set(
+      store.drift_deliverables
+        .filter((entry) => entry.project_id === projectId)
+        .map((entry) => entry.column_key),
+    );
+
+    const at = nowIso();
+    const accepted: DriftEntryInput[] = [];
+    const ignored: string[] = [];
+    for (const entry of input.entries) {
+      if (tracked.has(entry.column_key)) accepted.push(entry);
+      else ignored.push(entry.column_key);
+    }
+
+    store.drift_observations = store.drift_observations.filter(
+      (observation) =>
+        !(observation.project_id === projectId && observation.environment === input.environment),
+    );
+
+    for (const entry of accepted) {
+      store.drift_observations.push({
+        id: randomUUID(),
+        project_id: projectId,
+        environment: input.environment,
+        column_key: entry.column_key,
+        layer: entry.layer,
+        path: entry.path,
+        content_hash: entry.content_hash.toLowerCase(),
+        size_bytes: entry.size_bytes ?? 0,
+        built_at: entry.built_at ?? null,
+        source_modified_at: entry.source_modified_at ?? null,
+        in_packinglist: entry.in_packinglist ?? true,
+        observed_at: at,
+        reported_by: input.agent,
+      });
+    }
+
+    store.drift_reports.push({
+      id: randomUUID(),
+      project_id: projectId,
+      environment: input.environment,
+      agent: input.agent,
+      at,
+      observation_count: accepted.length,
+    });
+
+    // A promotion is confirmed by an observation, never by the act of promoting.
+    const confirmed = confirmPromotions(store, projectId, at);
+
+    const agentActor: Actor = {
+      userId: 'agent',
+      tenantId: project.tenant_id,
+      email: '',
+      displayName: input.agent,
+    };
+    record(store, projectId, agentActor, {
+      scope: 'project',
+      label: 'DRIFT',
+      what: `reported ${accepted.length} ${accepted.length === 1 ? 'hash' : 'hashes'} from ${input.environment}${
+        confirmed ? `, confirming ${confirmed} promotion${confirmed === 1 ? '' : 's'}` : ''
+      }`,
+    });
+
+    return { accepted: accepted.length, ignored: [...new Set(ignored)], confirmed_promotions: confirmed };
+  });
+}
+
+/**
+ * Records a promotion of one environment's hashes onto another.
+ *
+ * It writes no observations for the target. Promotion is an intent — "these exact bytes
+ * should now be on prod" — and only an agent report from prod turns that into a fact.
+ * Writing the hashes forward would make this screen agree with itself and with nothing
+ * else, which is the habit it exists to break.
+ */
+export async function promoteDrift(
+  actor: Actor,
+  projectId: string,
+  from: DriftEnvironment,
+  to: DriftEnvironment,
+): Promise<{ promotionId: string; columns: number }> {
+  return mutate((store) => {
+    const access = resolveAccess(store, actor, projectId);
+    require_(access, 'prod.confirm', 'promote a build');
+
+    if (from === to) throw validationFailed('A promotion needs two different environments.');
+
+    const { modules } = buildSnapshot(store, actor, projectId);
+    const rows = driftRows(store, projectId);
+    const gate = promotionGate(store, projectId, modules, rows);
+    if (!gate.can_promote) {
+      const blocking = gate.checks.filter((check) => !check.passed).map((check) => check.text);
+      throw badRequest(`Blocked — ${blocking.join('; ')}`);
+    }
+
+    const { id, hashes } = buildPromotion(store, projectId, from, to, actor.displayName);
+    const columns = Object.keys(hashes).length;
+    if (columns === 0) {
+      throw badRequest(`Nothing to promote — no hashes have been reported from ${from}.`);
+    }
+
+    store.drift_promotions.push({
+      id,
+      project_id: projectId,
+      from_environment: from,
+      to_environment: to,
+      hashes,
+      promoted_by: actor.displayName,
+      at: nowIso(),
+      confirmed_at: null,
+    });
+
+    record(store, projectId, actor, {
+      scope: 'project',
+      label: 'DRIFT',
+      what: `promoted ${columns} ${columns === 1 ? 'deliverable' : 'deliverables'} ${from} → ${to}, awaiting confirmation from ${to}`,
+    });
+
+    return { promotionId: id, columns };
   });
 }

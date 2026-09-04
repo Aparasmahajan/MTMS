@@ -6,6 +6,7 @@ import type {
   DefectStatus,
   DeliverableColumn,
   DriftVerdict,
+  DriftWarningKind,
   RunPhase,
 } from './domain';
 import type { PermissionKey } from './permissions';
@@ -156,14 +157,55 @@ export interface InvitationView {
 
 export interface DriftRowView {
   id: string;
+  /** The matrix column this deliverable is tracked as. */
+  column_key: string;
+  /** The column's label — what the row is called on screen. */
   layer: string;
   scope: string;
   cadence: string;
+  /** java | python | yaml | config — the four layers change and fail differently. */
+  code_layer: string;
+  /** Six characters, for the column. The full hashes ride alongside for the tooltip. */
   repo: string;
   lab: string;
   preprod: string;
   prod: string;
+  full_hashes: Record<string, string | null>;
+  /** Where the agent found the files. Metadata — identity is the hash. */
+  paths: string[];
   verdict: DriftVerdict;
+}
+
+export interface DriftWarningView {
+  id: string;
+  kind: DriftWarningKind;
+  severity: DefectSeverity;
+  text: string;
+  where: string;
+}
+
+export interface PromotionGateView {
+  checks: { text: string; detail: string; passed: boolean }[];
+  blocked: number;
+  can_promote: boolean;
+  label: string;
+}
+
+export interface DriftReportView {
+  environment: string;
+  agent: string;
+  at: string;
+  observation_count: number;
+}
+
+export interface DriftPromotionView {
+  id: string;
+  from_environment: string;
+  to_environment: string;
+  promoted_by: string;
+  at: string;
+  confirmed_at: string | null;
+  column_count: number;
 }
 
 /**
@@ -208,7 +250,11 @@ export interface Snapshot {
   invitations: InvitationView[];
   drift: {
     rows: DriftRowView[];
-    warnings: { id: string; severity: DefectSeverity; text: string; where: string }[];
+    warnings: DriftWarningView[];
+    gate: PromotionGateView;
+    /** The latest report per environment, so "when did anyone last look" is answerable. */
+    reports: DriftReportView[];
+    promotions: DriftPromotionView[];
   };
 }
 

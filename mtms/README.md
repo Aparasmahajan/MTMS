@@ -69,6 +69,37 @@ kept in step when a route is added.
 One limitation: the export has an HTML page per seeded module, so a module *created* during
 the demo has no detail page and its links fall back to the matrix.
 
+## Drift, and the agent
+
+"Loaded in prod" is only true if the bytes on prod are the ones that passed preprod. The
+Drift screen compares them **by content hash, never by path** — the same script has been
+found at five paths with five different contents.
+
+Hashes are reported by an agent that runs on each environment:
+
+```bash
+python agent/report_hashes.py \
+  --url https://mtms.internal --environment prod \
+  --root /data/cloud-user/om/install/sas/bin/macro_server/java \
+  --token "$DRIFT_INGEST_TOKEN" --project CR_AUTOMATION
+```
+
+Add `--dry-run` to print the report instead of posting it. The script is written for
+**Python 2.6+ and 3** because the servers run Python 2, streams files in 64 KB blocks
+because a comparison report is ~6 MB, reads `.packinglist` for what actually deploys, and
+**never sends file content** — `mds.rc*` and `nemo_parameters.properties` hold plaintext
+passwords and are excluded outright.
+
+Everything on the screen is derived from those reports: the verdicts, the warnings, and a
+five-check promotion gate. Nothing is stored pre-computed, so a fresh report changes all of
+it. Where no agent has reported, the screen says so rather than showing agreement it cannot
+vouch for — and a gate check that cannot be evaluated reads as *closed*, not as unknown.
+
+Promotion records the hash set that should now be on the target and writes **no observation
+there**. Only an agent report from prod turns an intent into a fact.
+
+Set `DRIFT_INGEST_TOKEN` to accept agent reports; see `.env.example`.
+
 ## The store
 
 One JSON document at `data/tracker.json`, seeded on first run from `lib/server/seed.ts`.

@@ -2,7 +2,9 @@
 
 import { useTracker } from '@/components/TrackerProvider';
 import { Blueprint, PageTitle, SectionHeading } from '@/components/primitives';
+import { send } from '@/lib/client/api';
 import type { DriftVerdict } from '@/lib/shared/domain';
+import { formatStamp, type Snapshot } from '@/lib/shared/views';
 
 /**
  * Drift.
@@ -12,8 +14,10 @@ import type { DriftVerdict } from '@/lib/shared/domain';
  * stale against source, and the deployed copy drifts from the repo copy — so identity
  * here is content hash, never path.
  *
- * The hashes come from an environment agent; the tracker compares them and nothing
- * more. Until that agent reports, these are the last values it recorded.
+ * Everything on this screen is derived from hashes an agent reported. Nothing is written
+ * down in advance, including the warnings and the gate, so a fresh report changes all of
+ * it at once. Where no agent has reported, the screen says so rather than showing
+ * agreement it cannot vouch for.
  */
 
 const VERDICT_STYLE: Record<DriftVerdict, { background: string; color: string }> = {
@@ -21,41 +25,75 @@ const VERDICT_STYLE: Record<DriftVerdict, { background: string; color: string }>
   'Prod behind': { background: 'var(--color-text)', color: 'var(--color-bg)' },
   'Patched in place': { background: 'var(--color-text)', color: 'var(--color-bg)' },
   'Never verified': { background: 'var(--color-text)', color: 'var(--color-bg)' },
+  'Not deployed': { background: 'var(--color-text)', color: 'var(--color-bg)' },
 };
 
+const ENVIRONMENTS = ['repo', 'lab', 'preprod', 'prod'] as const;
+
 export default function DriftPage() {
-  const { snapshot } = useTracker();
-  const { rows, warnings } = snapshot.drift;
+  const { snapshot, apply, can, reasonFor, setNotice } = useTracker();
+  const { rows, warnings, gate, reports, promotions } = snapshot.drift;
+  const canPromote = can('prod.confirm');
 
-  // The gate is per project and, like every other derived number here, computed from
-  // the same projection the matrix renders.
-  const worstReadiness = snapshot.modules.length
-    ? Math.min(...snapshot.modules.map((module) => module.readiness))
-    : 0;
-  const mismatches = rows.filter((row) => row.verdict !== 'In step').length;
+  async function promote() {
+    const meta = await apply(null, () =>
+      send<Snapshot>('/api/v1/drift/promote', 'POST', { from: 'preprod', to: 'prod' }),
+    );
+    if (meta) {
+      setNotice(
+        `Promotion recorded for ${meta.columns} deliverables. Nothing on prod has changed yet — it stays unconfirmed until an agent reports those exact hashes back from prod.`,
+      );
+    }
+  }
 
-  const gate = [
-    {
-      text: 'Every counted deliverable is Loaded in prod',
-      by: `lowest module ${worstReadiness}%`,
-      passed: worstReadiness === 100,
-    },
-    {
-      text: 'Preprod hash matches the prod hash',
-      by: `${mismatches} ${mismatches === 1 ? 'mismatch' : 'mismatches'}`,
-      passed: mismatches === 0,
-    },
-    { text: 'FNI final submission complete', by: 'pending', passed: false },
-    { text: 'Node access granted', by: 'pending', passed: false },
-  ];
-  const blocked = gate.filter((entry) => !entry.passed).length;
+  const promoteDisabled = !canPromote || !gate.can_promote;
+  const promoteReason = !canPromote
+    ? reasonFor('prod.confirm')
+    : gate.can_promote
+      ? ''
+      : `Blocked — ${gate.checks.filter((check) => !check.passed).map((check) => check.text).join('; ')}`;
 
   return (
     <div className="page page-narrow">
       <PageTitle
         title="Drift"
-        lede='"Loaded in prod" is only true if the bytes on prod are the ones that passed preprod. This compares them.'
+        lede='"Loaded in prod" is only true if the bytes on prod are the ones that passed preprod. This compares them, by content hash.'
       />
+
+      {/* When each environment was last looked at. An agent that stopped reporting looks
+          exactly like an environment that stopped changing, so say which it is. */}
+      <div
+        className="bordered"
+        style={{ display: 'flex', flexWrap: 'wrap', marginBottom: 'var(--space-6)' }}
+      >
+        {reports.map((report) => (
+          <div
+            key={report.environment}
+            style={{
+              flex: '1 1 160px',
+              padding: 'var(--space-3) var(--space-4)',
+              borderRight: '1px solid var(--color-divider)',
+            }}
+          >
+            <div className="kicker" style={{ letterSpacing: '.11em' }}>
+              {report.environment}
+            </div>
+            <div style={{ fontSize: 13, marginTop: 2 }}>
+              {report.at ? (
+                <>
+                  {report.observation_count} {report.observation_count === 1 ? 'file' : 'files'} ·{' '}
+                  {formatStamp(report.at)}
+                </>
+              ) : (
+                <span style={{ color: 'var(--color-neutral-600)' }}>never reported</span>
+              )}
+            </div>
+            <div className="mono" style={{ fontSize: 11, color: 'var(--color-neutral-600)' }}>
+              {report.agent}
+            </div>
+          </div>
+        ))}
+      </div>
 
       <div className="bordered" style={{ overflowX: 'auto', marginBottom: 'var(--space-8)' }}>
         <table className="table">
@@ -84,23 +122,36 @@ export default function DriftPage() {
                   >
                     {row.layer}
                   </span>
-                  <div style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>{row.cadence}</div>
+                  <div style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>
+                    {row.code_layer} · {row.cadence}
+                  </div>
+                  {row.paths.map((path) => (
+                    <div
+                      key={path}
+                      className="mono"
+                      style={{ fontSize: 11, color: 'var(--color-neutral-600)', wordBreak: 'break-all' }}
+                    >
+                      {path}
+                    </div>
+                  ))}
                 </td>
                 <td>
                   <span className="tag tag-outline">{row.scope}</span>
                 </td>
-                <td className="mono" style={{ fontSize: 12 }}>
-                  {row.repo}
-                </td>
-                <td className="mono" style={{ fontSize: 12 }}>
-                  {row.lab}
-                </td>
-                <td className="mono" style={{ fontSize: 12 }}>
-                  {row.preprod}
-                </td>
-                <td className="mono" style={{ fontSize: 12 }}>
-                  {row.prod}
-                </td>
+                {ENVIRONMENTS.map((environment) => {
+                  const full = row.full_hashes[environment];
+                  return (
+                    <td
+                      key={environment}
+                      className="mono"
+                      style={{ fontSize: 12, color: full ? undefined : 'var(--color-neutral-600)' }}
+                      // The six characters are for reading; the identity is the whole hash.
+                      title={full ? `sha256 ${full}` : `no hash reported from ${environment}`}
+                    >
+                      {row[environment]}
+                    </td>
+                  );
+                })}
                 <td>
                   <span
                     style={{
@@ -109,6 +160,7 @@ export default function DriftPage() {
                       letterSpacing: '.07em',
                       textTransform: 'uppercase',
                       padding: '2px 8px',
+                      whiteSpace: 'nowrap',
                       ...VERDICT_STYLE[row.verdict],
                     }}
                   >
@@ -117,6 +169,13 @@ export default function DriftPage() {
                 </td>
               </tr>
             ))}
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={7} style={{ fontSize: 13, color: 'var(--color-neutral-600)' }}>
+                  No deliverables are set up for hash tracking on this project.
+                </td>
+              </tr>
+            ) : null}
           </tbody>
         </table>
       </div>
@@ -149,8 +208,10 @@ export default function DriftPage() {
                       letterSpacing: '.1em',
                       textTransform: 'uppercase',
                       padding: '1px 7px',
-                      background: 'var(--color-text)',
-                      color: 'var(--color-bg)',
+                      background:
+                        warning.severity === 'High' ? 'var(--color-text)' : 'var(--color-accent-200)',
+                      color:
+                        warning.severity === 'High' ? 'var(--color-bg)' : 'var(--color-accent-800)',
                       flex: 'none',
                     }}
                   >
@@ -165,6 +226,12 @@ export default function DriftPage() {
                 </div>
               </div>
             ))}
+            {warnings.length === 0 ? (
+              <div style={{ padding: 'var(--space-4)', fontSize: 13, color: 'var(--color-neutral-600)' }}>
+                Nothing outstanding — every deliverable matches across the environments that
+                have reported.
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -172,11 +239,14 @@ export default function DriftPage() {
           <SectionHeading first>Promotion gate</SectionHeading>
           <Blueprint>
             <div style={{ fontSize: 14, lineHeight: 1.5, marginBottom: 'var(--space-4)', textWrap: 'pretty' }}>
-              Promotion copies hashes; it never rebuilds. Gates are set per project.
+              Promotion copies hashes; it never rebuilds. Recording one does not change prod —
+              it records the exact bytes that should now be there, and stays unconfirmed until
+              an agent reports them back.
             </div>
-            {gate.map((entry) => (
+
+            {gate.checks.map((check) => (
               <div
-                key={entry.text}
+                key={check.text}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -192,46 +262,88 @@ export default function DriftPage() {
                     height: 14,
                     flex: 'none',
                     border: '1px solid var(--color-neutral-500)',
-                    background: entry.passed ? 'var(--color-accent)' : 'transparent',
+                    background: check.passed ? 'var(--color-accent)' : 'transparent',
                   }}
                 />
-                <span style={{ flex: 1, fontSize: 13 }}>{entry.text}</span>
-                <span style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>{entry.by}</span>
+                <span style={{ flex: 1, fontSize: 13 }}>{check.text}</span>
+                <span style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>{check.detail}</span>
               </div>
             ))}
 
             <button
               type="button"
-              disabled
-              title={`Blocked by ${blocked} ${blocked === 1 ? 'gate' : 'gates'}`}
-              style={{
-                display: 'block',
-                width: '100%',
-                marginTop: 'var(--space-6)',
-                padding: 'var(--space-2) var(--space-4)',
-                textAlign: 'center',
-                background: 'var(--color-neutral-300)',
-                color: 'var(--color-neutral-700)',
-                border: 0,
-                borderRadius: 0,
-                fontFamily: 'var(--font-heading)',
-                fontSize: 15,
-                letterSpacing: '.06em',
-                textTransform: 'uppercase',
-                cursor: 'not-allowed',
-              }}
+              className="btn btn-primary btn-block"
+              disabled={promoteDisabled}
+              title={promoteReason || undefined}
+              onClick={() => void promote()}
+              style={{ marginTop: 'var(--space-6)' }}
             >
-              {blocked === 0
-                ? 'Promote'
-                : `Promote — blocked by ${blocked} ${blocked === 1 ? 'gate' : 'gates'}`}
+              {gate.label}
             </button>
+
+            {promoteReason ? (
+              <div
+                style={{
+                  marginTop: 'var(--space-3)',
+                  fontSize: 12,
+                  color: 'var(--color-neutral-700)',
+                  textWrap: 'pretty',
+                }}
+              >
+                {promoteReason}
+              </div>
+            ) : null}
           </Blueprint>
 
+          {promotions.length > 0 ? (
+            <>
+              <SectionHeading>Recent promotions</SectionHeading>
+              <div className="bordered">
+                {promotions.map((promotion) => (
+                  <div
+                    key={promotion.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      gap: 'var(--space-3)',
+                      padding: 'var(--space-2) var(--space-4)',
+                      borderBottom: '1px solid var(--color-divider)',
+                      fontSize: 12,
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontFamily: 'var(--font-heading)',
+                        letterSpacing: '.06em',
+                        textTransform: 'uppercase',
+                        flex: 'none',
+                      }}
+                    >
+                      {promotion.from_environment} → {promotion.to_environment}
+                    </span>
+                    <span style={{ flex: 1, color: 'var(--color-neutral-700)' }}>
+                      {promotion.column_count} deliverables ·{' '}
+                      {promotion.confirmed_at ? (
+                        <>confirmed {formatStamp(promotion.confirmed_at)}</>
+                      ) : (
+                        <span style={{ color: 'var(--color-text)' }}>awaiting confirmation</span>
+                      )}
+                    </span>
+                    <span style={{ color: 'var(--color-neutral-600)', flex: 'none' }}>
+                      {promotion.promoted_by}, {formatStamp(promotion.at)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : null}
+
           <div style={{ marginTop: 'var(--space-3)', fontSize: 12, color: 'var(--color-neutral-600)', textWrap: 'pretty' }}>
-            Hashes are reported by an environment agent, which is not built yet. It has to respect
-            the platform as it is: Java 8 and Python 2 on the servers, <span className="mono">.packinglist</span>{' '}
-            as the source of truth for what deploys, strict YAML binding against the compiled bean,
-            and a ~96 KB inline transport ceiling above which files go over SFTP.
+            Hashes come from <span className="mono">agent/report_hashes.py</span>, which runs on
+            each environment and posts to <span className="mono">/api/v1/drift/reports</span>. It
+            is written for Python 2.6+ and reads <span className="mono">.packinglist</span> for
+            what actually deploys, because a file in the repo and absent from that list never
+            reaches a server.
           </div>
         </div>
       </div>
