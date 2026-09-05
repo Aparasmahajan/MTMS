@@ -421,6 +421,63 @@ export type DriftWarningKind = z.infer<typeof DriftWarningKind>;
 // Invitations
 // ---------------------------------------------------------------------------
 
+/**
+ * A refresh token, stored as a hash so a leaked store cannot be replayed.
+ *
+ * Rotation: using one revokes it and issues a successor in the same family. If a token
+ * that has already been used comes back, the whole family is revoked — that is the
+ * signature of a stolen token being replayed alongside the legitimate one.
+ */
+export const RefreshToken = z.object({
+  id: uuid,
+  token_hash: z.string(),
+  user_id: uuid,
+  tenant_id: uuid,
+  /** Rotation chain. Revoking a family logs out every descendant of one login. */
+  family_id: uuid,
+  issued_at: isoDateTime,
+  expires_at: isoDateTime,
+  revoked_at: isoDateTime.nullable().default(null),
+  /** Set when this token was exchanged, so a replay is detectable. */
+  used_at: isoDateTime.nullable().default(null),
+});
+export type RefreshToken = z.infer<typeof RefreshToken>;
+
+/**
+ * Domain events, in an outbox.
+ *
+ * The design calls for Kafka. Writing to a broker inside a mutation would make the store
+ * write and the publish two things that can disagree, so events are recorded in the same
+ * document as the change that produced them and drained afterwards. That is the outbox
+ * pattern, and it is what makes "the cell changed" and "the event was published" the same
+ * fact rather than two hopeful ones.
+ */
+export const DomainEventName = z.enum([
+  'cell.changed',
+  'module.closed',
+  'defect.raised',
+  'defect.transitioned',
+  'deployment.confirmed',
+  'user.invited',
+]);
+export type DomainEventName = z.infer<typeof DomainEventName>;
+
+export const DomainEvent = z.object({
+  id: uuid,
+  name: DomainEventName,
+  tenant_id: uuid,
+  project_id: uuid.nullable().default(null),
+  /** Kafka partition key: everything about one module stays in order. */
+  partition_key: z.string(),
+  payload: z.record(z.unknown()).default({}),
+  occurred_at: isoDateTime,
+  actor: z.string(),
+  published_at: isoDateTime.nullable().default(null),
+  attempts: z.number().int().nonnegative().default(0),
+  last_error: z.string().nullable().default(null),
+});
+export type DomainEvent = z.infer<typeof DomainEvent>;
+
 export const Invitation = z.object({
   id: uuid,
   tenant_id: uuid,

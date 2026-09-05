@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { fail, parseBody, setAuthCookie, withoutAuth } from '@/lib/server/api';
-import { hashPassword, hashToken, issueAccessToken } from '@/lib/server/auth';
+import { fail, parseBody, setSessionCookies, withoutAuth } from '@/lib/server/api';
+import { hashPassword, hashToken } from '@/lib/server/auth';
+import { startSession } from '@/lib/server/sessions';
 import { mutate, nowIso } from '@/lib/server/store';
 
 const Body = z.object({
@@ -52,16 +53,15 @@ export const POST = withoutAuth(async ({ request }) => {
     return fail('bad_request', outcome.error ?? 'That invitation link is not valid.');
   }
 
-  const { token, expiresIn } = issueAccessToken({
+  const session = await startSession({
     userId: outcome.user.id,
     tenantId: outcome.user.tenant_id,
     email: outcome.user.email,
     displayName: outcome.user.display_name,
   });
 
-  return setAuthCookie(
+  return setSessionCookies(
     NextResponse.json({ data: { display_name: outcome.user.display_name } }),
-    token,
-    expiresIn,
+    session,
   );
 });

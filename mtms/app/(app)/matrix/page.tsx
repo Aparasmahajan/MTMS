@@ -108,6 +108,27 @@ function MatrixScreen() {
 
   const minWidth = NAME_WIDTH + READY_WIDTH + TARGET_WIDTH + columns.length * CELL_WIDTH;
 
+  /**
+   * `aria-rowindex` is 1-based over the *whole* grid, so the header, each node-type group
+   * header, each module and every expanded subactivity all consume one. A running counter
+   * during render is the only way to get that right when the visible rows depend on which
+   * modules are open.
+   */
+  let rowIndex = 1;
+  const rowCount =
+    1 +
+    groups.length +
+    groups.reduce(
+      (total, group) =>
+        total +
+        group.rows.length +
+        group.rows.reduce(
+          (subs, module) => subs + (expanded.has(module.id) ? module.subactivities.length : 0),
+          0,
+        ),
+      0,
+    );
+
   return (
     <div className="page-full">
       <div
@@ -202,9 +223,23 @@ function MatrixScreen() {
       </div>
 
       <div className="bordered" style={{ overflow: 'auto', maxHeight: '74vh' }}>
-        <div style={{ minWidth }}>
+        {/*
+          A real grid, not a table of divs. Screen readers announce "row 4 of 23, column
+          6 of 17" only if the roles and the counts are here — and the counts have to be
+          the *whole* grid, including the group headers and any expanded subactivities,
+          which is why they are computed rather than taken from `groups.length`.
+        */}
+        <div
+          role="grid"
+          aria-label={`Deliverable matrix for ${snapshot.project.key}`}
+          aria-rowcount={rowCount}
+          aria-colcount={columns.length + 3}
+          style={{ minWidth }}
+        >
           {/* Header row — sticky top, with the first cell sticky in both axes. */}
           <div
+            role="row"
+            aria-rowindex={1}
             style={{
               display: 'flex',
               position: 'sticky',
@@ -215,6 +250,8 @@ function MatrixScreen() {
             }}
           >
             <div
+              role="columnheader"
+              aria-colindex={1}
               className="kicker"
               style={{
                 width: NAME_WIDTH,
@@ -231,6 +268,8 @@ function MatrixScreen() {
               Module — node + activity
             </div>
             <div
+              role="columnheader"
+              aria-colindex={2}
               className="kicker"
               style={{
                 width: READY_WIDTH,
@@ -242,9 +281,11 @@ function MatrixScreen() {
             >
               Ready
             </div>
-            {columns.map((column) => (
+            {columns.map((column, index) => (
               <div
                 key={column.key}
+                role="columnheader"
+                aria-colindex={index + 3}
                 title={column.full}
                 style={{
                   width: CELL_WIDTH,
@@ -264,6 +305,8 @@ function MatrixScreen() {
               </div>
             ))}
             <div
+              role="columnheader"
+              aria-colindex={columns.length + 3}
               style={{
                 width: TARGET_WIDTH,
                 flex: 'none',
@@ -288,8 +331,10 @@ function MatrixScreen() {
           {groups.map((group) => {
             const fullyInProd = group.rows.filter((module) => module.readiness === 100).length;
             return (
-              <div key={group.nodeType}>
+              <div key={group.nodeType} role="rowgroup">
                 <div
+                  role="row"
+                  aria-rowindex={++rowIndex}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -324,8 +369,16 @@ function MatrixScreen() {
 
                   return (
                     <div key={module.id}>
-                      <div className="hoverable" style={{ display: 'flex', borderBottom: '1px solid var(--color-divider)' }}>
+                      <div
+                        className="hoverable"
+                        role="row"
+                        aria-rowindex={++rowIndex}
+                        aria-expanded={hasSubs ? isOpen : undefined}
+                        style={{ display: 'flex', borderBottom: '1px solid var(--color-divider)' }}
+                      >
                         <div
+                          role="rowheader"
+                          aria-colindex={1}
                           style={{
                             width: NAME_WIDTH,
                             flex: 'none',
@@ -380,6 +433,9 @@ function MatrixScreen() {
                         </div>
 
                         <div
+                          role="gridcell"
+                          aria-colindex={2}
+                          aria-label={`${module.readiness}% ready`}
                           style={{
                             width: READY_WIDTH,
                             flex: 'none',
@@ -401,12 +457,14 @@ function MatrixScreen() {
                           </span>
                         </div>
 
-                        {module.cells.map((cell) => {
+                        {module.cells.map((cell, cellIndex) => {
                           const column = columns.find((candidate) => candidate.key === cell.column_key);
                           if (!column) return null;
                           return (
                             <div
                               key={cell.column_key}
+                              role="gridcell"
+                              aria-colindex={cellIndex + 3}
                               style={{
                                 width: CELL_WIDTH,
                                 flex: 'none',
@@ -429,6 +487,8 @@ function MatrixScreen() {
                         })}
 
                         <div
+                          role="gridcell"
+                          aria-colindex={columns.length + 3}
                           style={{
                             width: TARGET_WIDTH,
                             flex: 'none',
@@ -445,6 +505,8 @@ function MatrixScreen() {
                         ? module.subactivities.map((subactivity) => (
                             <div
                               key={subactivity.id}
+                              role="row"
+                              aria-rowindex={++rowIndex}
                               style={{
                                 display: 'flex',
                                 borderBottom: '1px solid var(--color-divider)',
@@ -452,6 +514,8 @@ function MatrixScreen() {
                               }}
                             >
                               <div
+                                role="rowheader"
+                                aria-colindex={1}
                                 style={{
                                   width: NAME_WIDTH,
                                   flex: 'none',
@@ -470,6 +534,9 @@ function MatrixScreen() {
                                 ↳ {subactivity.name}
                               </div>
                               <div
+                                role="gridcell"
+                                aria-colindex={2}
+                                aria-label={`${subactivity.readiness}% ready`}
                                 style={{
                                   width: READY_WIDTH,
                                   flex: 'none',
@@ -490,7 +557,7 @@ function MatrixScreen() {
                                   {subactivity.readiness}
                                 </span>
                               </div>
-                              {subactivity.cells.map((cell) => {
+                              {subactivity.cells.map((cell, cellIndex) => {
                                 const column = columns.find(
                                   (candidate) => candidate.key === cell.column_key,
                                 );
@@ -498,6 +565,8 @@ function MatrixScreen() {
                                 return (
                                   <div
                                     key={cell.column_key}
+                                    role="gridcell"
+                                    aria-colindex={cellIndex + 3}
                                     style={{
                                       width: CELL_WIDTH,
                                       flex: 'none',
@@ -516,7 +585,11 @@ function MatrixScreen() {
                                   </div>
                                 );
                               })}
-                              <div style={{ width: TARGET_WIDTH, flex: 'none' }} />
+                              <div
+                                role="gridcell"
+                                aria-colindex={columns.length + 3}
+                                style={{ width: TARGET_WIDTH, flex: 'none' }}
+                              />
                             </div>
                           ))
                         : null}

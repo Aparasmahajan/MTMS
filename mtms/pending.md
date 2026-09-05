@@ -1,8 +1,13 @@
 # Pending — MTMS (Mahajan Ticket Management System)
 
-**Handoff document.** Written to be read cold, with no prior conversation. Parts 1–3 and 5
-are built, run and verified; Part 4 is all but two items; the rename to MTMS and the static
-client demo are done. Part 6 is not started.
+**Handoff document.** Written to be read cold, with no prior conversation. Parts 1–6 are
+built; Part 4 is all but two items. The rename to MTMS and the static client demo are done.
+
+**What is verified and what is not.** Every rule is tested (189 tests). The Part 6
+*drivers* are not: there is no Postgres, Redis, Kafka broker, browser or JDK on the
+development machine, so that code is written, typechecked and reviewed but has never
+executed. Each such file says so at the top. The list is under "Unverified" below — read it
+before trusting any of it in production.
 
 The part numbers are stable identifiers — a finished part keeps its number, so that every
 cross-reference in this file and in the code comments keeps resolving.
@@ -24,7 +29,7 @@ cross-reference in this file and in the code comments keeps resolving.
 cd tracker/mtms
 npm install
 npm run dev          # http://localhost:3100
-npm test             # 169 tests — run this before and after any change to the rules
+npm test             # 189 tests — run this before and after any change to the rules
 npm run build:demo   # writes demo/ — the static client demo, no server needed
 ```
 
@@ -35,16 +40,20 @@ Sign in `parmahaj@nokia.com` / `tracker` (Admin), or `k.menon@nokia.com` / `trac
 
 ```
 lib/shared/     vocabulary · permissions · promotion · domain · views  ← pure, both sides
-lib/server/     store · seed · auth · api · errors · service · session · mailer · drift · demo-snapshot
+lib/server/     store · seed · auth · sessions · api · errors · service · session · mailer
+                drift · cache · events · demo-snapshot · storage/{driver,file,postgres,schema.sql}
 lib/client/     api · optimistic
 lib/demo/       config · runtime                            ← the static demo's stand-in server
 lib/**/__tests__/   vocabulary · service · columns · modules · projects · audit · drift · api
                     plus harness.ts   ← npm test
 components/     AppShell · TrackerProvider · primitives · screens/ModuleScreen
 app/(app)/      page(dashboard) matrix defects pipeline modules/[id] library access audit drift configure
-app/api/v1/     27 route handlers
+app/api/v1/     28 route handlers
 scripts/        build-demo.mjs
 agent/          report_hashes.py    ← runs on each environment, py2.6+ and py3
+contracts/      openapi.yaml        ← the contract both back ends answer to
+services/       api-java/           ← the Spring Boot port, started at StatusVocabulary
+e2e/            matrix.spec.ts      ← Playwright; needs @playwright/test installed
 ```
 
 ---
@@ -103,7 +112,7 @@ These are not style preferences; each one is load-bearing.
 - **The session cookie is `Secure` in production**, so `next start` over plain HTTP will
   not keep a browser session. Use `npm run dev` locally.
 - **Delete `data/tracker.json` to reseed.** Bumping `STORE_VERSION` in `lib/server/store.ts`
-  forces the same thing on next start. It is at **3** — drift became reported observations.
+  forces the same thing on next start. It is at **4** — revision, refresh tokens, outbox.
 - **Every mutation that changes what the matrix shows must call `record()`** in
   `lib/server/service.ts`. A change nobody can attribute is the failure this app exists to
   fix, and `/audit` is only as good as the calls into it.
@@ -239,30 +248,67 @@ What matters before you touch it:
 
 ---
 
-# Part 6 — Production shape
+# Part 6 — Production shape · **built, largely unverified**
 
-None of this is needed for a pilot. All of it is needed before more than one person relies
-on it concurrently.
+See [completed.md](completed.md) for what landed. What matters before touching it:
 
-- **Postgres.** The store is deliberately shaped for it — the narrow `cells` table ports
-  row-for-row. Needs a schema, a repository seam behind `lib/server/store.ts`, and an
-  importer. TMS's `packages/core/src/repos/sql/` is the reference for how they did it.
-- **Concurrency.** Writes are serialised in one process. Two instances will lose writes.
-  This is the real reason Postgres matters, not scale.
-- **Redis** in front of `buildSnapshot` — one projection per project, invalidated on any
-  write. That is exactly the cache the design calls for, and the code is already shaped as
-  a single projection function to make it drop-in.
-- **Kafka** — `cell.changed`, `module.closed`, `defect.raised`, `defect.transitioned`,
-  `deployment.confirmed`, `user.invited`. Nothing is emitted today.
-- **Refresh tokens.** Auth issues one 12-hour access cookie; there is no rotation and no
-  revocation list. TMS's `packages/core/src/services/auth.service.ts` has the pattern.
-- **Spring Boot back end.** The design targets Java; today the API is Next.js route
-  handlers. The HTTP boundary is thin and the service layer is transport-agnostic, so the
-  port is mechanical — but it is a real piece of work and has not been started.
-- **E2E tests.** TMS uses Playwright; there is none here.
-- **Accessibility audit.** Focus rings, `aria-pressed` and titles are in place. The matrix
-  has not been checked with a screen reader, and its cells are buttons in a flex layout
-  rather than a real `role="grid"` — that is the known weak point.
+- **Optimistic concurrency, not locking.** `mutate()` re-runs its callback against fresh
+  data on a conflict, so **a callback must be safe to run more than once**. In practice they
+  only touch the store they are handed; if you write one that has an outside effect, it will
+  happen twice.
+- **The cache key carries the store revision and the user.** Never widen it to the project
+  alone: a snapshot holds that user's permissions, so a shared entry serves an admin's view
+  to a viewer.
+- **Events go in the outbox inside the same `mutate()` as the change.** Never publish
+  directly from a mutation — the store write is the commit point, and consumers must be
+  idempotent because a drain can repeat.
+- **A replayed refresh token revokes its whole family**, including the honest successor.
+  That is deliberate. Do not "fix" it by revoking only the presented token.
+- **`e2e/` and `playwright.config.ts` are excluded from `tsconfig.json`** so the build works
+  without the package. Install Playwright, then delete those two exclusions.
+
+## Unverified — read before production
+
+Everything here is written and reviewed but has **never executed**, because the dependency
+is not on this machine. In rough order of how much it would hurt to be wrong:
+
+- [ ] **`lib/server/storage/postgres-driver.ts`** — the SQL has never run. Point
+      `DATABASE_URL` at a real database and confirm: first-write insert, the
+      `UPDATE … WHERE revision` conflict path, and that `bigint` really does come back as a
+      string from node-postgres.
+- [ ] **`lib/server/storage/schema.sql`** — never applied. Apply it to an empty database and
+      check the partial unique indexes actually forbid a module holding both its own cell
+      row and subactivity rows.
+- [ ] **The importer does not exist.** `tracker.json` → Postgres has not been written at all.
+      Nothing migrates a pilot's data.
+- [ ] **`lib/server/cache.ts` Redis path** — never connected. The in-memory path is exercised
+      by every test; the `ioredis` branch is not.
+- [ ] **`lib/server/events.ts` Kafka path** — never connected to a broker. The outbox,
+      draining and retry *are* tested with a fake publisher; only `kafkajs` is untried.
+- [ ] **`e2e/matrix.spec.ts`** — never run. Needs
+      `npm i -D @playwright/test && npx playwright install chromium`. Expect the selectors
+      to need adjusting on first run; they were written against the source, not a browser.
+- [ ] **`services/api-java/`** — never compiled. No JDK or Maven here.
+- [ ] **The optional packages are not installed**: `pg`, `ioredis`, `kafkajs`,
+      `@playwright/test`. Each driver throws a message naming the missing package rather
+      than a module-not-found stack, so the failure is at least legible.
+
+## Still open in Part 6
+
+- [ ] **The row-level Postgres port.** The staged decision was document-plus-locking now,
+      tables later. Doing it properly means a repository per entity and rewriting every
+      `mutate()` in `service.ts` — the largest single piece of work left. `schema.sql` is
+      the target; TMS's `packages/core/src/repos/sql/` is the reference.
+- [ ] **A migration tool.** The store reseeds on a version bump. Fine for a pilot, not once
+      there is real data.
+- [ ] **Row-level security.** Tenancy is enforced in the service layer and every query
+      filters on `tenant_id`. RLS would make a missed filter fail closed instead of leak.
+      Needs a per-request `SET LOCAL app.tenant_id` and a transaction-scoped pool.
+- [ ] **Keyboard navigation in the matrix.** The roles and indices are right, so a screen
+      reader can describe it; arrow-key movement between cells is not implemented, and a
+      grid that announces itself but cannot be walked is only half done.
+- [ ] **A real accessibility audit.** Nobody has run this with a screen reader. The roles
+      are a considered guess, not a verified result.
 
 ---
 

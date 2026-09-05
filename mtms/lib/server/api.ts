@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { ZodError, type ZodTypeAny, type output } from 'zod';
-import { ACCESS_COOKIE, verifyAccessToken, type Actor } from './auth';
+import { ACCESS_COOKIE, REFRESH_COOKIE, verifyAccessToken, type Actor } from './auth';
 import { ServiceError, STATUS_BY_CODE, type ErrorCode } from './errors';
+import { cacheKey, snapshotCache } from './cache';
+import { scheduleDrain } from './events';
 import { buildSnapshot, defaultProjectId } from './service';
 import { getStore } from './store';
 import type { Snapshot } from '../shared/views';
@@ -94,17 +96,50 @@ export function withAuth<P extends Record<string, string> = Record<string, strin
           ? requested
           : defaultProjectId(store, actor);
 
-      return await handler({
+      const response = await handler({
         actor,
         projectId,
         request,
         params: (context?.params ?? {}) as P,
-        snapshot: async () => buildSnapshot(await getStore(), actor, projectId),
+        snapshot: async () => cachedSnapshot(actor, projectId),
       });
+
+      // The store write is already durable; publishing is allowed to be slow, so it does
+      // not sit in the user's request. A failed drain leaves the events pending.
+      if (WRITE_METHODS.has(request.method) && response.status < 400) scheduleDrain();
+
+      return response;
     } catch (error) {
       return toErrorResponse(error);
     }
   };
+}
+
+/**
+ * The projection, cached per (tenant, project, user, store revision).
+ *
+ * Keying on the revision is what makes this correct without invalidation: after a write
+ * the revision moves, so the old key is simply never asked for again and a stale read is
+ * impossible. Keying on the user is what keeps it honest — a snapshot carries that user's
+ * permissions and their members list, so a cache shared across users would serve an
+ * admin's view to a viewer.
+ */
+async function cachedSnapshot(actor: Actor, projectId: string): Promise<Snapshot> {
+  const store = await getStore();
+  const key = cacheKey({
+    tenantId: actor.tenantId,
+    projectId,
+    userId: actor.userId,
+    revision: store.revision,
+  });
+
+  const cache = snapshotCache();
+  const hit = await cache.get(key);
+  if (hit) return hit;
+
+  const snapshot = buildSnapshot(store, actor, projectId);
+  await cache.set(key, snapshot);
+  return snapshot;
 }
 
 /** For the handful of routes that run before there is a session. */
@@ -155,5 +190,45 @@ export function setAuthCookie(response: NextResponse, token: string, maxAge: num
 
 export function clearAuthCookie(response: NextResponse): NextResponse {
   response.cookies.set(ACCESS_COOKIE, '', { path: '/', maxAge: 0 });
+  response.cookies.set(REFRESH_COOKIE, '', { path: '/api/v1/auth', maxAge: 0 });
   return response;
+}
+
+/**
+ * Sets both cookies for an issued session.
+ *
+ * The refresh cookie is scoped to `/api/v1/auth`, so it is not attached to the hundreds of
+ * ordinary requests that have no business seeing it — a long-lived credential should travel
+ * as rarely as it can.
+ */
+export function setSessionCookies(
+  response: NextResponse,
+  session: {
+    accessToken: string;
+    accessExpiresIn: number;
+    refreshToken: string;
+    refreshExpiresAt: string;
+  },
+): NextResponse {
+  const secure = process.env.NODE_ENV === 'production';
+
+  response.cookies.set(ACCESS_COOKIE, session.accessToken, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure,
+    path: '/',
+    maxAge: session.accessExpiresIn,
+  });
+  response.cookies.set(REFRESH_COOKIE, session.refreshToken, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure,
+    path: '/api/v1/auth',
+    expires: new Date(session.refreshExpiresAt),
+  });
+  return response;
+}
+
+export function readRefreshToken(request: NextRequest): string | null {
+  return request.cookies.get(REFRESH_COOKIE)?.value ?? null;
 }

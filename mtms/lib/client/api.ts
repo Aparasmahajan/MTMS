@@ -23,9 +23,37 @@ interface Envelope<T> {
   error?: { code: string; message: string; details?: unknown };
 }
 
+/**
+ * One refresh at a time.
+ *
+ * An expired access cookie usually shows up as several 401s at once — a page render fires
+ * more than one request. Without this they would each rotate the refresh token, and every
+ * rotation after the first would present a spent token and revoke the whole family. So the
+ * first 401 starts the refresh and the rest await the same promise.
+ */
+let refreshing: Promise<boolean> | null = null;
+
+async function refreshSession(): Promise<boolean> {
+  refreshing ??= (async () => {
+    try {
+      const response = await fetch('/api/v1/auth/refresh', { method: 'POST', cache: 'no-store' });
+      return response.ok;
+    } catch {
+      return false;
+    } finally {
+      // Cleared after the awaiting callers have read the result.
+      setTimeout(() => {
+        refreshing = null;
+      }, 0);
+    }
+  })();
+  return refreshing;
+}
+
 export async function request<T>(
   path: string,
   init?: RequestInit,
+  retryAfterRefresh = true,
 ): Promise<{ data: T; meta: Record<string, unknown> }> {
   // The static client demo has no server. It answers here, at the one seam every screen
   // already goes through, so nothing above this line knows the difference.
@@ -53,6 +81,11 @@ export async function request<T>(
   }
 
   if (!response.ok || body.error) {
+    // An expired access token is an ordinary state, not an error to show anyone: rotate
+    // and replay once. A second 401 means the session is genuinely over.
+    if (response.status === 401 && retryAfterRefresh && !path.startsWith('/api/v1/auth/')) {
+      if (await refreshSession()) return request<T>(path, init, false);
+    }
     throw new ApiError(
       body.error?.code ?? 'internal',
       body.error?.message ?? 'Something went wrong.',
