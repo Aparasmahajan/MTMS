@@ -12,3 +12,7 @@ next-env.d.ts
 # The file-backed store. Delete it to reseed from lib/server/seed.ts.
 data/tracker.json
 data/tracker.json.tmp
+
+# Python bytecode from running the drift agent locally.
+__pycache__/
+*.pyc

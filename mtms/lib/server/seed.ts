@@ -627,6 +627,8 @@ export async function buildSeed(): Promise<StoreData> {
 
   return {
     version: STORE_VERSION,
+    // The driver owns this from here on; 0 means "never written".
+    revision: 0,
     tenants: [
       { id: TENANT_ID, name: 'Flow One', slug: 'flow-one', created_at: createdAt, status: 'active' },
     ],
@@ -649,5 +651,7 @@ export async function buildSeed(): Promise<StoreData> {
     drift_observations,
     drift_reports,
     drift_promotions: [],
+    refresh_tokens: [],
+    events: [],
   };
 }

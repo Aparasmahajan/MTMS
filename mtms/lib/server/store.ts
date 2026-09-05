@@ -1,11 +1,10 @@
-import fs from 'node:fs';
-import fsp from 'node:fs/promises';
 import path from 'node:path';
 import type {
   AuditEntry,
   Cell,
   Defect,
   DeliverableColumn,
+  DomainEvent,
   DriftDeliverable,
   DriftObservation,
   DriftPromotion,
@@ -17,31 +16,41 @@ import type {
   ModuleLibraryEntry,
   Project,
   ProjectConfig,
+  RefreshToken,
   Role,
   Run,
   Subactivity,
   Tenant,
   UserWithSecret,
 } from '../shared/domain';
+import { RevisionConflict, type StoreDriver } from './storage/driver';
+import { FileDriver } from './storage/file-driver';
 
 /**
  * The store.
  *
- * One JSON document on disk, read once into memory and written back through a single
- * serialised queue. That is the same constraint TMS's workbook store lives under —
- * a single long-running process — and it is deliberate: the matrix is read constantly
- * and written rarely, so a whole-document write per mutation is cheap and leaves no
- * room for a torn read.
+ * One JSON document, read into memory and written back through a serialised queue. Where
+ * it lives is a driver's business (`lib/server/storage/`): the file by default, Postgres
+ * when `DATABASE_URL` is set.
  *
- * The narrow `cells` table is the part that matters for the eventual Postgres move:
- * one row per (module, subactivity, column), never a wide row per module, because
- * columns are user-configurable.
+ * Concurrency is optimistic rather than exclusive. Each read carries the revision it saw;
+ * a write states the revision it expects to replace, and a driver refuses if that is stale.
+ * `mutate()` then re-reads and **re-runs the callback** against fresh data, so a change
+ * lands on top of a concurrent one rather than over it. Callbacks must therefore be safe to
+ * run more than once — in practice they only touch the store they are handed.
+ *
+ * The narrow `cells` table is the part that matters for the relational move: one row per
+ * (module, subactivity, column), never a wide row per module, because columns are
+ * user-configurable. `storage/schema.sql` is that target.
  */
 
 export interface StoreData {
   version: number;
+  /** Bumped by the driver on every write. Optimistic concurrency turns on this. */
+  revision: number;
   tenants: Tenant[];
   users: UserWithSecret[];
+  refresh_tokens: RefreshToken[];
   roles: Role[];
   memberships: Membership[];
   invitations: Invitation[];
@@ -60,109 +69,101 @@ export interface StoreData {
   drift_observations: DriftObservation[];
   drift_reports: DriftReport[];
   drift_promotions: DriftPromotion[];
+  /** The outbox. Domain events wait here until a consumer drains them. */
+  events: DomainEvent[];
 }
 
 /**
  * 2: `cell_audit` became `audit`, carrying structural changes as well as cell changes.
- * 3: drift stopped being pre-computed rows. Hashes are now observations reported per
- *    file per environment, and every row, verdict and warning is derived from them.
+ * 3: drift stopped being pre-computed rows — hashes are reported observations.
+ * 4: added `revision` (optimistic concurrency), `refresh_tokens` and the `events` outbox.
  */
-export const STORE_VERSION = 3;
+export const STORE_VERSION = 4;
 
-function dataDir(): string {
-  return process.env.TRACKER_DATA_DIR ?? path.join(process.cwd(), 'data');
-}
+/** How many times a mutation is re-applied before a conflict is given up on. */
+const MAX_CONFLICT_RETRIES = 5;
 
 function storePath(): string {
-  return process.env.TRACKER_STORE_PATH ?? path.join(dataDir(), 'tracker.json');
+  return (
+    process.env.TRACKER_STORE_PATH ??
+    path.join(process.env.TRACKER_DATA_DIR ?? path.join(process.cwd(), 'data'), 'tracker.json')
+  );
 }
 
-let cache: StoreData | null = null;
-/** Every write chains onto this, so two concurrent requests cannot interleave. */
+let driver: StoreDriver | null = null;
+let cache: { data: StoreData; revision: number } | null = null;
+/** Every write chains onto this, so two requests in one process cannot interleave. */
 let writeChain: Promise<void> = Promise.resolve();
 
-function readFromDisk(): StoreData | null {
-  const file = storePath();
-  if (!fs.existsSync(file)) return null;
-  try {
-    const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as StoreData;
-    if (parsed.version !== STORE_VERSION) {
-      // A version bump means the seed shape changed under a store written by an older
-      // build. Reseeding is right for a pilot; a migration list replaces this later.
-      console.warn(
-        `[store] on-disk version ${parsed.version} does not match ${STORE_VERSION} — reseeding`,
-      );
-      return null;
-    }
-    return parsed;
-  } catch (error) {
-    console.error('[store] could not parse the store file, reseeding', error);
-    return null;
+/** File by default; Postgres when a connection string is configured. */
+export function storeDriver(): StoreDriver {
+  if (driver) return driver;
+
+  const databaseUrl = process.env.DATABASE_URL;
+  if (databaseUrl) {
+    // Required lazily so a file-store deployment never loads the Postgres code path.
+    const { PostgresDriver } = require('./storage/postgres-driver') as typeof import('./storage/postgres-driver');
+    driver = new PostgresDriver(databaseUrl);
+  } else {
+    driver = new FileDriver(storePath());
   }
+  return driver;
 }
 
-async function writeToDisk(data: StoreData): Promise<void> {
-  const file = storePath();
-  await fsp.mkdir(path.dirname(file), { recursive: true });
-  const temporary = `${file}.tmp`;
-  await fsp.writeFile(temporary, JSON.stringify(data, null, 2), 'utf8');
-  // Rename is atomic on the same volume, so a crash mid-write cannot truncate the store.
-  await renameWithRetry(temporary, file);
-}
-
-/** Transient Windows failures: a scanner or an indexer holding the destination open
- *  for a moment makes rename-over-existing fail, and retrying clears it. Losing a
- *  write here would lose an audited status change, so it is worth waiting out. */
-const TRANSIENT_RENAME_CODES = new Set(['EPERM', 'EACCES', 'EBUSY']);
-
-async function renameWithRetry(from: string, to: string, attempts = 5): Promise<void> {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      await fsp.rename(from, to);
-      return;
-    } catch (error) {
-      const { code } = error as NodeJS.ErrnoException;
-      if (attempt >= attempts || !code || !TRANSIENT_RENAME_CODES.has(code)) throw error;
-      await new Promise((resolve) => setTimeout(resolve, attempt * 10));
-    }
-  }
-}
-
-/**
- * Reads the store, seeding it on first use. Lazily imports the seed so the seed data
- * is not pulled into any bundle that only reads.
- */
-export async function getStore(): Promise<StoreData> {
+async function load(): Promise<{ data: StoreData; revision: number }> {
   if (cache) return cache;
 
-  const onDisk = readFromDisk();
-  if (onDisk) {
-    cache = onDisk;
-    return cache;
+  const stored = await storeDriver().read();
+
+  if (stored) {
+    if (stored.data.version === STORE_VERSION) {
+      cache = stored;
+      return cache;
+    }
+    // A version bump means the seed shape changed under a store written by an older build.
+    // Reseeding is right for a pilot; a migration list replaces this before real data.
+    console.warn(
+      `[store] on-disk version ${stored.data.version} does not match ${STORE_VERSION} — reseeding`,
+    );
   }
 
   const { buildSeed } = await import('./seed');
   const seeded = await buildSeed();
-  cache = seeded;
-  await writeToDisk(seeded);
-  return seeded;
+  const revision = await storeDriver().write(seeded, stored?.revision ?? 0);
+  cache = { data: seeded, revision };
+  return cache;
+}
+
+export async function getStore(): Promise<StoreData> {
+  return (await load()).data;
 }
 
 /**
- * Applies a mutation and persists it. Mutations run one at a time and in order;
- * the callback receives the live document and may edit it in place.
+ * Applies a mutation and persists it. Mutations run one at a time within a process, and
+ * are retried against fresh data if another process wrote first.
  */
 export async function mutate<T>(fn: (data: StoreData) => T | Promise<T>): Promise<T> {
-  const store = await getStore();
-
   const run = writeChain.then(async () => {
-    const result = await fn(store);
-    await writeToDisk(store);
-    return result;
+    for (let attempt = 1; ; attempt++) {
+      const current = await load();
+      const result = await fn(current.data);
+
+      try {
+        const revision = await storeDriver().write(current.data, current.revision);
+        cache = { data: current.data, revision };
+        return result;
+      } catch (error) {
+        if (!(error instanceof RevisionConflict) || attempt >= MAX_CONFLICT_RETRIES) throw error;
+        // Drop the stale document, including the edits just applied to it, and start over
+        // from what the other writer left behind.
+        cache = null;
+        console.warn(`[store] ${error.message} Re-applying (attempt ${attempt + 1}).`);
+      }
+    }
   });
 
-  // Keep the chain alive even when this mutation rejects, or one failed write would
-  // wedge every later one.
+  // Keep the chain alive even when this mutation rejects, or one failed write would wedge
+  // every later one.
   writeChain = run.then(
     () => undefined,
     () => undefined,
@@ -171,8 +172,14 @@ export async function mutate<T>(fn: (data: StoreData) => T | Promise<T>): Promis
   return run;
 }
 
-/** Test seam: drops the in-memory copy so the next read comes from disk (or reseeds). */
+/** Test seam: drops the in-memory copy so the next read comes from the driver. */
 export function resetStoreCache(): void {
+  cache = null;
+}
+
+/** Test seam: swaps the driver, e.g. for an in-memory Postgres. */
+export function setStoreDriver(next: StoreDriver | null): void {
+  driver = next;
   cache = null;
 }
 

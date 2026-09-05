@@ -41,11 +41,16 @@ so serve it over HTTPS or a browser will not keep the session.
 npm test
 ```
 
-141 tests over the two things worth pinning down: the pure rules in `lib/shared/vocabulary.ts`
-— the subactivity roll-up, readiness, stage bucketing — and the rules the server refuses to
-break in `lib/server/service.ts`, chiefly the FNI gate and the permission checks. A
-regression fixture holds the seeded projection to its hand-verified numbers, so a change to
-a rule that would shift what the dashboard reports fails loudly.
+189 tests over the things worth pinning down: the pure rules in `lib/shared/vocabulary.ts`
+— the subactivity roll-up, readiness, stage bucketing — the rules the server refuses to
+break in `lib/server/service.ts`, chiefly the FNI gate and the permission checks, the drift
+verdicts and their warnings, and the concurrency, session-rotation and outbox behaviour from
+Part 6. A regression fixture holds the seeded projection to its hand-verified numbers, so a
+rule change that would shift what the dashboard reports fails loudly.
+
+What the tests do **not** cover is anything needing a server — Postgres, Redis, a Kafka
+broker, a browser, a JDK. None is installed here, so that code is written and typechecked
+but has never run. `pending.md` lists it under "Unverified".
 
 ## The static client demo
 
@@ -106,6 +111,17 @@ One JSON document at `data/tracker.json`, seeded on first run from `lib/server/s
 **Delete the file to reseed.** Writes go through a single serialised queue and land via
 `write-temp + rename`, so a crash cannot truncate it.
 
+Concurrency is optimistic rather than exclusive. Every read carries the revision it saw and
+every write states the revision it expects to replace; if another process got there first,
+the mutation is **re-applied against fresh data** rather than overwriting. So a callback
+passed to `mutate()` must be safe to run more than once.
+
+Set `DATABASE_URL` and the document moves to Postgres with the same guarantee — the write
+becomes `UPDATE … WHERE revision = $expected`. That is the staged move: it buys
+multi-process safety without rewriting every mutation. `lib/server/storage/schema.sql` is
+the relational target for the rest. **The Postgres path has never been run** — there is no
+database on the development machine; see `pending.md`.
+
 The shape is deliberately relational, ready to port to Postgres unchanged. In particular
 cells live in a narrow table — `(module_id, subactivity_id, column_key, status, changed_by,
 changed_at)` — never a wide row per module, because columns are user-configurable.
@@ -134,20 +150,57 @@ only to disable controls and say why.
 
 ```
 app/
-  (app)/            the nine authenticated screens
-  api/v1/           18 route handlers, TMS-shaped { data, meta } / { error }
+  (app)/            the ten authenticated screens
+  api/v1/           28 route handlers, TMS-shaped { data, meta } / { error }
   login/ accept-invite/
   globals.css       Industry design tokens and the blueprint frame
-components/         AppShell, TrackerProvider, primitives
+components/         AppShell, TrackerProvider, primitives, screens/
 lib/
-  shared/           vocabulary · permissions · domain · views  (pure, both sides import it)
-  server/           store · seed · auth · api · service · session
+  shared/           vocabulary · promotion · permissions · domain · views  (pure, both sides)
+  server/           store · seed · auth · sessions · api · service · session · mailer
+                    drift · cache · events · storage/{driver,file,postgres,schema.sql}
   client/           api · optimistic
+  demo/             config · runtime      the static demo's stand-in server
+agent/              report_hashes.py      hashes, from each environment
+contracts/          openapi.yaml          the contract both back ends answer to
+services/api-java/  the Spring Boot port, started at StatusVocabulary
+e2e/                Playwright specs (needs @playwright/test)
 ```
 
 `lib/shared/vocabulary.ts` is the file to read first: the roll-up rule and readiness live
 there as pure functions, and the server enforces the FNI gate with the same code the client
 renders the matrix with, so the two cannot disagree about what 100% means.
+
+## Running it for real
+
+| Variable | What it turns on | Without it |
+|---|---|---|
+| `JWT_SECRET` | **Required in production.** Signs the access token. | Refuses to start |
+| `DATABASE_URL` | Postgres instead of the JSON file | The file store |
+| `REDIS_URL` | Redis in front of the snapshot projection | An in-process LRU |
+| `KAFKA_BROKERS` | Publishes the six domain events | They are recorded and logged |
+| `DRIFT_INGEST_TOKEN` | Lets the drift agents report hashes | No agent can post |
+| `MAIL_TRANSPORT` | Sends invitation emails | The link is returned to the admin |
+
+The optional drivers (`pg`, `ioredis`, `kafkajs`) are loaded only when their variable is
+set, and each throws a message naming the package to install rather than a
+module-not-found stack. None of them is installed here.
+
+Sessions are a short access token plus a rotating refresh token. Rotation is on every use,
+and **a token presented twice revokes its whole family** — two parties hold it, and there is
+no way to tell the legitimate client from a thief.
+
+Domain events go through an outbox: they are written in the same store write as the change
+that caused them, then drained. So "the cell changed" and "the event was published" cannot
+disagree — but a drain can repeat, so consumers must be idempotent.
+
+## The Spring Boot port
+
+`contracts/openapi.yaml` is the contract both back ends answer to. `services/api-java/`
+starts with `StatusVocabulary.java` — the roll-up, readiness and stage rules — because that
+is the only code whose behaviour must be *identical* in both implementations. Two services
+can differ in every other way; if they differ about what 58% means, the matrix stops being
+evidence. Neither has been compiled.
 
 ## Relationship to TMS
 
