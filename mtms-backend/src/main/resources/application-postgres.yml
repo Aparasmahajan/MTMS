@@ -1,0 +1,59 @@
+# The profile that uses real infrastructure.
+#
+#   ./mvn.sh spring-boot:run -Dspring-boot.run.profiles=postgres
+#
+# Re-enables the autoconfiguration the default profile switches off. The empty `exclude`
+# list is doing real work: profile properties replace the default list rather than adding
+# to it, which is what turns the datasource, Flyway, Redis and Kafka back on.
+
+spring:
+  autoconfigure:
+    exclude:
+
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/mtms}
+    username: ${DATABASE_USER:mtms}
+    password: ${DATABASE_PASSWORD:mtms}
+    hikari:
+      # Sized for a service that holds connections briefly. The projection is one read and
+      # a mutation is one short transaction, so a large pool would mostly be idle sockets —
+      # and Postgres pays per connection whether or not it is doing anything.
+      maximum-pool-size: ${DATABASE_POOL_SIZE:10}
+      minimum-idle: 2
+      connection-timeout: 3000
+      # Shorter than any sensible proxy or firewall idle timeout, so the pool retires
+      # connections before something upstream silently drops them.
+      max-lifetime: 600000
+      pool-name: mtms-pool
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    # Fail rather than guess if the database already has tables from something else.
+    baseline-on-migrate: false
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2s
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    producer:
+      # The outbox already guarantees the event was recorded; acks=all is what makes
+      # "published" mean the broker will not lose it either.
+      acks: all
+      retries: 3
+      properties:
+        enable.idempotence: true
+
+mtms:
+  storage: postgres
+  cache:
+    type: redis
+  events:
+    publisher: kafka
+  seed-on-empty-database: false
+  security:
+    secure-cookies: true
