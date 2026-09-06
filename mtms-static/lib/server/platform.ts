@@ -310,6 +310,8 @@ export async function createOrganisationProject(
       stages: [],
       owners: [],
       link_types: [],
+      // No columns yet, so nothing is tracked per environment yet either.
+      environments: [],
     });
 
     recordPlatform(store, actor, {

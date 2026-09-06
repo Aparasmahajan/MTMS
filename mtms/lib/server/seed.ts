@@ -21,9 +21,10 @@ import type {
   Subactivity,
   UserWithSecret,
 } from '../shared/domain';
-import { DRIFT_ENVIRONMENTS } from '../shared/domain';
+import { DRIFT_ENVIRONMENTS, PROD_ENVIRONMENT } from '../shared/domain';
 import { SEEDED_ROLES } from '../shared/permissions';
 import { STATUS_SETS } from '../shared/vocabulary';
+import { columnDisplayLabel } from '../shared/views';
 import { hashPassword } from './auth';
 import { STORE_VERSION, type StoreData } from './store';
 
@@ -62,10 +63,48 @@ function daysAgo(days: number): string {
 // Deliverable columns — the seeded set for CR_AUTOMATION, in sheet order
 // ---------------------------------------------------------------------------
 
-const COLUMN_SEED: Omit<DeliverableColumn, 'id' | 'project_id' | 'order_index'>[] = [
+/**
+ * The environments a deliverable is loaded onto, in promotion order.
+ *
+ * All three ship enabled. A project without a preprod, or one whose lab is down for a
+ * release, switches it off on Configure and the six preprod columns leave the grid and
+ * the readiness maths together — see `ProjectConfig.environments`.
+ */
+const ENVIRONMENT_SEED = [
+  { key: 'lab', label: 'Lab', short: 'LAB', enabled: true },
+  { key: 'preprod', label: 'Preprod', short: 'PRE', enabled: true },
+  { key: 'prod', label: 'Prod', short: 'PROD', enabled: true },
+];
+
+/**
+ * `perEnvironment` marks a deliverable that is loaded onto each environment separately.
+ * One such entry becomes one column per environment, each taking a plain Not Loaded /
+ * Loaded tick, because the three loads are independent facts rather than one journey:
+ * prod can be ticked with lab blank, which is what a single status could never say.
+ */
+type ColumnSeed = Omit<
+  DeliverableColumn,
+  'id' | 'project_id' | 'order_index' | 'environment' | 'group_key' | 'group_label'
+> & { perEnvironment?: true };
+
+const COLUMN_SEED: ColumnSeed[] = [
   { key: 'oh', label: 'OH', full: 'Order Hub entry created', allowed: [...STATUS_SETS.create], counts: true },
-  { key: 'filecr', label: 'FILECR', full: 'NEI code for File CR', allowed: [...STATUS_SETS.load], counts: true },
-  { key: 'clicr', label: 'CLICR', full: 'NEI code for CLICR', allowed: [...STATUS_SETS.load], counts: true },
+  {
+    key: 'filecr',
+    label: 'FILECR',
+    full: 'NEI code for File CR',
+    allowed: [...STATUS_SETS.simple],
+    counts: true,
+    perEnvironment: true,
+  },
+  {
+    key: 'clicr',
+    label: 'CLICR',
+    full: 'NEI code for CLICR',
+    allowed: [...STATUS_SETS.simple],
+    counts: true,
+    perEnvironment: true,
+  },
   {
     key: 'nemo',
     label: 'NEMO',
@@ -77,18 +116,34 @@ const COLUMN_SEED: Omit<DeliverableColumn, 'id' | 'project_id' | 'order_index'>[
     key: 'html',
     label: 'HTML',
     full: 'HTML report files for File CR and CLICR',
-    allowed: [...STATUS_SETS.load],
+    allowed: [...STATUS_SETS.simple],
     counts: true,
+    perEnvironment: true,
   },
   {
     key: 'json',
     label: 'JSON.Y',
     full: 'json.yaml template — shared by File CR and CLICR',
-    allowed: [...STATUS_SETS.load],
+    allowed: [...STATUS_SETS.simple],
     counts: true,
+    perEnvironment: true,
   },
-  { key: 'valid', label: 'VALID.Y', full: 'validation.yaml — File CR', allowed: [...STATUS_SETS.load], counts: true },
-  { key: 'exec', label: 'EXEC.Y', full: 'execution.yaml — CLICR', allowed: [...STATUS_SETS.load], counts: true },
+  {
+    key: 'valid',
+    label: 'VALID.Y',
+    full: 'validation.yaml — File CR',
+    allowed: [...STATUS_SETS.simple],
+    counts: true,
+    perEnvironment: true,
+  },
+  {
+    key: 'exec',
+    label: 'EXEC.Y',
+    full: 'execution.yaml — CLICR',
+    allowed: [...STATUS_SETS.simple],
+    counts: true,
+    perEnvironment: true,
+  },
   { key: 'bst', label: 'BST', full: 'BST workflow logic', allowed: [...STATUS_SETS.simple], counts: true },
   {
     key: 'lookup',
@@ -102,6 +157,23 @@ const COLUMN_SEED: Omit<DeliverableColumn, 'id' | 'project_id' | 'order_index'>[
   { key: 'access', label: 'ACCESS', full: 'Node access granted', allowed: [...STATUS_SETS.sign], counts: true },
   { key: 'ritm', label: 'RITM', full: 'RITM raised', allowed: [...STATUS_SETS.ritm], counts: false },
 ];
+
+/**
+ * How far the sheet's single load status had got, as a tick per environment.
+ *
+ * The sheet recorded one value per deliverable, so "loaded in prod" is evidence that lab
+ * and preprod were passed on the way. Read forward, not invented: a value of `lab` ticks
+ * lab and leaves the two ahead of it Not Loaded, and a blank stays blank everywhere,
+ * because a blank means nobody said.
+ */
+const LOAD_REACH: Record<string, number> = { notloaded: 0, lab: 1, preprod: 2, prod: 3 };
+
+function perEnvironmentStatus(sheetValue: string, environmentIndex: number): string {
+  if (sheetValue === '') return '';
+  const reach = LOAD_REACH[sheetValue];
+  if (reach === undefined) return sheetValue;
+  return environmentIndex < reach ? 'loaded' : 'notloaded';
+}
 
 // ---------------------------------------------------------------------------
 // Modules — faithful to the DevOps sheet. '' = the cell was left blank.
@@ -300,17 +372,76 @@ export async function buildSeed(): Promise<StoreData> {
       ],
       owners: ['P. Mahajan', 'A. Iyer', 'R. Kaur', 'S. Nair'],
       link_types: ['RITM', 'Jira', 'Repo', 'Run log', 'Report', 'Confluence'],
+      environments: ENVIRONMENT_SEED.map((environment) => ({ ...environment })),
     },
-    { project_id: id('project:CMDB'), node_types: [], stages: [], owners: [], link_types: [] },
-    { project_id: id('project:INVENTORY_SYNC'), node_types: [], stages: [], owners: [], link_types: [] },
+    {
+      project_id: id('project:CMDB'),
+      node_types: [],
+      stages: [],
+      owners: [],
+      link_types: [],
+      environments: [],
+    },
+    {
+      project_id: id('project:INVENTORY_SYNC'),
+      node_types: [],
+      stages: [],
+      owners: [],
+      link_types: [],
+      environments: [],
+    },
   ];
 
-  const columns: DeliverableColumn[] = COLUMN_SEED.map((column, index) => ({
-    ...column,
-    id: id(`column:${column.key}`),
-    project_id: PROJECT_ID,
-    order_index: index,
-  }));
+  /**
+   * Expanded, in sheet order, with each per-environment deliverable becoming one column
+   * per environment. `sheetKey` is carried alongside so the seeded values below — which
+   * are the sheet's, one per deliverable — still find their row.
+   */
+  const columnPlan: { column: DeliverableColumn; sheetKey: string; environmentIndex: number }[] = [];
+  for (const seed of COLUMN_SEED) {
+    const { perEnvironment, ...base } = seed;
+    if (!perEnvironment) {
+      columnPlan.push({
+        column: {
+          ...base,
+          id: id(`column:${base.key}`),
+          project_id: PROJECT_ID,
+          order_index: columnPlan.length,
+          environment: null,
+          group_key: null,
+          group_label: null,
+        },
+        sheetKey: base.key,
+        environmentIndex: -1,
+      });
+      continue;
+    }
+
+    ENVIRONMENT_SEED.forEach((environment, environmentIndex) => {
+      const key = `${base.key}_${environment.key}`;
+      columnPlan.push({
+        column: {
+          ...base,
+          key,
+          label: environment.short,
+          full: `${base.full} — loaded on ${environment.label.toLowerCase()}`,
+          // Only prod enters readiness — see PROD_ENVIRONMENT. The toggle is still per
+          // column on Configure, so a project that wants its lab load to count can say so.
+          counts: base.counts && environment.key === PROD_ENVIRONMENT,
+          id: id(`column:${key}`),
+          project_id: PROJECT_ID,
+          order_index: columnPlan.length,
+          environment: environment.key,
+          group_key: base.key,
+          group_label: base.label,
+        },
+        sheetKey: base.key,
+        environmentIndex,
+      });
+    });
+  }
+
+  const columns: DeliverableColumn[] = columnPlan.map((entry) => entry.column);
 
   const modules: Module[] = [];
   const subactivities: Subactivity[] = [];
@@ -351,12 +482,14 @@ export async function buildSeed(): Promise<StoreData> {
       : [null];
 
     for (const target of targets) {
-      for (const column of columns) {
+      for (const { column, sheetKey, environmentIndex } of columnPlan) {
+        const sheetValue = seed.values[sheetKey] ?? '';
         cells.push({
           module_id: moduleId,
           subactivity_id: target,
           column_key: column.key,
-          status: seed.values[column.key] ?? '',
+          status:
+            environmentIndex < 0 ? sheetValue : perEnvironmentStatus(sheetValue, environmentIndex),
           changed_by: null,
           changed_at: null,
         });
@@ -364,13 +497,15 @@ export async function buildSeed(): Promise<StoreData> {
     }
   }
 
-  const columnLabel = (key: string): string =>
-    columns.find((column) => column.key === key)?.label ?? key.toUpperCase();
+  const columnLabel = (key: string): string => {
+    const column = columns.find((candidate) => candidate.key === key);
+    return column ? columnDisplayLabel(column) : key.toUpperCase();
+  };
 
   const auditSeed: { ref: string; column: string; what: string; who: string; days: number }[] = [
     { ref: 'a12', column: 'fni', what: 'Completed → Pending, waiting on access', who: 'A. Iyer', days: 1 },
     { ref: 'a16', column: 'nemo', what: 'set Not Created', who: 'S. Nair', days: 2 },
-    { ref: 'a10', column: 'exec', what: 'Not Loaded → Loaded in prod', who: 'P. Mahajan', days: 2 },
+    { ref: 'a10', column: 'exec_prod', what: 'Not Loaded → Loaded', who: 'P. Mahajan', days: 2 },
     { ref: 'a3', column: 'nemo', what: 'Created', who: 'R. Kaur', days: 3 },
     { ref: 'a14', column: 'oh', what: 'set Not Created', who: 'A. Iyer', days: 6 },
   ];

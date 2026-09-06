@@ -133,8 +133,10 @@ describe('the audit trail', () => {
   });
 
   it('records a reorder', async () => {
-    await moveColumn(admin, project, 'clicr', 'up');
-    expect((await since(1))[0]?.what).toBe('moved CLICR earlier on the matrix');
+    await moveColumn(admin, project, 'clicr_lab', 'up');
+    // The deliverable is part of the name away from the grid: on the matrix the header
+    // above the column says CLICR, and in the change feed there is no header.
+    expect((await since(1))[0]?.what).toBe('moved CLICR·LAB earlier on the matrix');
   });
 
   it('says how many cells a narrowed column left behind', async () => {

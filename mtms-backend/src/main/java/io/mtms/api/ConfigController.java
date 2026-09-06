@@ -67,6 +67,22 @@ public class ConfigController {
     return ApiResponse.ok(snapshots.of(actor));
   }
 
+  public record EnvironmentRequest(Boolean enabled) {}
+
+  /**
+   * Switches one environment on or off.
+   *
+   * <p>PATCH rather than DELETE on purpose: switching an environment off keeps every cell
+   * recorded against it. Nothing here removes anything.
+   */
+  @PatchMapping("/environments/{key}")
+  public ApiResponse.Success<Snapshot> setEnvironmentEnabled(
+      @PathVariable("key") String key, @RequestBody EnvironmentRequest request, Actor actor) {
+
+    config.setEnvironmentEnabled(actor, key, Boolean.TRUE.equals(request.enabled()));
+    return ApiResponse.ok(snapshots.of(actor));
+  }
+
   public record ListValueRequest(@NotBlank String list, @NotBlank String value) {}
 
   @PostMapping("/lists")

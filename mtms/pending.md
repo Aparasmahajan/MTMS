@@ -3,7 +3,7 @@
 **Handoff document.** Written to be read cold, with no prior conversation. Parts 1–6 are
 built; Part 4 is all but two items. The rename to MTMS and the static client demo are done.
 
-**What is verified and what is not.** Every rule is tested (189 tests). The Part 6
+**What is verified and what is not.** Every rule is tested (224 tests). The Part 6
 *drivers* are not: there is no Postgres, Redis, Kafka broker, browser or JDK on the
 development machine, so that code is written, typechecked and reviewed but has never
 executed. Each such file says so at the top. The list is under "Unverified" below — read it
@@ -29,7 +29,7 @@ cross-reference in this file and in the code comments keeps resolving.
 cd tracker/mtms
 npm install
 npm run dev          # http://localhost:3100
-npm test             # 211 tests — run this before and after any change to the rules
+npm test             # 224 tests — run this before and after any change to the rules
 npm run build:demo   # writes demo/ — the static client demo, no server needed
 ```
 
