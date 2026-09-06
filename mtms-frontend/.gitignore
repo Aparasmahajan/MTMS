@@ -1,8 +1,10 @@
 node_modules/
 .next/
-out/
-# The static client demo, and the API routes while `build:demo` has them parked.
-demo/
+/out/
+# The built static site at the project root, and the API routes while `build:demo` has
+# them parked. The leading slash matters: an unanchored `demo/` also matches `lib/demo/`,
+# which holds source the app imports — it was silently kept out of the repository.
+/demo/
 .api-parked/
 *.tsbuildinfo
 next-env.d.ts

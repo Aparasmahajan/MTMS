@@ -132,9 +132,23 @@ async function load(): Promise<{ data: StoreData; revision: number }> {
 
   const { buildSeed } = await import('./seed');
   const seeded = await buildSeed();
-  const revision = await storeDriver().write(seeded, stored?.revision ?? 0);
-  cache = { data: seeded, revision };
-  return cache;
+
+  try {
+    const revision = await storeDriver().write(seeded, stored?.revision ?? 0);
+    cache = { data: seeded, revision };
+    return cache;
+  } catch (error) {
+    if (!(error instanceof RevisionConflict)) throw error;
+
+    // Somebody else seeded first. This is not a failure — it is two processes starting
+    // against an empty store at the same moment, which happens every time a static export
+    // prerenders pages in parallel workers, and would happen to two app instances booting
+    // together. Take their document rather than fighting for ours; the seed is the same.
+    const theirs = await storeDriver().read();
+    if (!theirs) throw error;
+    cache = theirs;
+    return cache;
+  }
 }
 
 export async function getStore(): Promise<StoreData> {
