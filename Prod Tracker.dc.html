@@ -154,7 +154,7 @@
       <h2 style="margin:0 0 var(--space-6)">Sign in</h2>
       <div style="display:flex;flex-direction:column;gap:var(--space-4)">
         <label style="display:flex;flex-direction:column;gap:var(--space-1);font-size:13px;color:var(--color-neutral-700)">Work email
-          <input class="input" type="email" value="{{ loginEmail }}" onChange="{{ onLoginEmail }}" placeholder="name@nokia.com">
+          <input class="input" type="email" value="{{ loginEmail }}" onChange="{{ onLoginEmail }}" placeholder="name@mahajan.com">
         </label>
         <label style="display:flex;flex-direction:column;gap:var(--space-1);font-size:13px;color:var(--color-neutral-700)">Password
           <input class="input" type="password" value="{{ loginPass }}" onChange="{{ onLoginPass }}" placeholder="••••••••">
@@ -194,7 +194,7 @@
         <span style="font-size:12px;color:var(--color-neutral-600)">an invitation email is sent; the user sets their own password</span>
       </div>
       <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;align-items:center">
-        <input class="input" value="{{ inviteEmail }}" onChange="{{ onInviteEmail }}" placeholder="name@nokia.com" style="width:220px">
+        <input class="input" value="{{ inviteEmail }}" onChange="{{ onInviteEmail }}" placeholder="name@mahajan.com" style="width:220px">
         <input class="input" value="{{ inviteName }}" onChange="{{ onInviteName }}" placeholder="Display name" style="width:170px">
         <select class="input" value="{{ inviteRole }}" onChange="{{ onInviteRole }}" style="width:150px">
           <sc-for list="{{ roleOptions }}" as="r" hint-placeholder-count="7">
@@ -978,12 +978,12 @@ const GRANTS = {
 };
 
 const USERS = [
-  { name: "P. Mahajan", email: "parmahaj@nokia.com", role: "admin", scope: "Flow One — all projects" },
-  { name: "A. Iyer", email: "a.iyer@nokia.com", role: "subadmin", scope: "CR_AUTOMATION, CMDB" },
-  { name: "R. Kaur", email: "r.kaur@nokia.com", role: "dev", scope: "CR_AUTOMATION" },
-  { name: "S. Nair", email: "s.nair@nokia.com", role: "qa", scope: "CR_AUTOMATION" },
-  { name: "V. Rao", email: "v.rao@nokia.com", role: "devops", scope: "CR_AUTOMATION, INVENTORY_SYNC" },
-  { name: "K. Menon", email: "k.menon@nokia.com", role: "viewer", scope: "CR_AUTOMATION" }
+  { name: "P. Mahajan", email: "parmahaj@mahajan.com", role: "admin", scope: "Flow One — all projects" },
+  { name: "A. Iyer", email: "a.iyer@mahajan.com", role: "subadmin", scope: "CR_AUTOMATION, CMDB" },
+  { name: "R. Kaur", email: "r.kaur@mahajan.com", role: "dev", scope: "CR_AUTOMATION" },
+  { name: "S. Nair", email: "s.nair@mahajan.com", role: "qa", scope: "CR_AUTOMATION" },
+  { name: "V. Rao", email: "v.rao@mahajan.com", role: "devops", scope: "CR_AUTOMATION, INVENTORY_SYNC" },
+  { name: "K. Menon", email: "k.menon@mahajan.com", role: "viewer", scope: "CR_AUTOMATION" }
 ];
 
 const PHASES = ["Staging test", "Preprod test", "Prod deployment"];
@@ -1018,8 +1018,8 @@ class Component extends DCLogic {
     loginEmail: "", loginPass: "", loginError: "",
     inviteEmail: "", inviteName: "", inviteRole: "Developer", inviteScope: "CR_AUTOMATION",
     invites: [
-      { email: "n.desai@nokia.com", name: "N. Desai", role: "QA", scope: "CR_AUTOMATION", state: "Invited, 2 Sep — not accepted" },
-      { email: "t.bose@nokia.com", name: "T. Bose", role: "Sub-admin", scope: "Flow One — all projects", state: "Accepted, 1 Sep" }
+      { email: "n.desai@mahajan.com", name: "N. Desai", role: "QA", scope: "CR_AUTOMATION", state: "Invited, 2 Sep — not accepted" },
+      { email: "t.bose@mahajan.com", name: "T. Bose", role: "Sub-admin", scope: "Flow One — all projects", state: "Accepted, 1 Sep" }
     ],
     links: [
       { type: "RITM", label: "RITM0184221", url: "https://snow.internal/RITM0184221" },

@@ -1,0 +1,911 @@
+openapi: 3.1.0
+
+# MTMS — the HTTP contract.
+#
+# This is what both implementations answer to: the Next.js route handlers in `app/api/v1/`
+# today, and the Spring Boot service in `services/api-java/` as it takes over. Generate the
+# Java DTOs from this rather than hand-writing them twice.
+#
+# Two conventions run through every path and are worth stating once:
+#
+#   1. EVERY RESPONSE IS ENVELOPED. Success is `{ data, meta? }`; failure is
+#      `{ error: { code, message, details? } }`. `message` is written for the person who hit
+#      it — the client renders it verbatim rather than inventing its own wording.
+#
+#   2. EVERY MUTATION RETURNS THE WHOLE SNAPSHOT. One round trip, and the client replaces
+#      its state outright. That is why clicking a matrix cell updates the dashboard: there
+#      is no partial update to get wrong.
+#
+# The tenant comes from the session token claim and from nowhere else — never a query
+# parameter, header or body field. The project comes from `?project=` or the project cookie,
+# and is checked against the caller's memberships.
+
+info:
+  title: MTMS — Mahajan Ticket Management System
+  version: 1.0.0
+  description: |
+    Getting change activities into production: an editable, attributable deliverable matrix.
+
+    Permissions are enforced server-side on every request. The client holds the same
+    permission keys only to disable controls and explain why.
+
+servers:
+  - url: /api/v1
+
+tags:
+  - name: auth
+  - name: snapshot
+  - name: matrix
+  - name: modules
+  - name: defects
+  - name: configuration
+  - name: access
+  - name: drift
+
+security:
+  - sessionCookie: []
+
+paths:
+  # ---------------------------------------------------------------------------
+  # Auth
+  # ---------------------------------------------------------------------------
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Sign in with email and password
+      security: []
+      description: |
+        One rejection message covers both a wrong password and an unknown account, so the
+        response cannot be used to enumerate who has an account here.
+
+        Sets two cookies: a short-lived access token scoped to `/`, and a rotating refresh
+        token scoped to `/api/v1/auth` so a long-lived credential travels as rarely as it can.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string }
+                password: { type: string }
+      responses:
+        '200':
+          description: Signed in
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      display_name: { type: string }
+                      email: { type: string }
+        '401': { $ref: '#/components/responses/Error' }
+        '403':
+          description: The invitation has not been accepted yet
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Rotate the session
+      security: []
+      description: |
+        Spends the presented refresh token and issues a successor in the same family.
+
+        **A token presented twice revokes its whole family.** Two parties then hold it and
+        there is no way to tell the legitimate client from a thief, so both are signed out.
+        Losing a session is the correct price for that ambiguity.
+
+        On failure both cookies are cleared, so a client that has lost its session lands on
+        sign-in rather than looping.
+      responses:
+        '200': { description: Rotated }
+        '401': { $ref: '#/components/responses/Error' }
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Sign out
+      security: []
+      description: Revokes the whole refresh-token family, not just the token in hand.
+      responses:
+        '200': { description: Signed out }
+
+  /auth/accept-invite:
+    post:
+      tags: [auth]
+      summary: Set a password from an invitation link
+      security: []
+      description: Invitation tokens are single-use and expiring. Accepting one consumes it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token: { type: string }
+                password: { type: string, minLength: 8 }
+      responses:
+        '200': { description: Password set and signed in }
+        '400': { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------------------
+  # Reading
+  # ---------------------------------------------------------------------------
+  /snapshot:
+    get:
+      tags: [snapshot]
+      summary: Everything the screens read, in one projection
+      description: |
+        The whole project: configuration, modules with their cells and roll-ups, audit,
+        defects, library, roles, users, members, invitations and drift.
+
+        A project is a few hundred cells, so one projection beats per-screen queries. It is
+        cached per (tenant, project, user, store revision) — keyed on the revision so a
+        stale read is impossible, and on the user because it carries their permissions.
+      responses:
+        '200': { $ref: '#/components/responses/Snapshot' }
+        '401': { $ref: '#/components/responses/Error' }
+
+  /projects/select:
+    post:
+      tags: [snapshot]
+      summary: Switch the current project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project_id]
+              properties:
+                project_id: { type: string, format: uuid }
+      responses:
+        '200': { $ref: '#/components/responses/Snapshot' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------------------
+  # The matrix
+  # ---------------------------------------------------------------------------
+  /cells:
+    patch:
+      tags: [matrix]
+      summary: Advance one deliverable cell
+      description: |
+        Click-to-advance through the column's configured statuses — no modal. Every advance
+        writes an audit entry and emits `cell.changed`, partitioned by module so a
+        consumer sees one module's changes in the order they happened.
+
+        **A module cell that is a roll-up is refused here**, not merely disabled in the UI:
+        a derived value must not be writable by any route. Send the subactivity instead.
+
+        Requires `deliverable.update`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [module_id, column_key]
+              properties:
+                module_id: { type: string, format: uuid }
+                subactivity_id:
+                  type: [string, 'null']
+                  format: uuid
+                  description: null is the module's own row, which only exists when it has no subactivities.
+                column_key: { type: string }
+                status:
+                  type: string
+                  description: Omit to advance through the column's subset. If given, it must be one the column allows.
+      responses:
+        '200': { $ref: '#/components/responses/Snapshot' }
+        '400':
+          description: A roll-up cell, or a closed module
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------------------
+  # Modules
+  # ---------------------------------------------------------------------------
+  /modules:
+    post:
+      tags: [modules]
+      summary: Create a module
+      description: |
+        A module is a node type plus an activity, and that pair is its identity — a
+        duplicate in the same project is refused. Created with every cell blank, so the
+        gaps show as gaps. Requires `module.create`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [node_type, name]
+              properties:
+                node_type: { type: string }
+                name: { type: string }
+                add_to_library:
+                  type: boolean
+                  default: false
+                  description: Direct creation is the exception path; the normal one is clone-from-library.
+      responses:
+        '200': { $ref: '#/components/responses/Snapshot' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  /modules/{id}:
+    patch:
+      tags: [modules]
+      summary: Set the owner or the FNI target date
+      description: Owner needs `module.edit`; the target date needs `fni.date`.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                owner: { type: [string, 'null'] }
+                fni_target_date: { type: [string, 'null'], format: date }
+      responses:
+        '200': { $ref: '#/components/responses/Snapshot' }
+        '403': { $ref: '#/components/responses/Error' }
+
+  /modules/{id}/fni:
+    post:
+      tags: [modules]
+      summary: Close or reopen a module (FNI sign-off)
+      description: |
+        Step 5 of the handover chain. **Permitted only when readiness is 100% and the FNI
+        column is done**, recomputed from the store — a client that believes the gate is
+        open does not make it open. Emits `module.closed`.
+
+        Requires `fni.signoff`.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [close]
+              properties: { close: { type: boolean } }
+      responses:
+        '200': { $ref: '#/components/responses/Snapshot' }
+        '400':
+          description: Blocked, with every blocking reason named
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /modules/{id}/confirm-prod:
+    post:
+      tags: [modules]
+      summary: Confirm every counted deliverable is loaded in prod
+      description: Requires `prod.confirm`. Emits `deployment.confirmed`.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { $ref: '#/components/responses/Snapshot' }
+
+  /modules/{id}/subactivities:
+    post:
+      tags: [modules]
+      summary: Add a subactivity
+      description: |
+        Adding the **first** subactivity moves the module's own cells onto it, so readiness
+        does not jump when a module gains its first child.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties: { name: { type: string } }
+      responses:
+        '200': { $ref: '#/components/responses/Snapshot' }
+
+  /modules/{id}/subactivities/{subId}:
+    patch:
+      tags: [modules]
+      summary: Rename a subactivity
+      description: Allowed on a closed module, because it changes no status.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/SubId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties: { name: { type: string } }
+      responses:
+        '200': { $ref: '#/components/responses/Snapshot' }
+    delete:
+      tags: [modules]
+      summary: Remove a subactivity
+      description: |
+        Removing the **last** one materialises the module's row from what the roll-up
+        showed, so readiness is preserved across the change.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/SubId' }
+      responses:
+        '200': { $ref: '#/components/responses/Snapshot' }
+
+  /modules/{id}/links:
+    post:
+      tags: [modules]
+      summary: Attach a typed link
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, url]
+              properties:
+                type: { type: string }
+                label: { type: string }
+                url: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/Snapshot' }
+
+  /links/{id}:
+    delete:
+      tags: [modules]
+      summary: Remove a link
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { $ref: '#/components/responses/Snapshot' }
+
+  /library/{id}/clone:
+    post:
+      tags: [modules]
+      summary: Clone a library entry into the project
+      description: |
+        Copies the definition and starts fresh tracking with every cell blank. The library
+        entry is unaffected, and the node type joins the project's list if missing.
+        Requires `module.clone`.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Cloned; `meta` names the new module and its node type
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Snapshot' }
+                  meta:
+                    type: object
+                    properties:
+                      module_id: { type: string, format: uuid }
+                      node_type: { type: string }
+
+  # ---------------------------------------------------------------------------
+  # Defects
+  # ---------------------------------------------------------------------------
+  /defects:
+    post:
+      tags: [defects]
+      summary: Log a defect
+      description: |
+        References a ticket key and links out; this is not a second ticket store and never
+        copies ticket bodies. Emits `defect.raised`. Requires `defect.create`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [module_id, phase, severity, description]
+              properties:
+                module_id: { type: string, format: uuid }
+                phase: { $ref: '#/components/schemas/DefectPhase' }
+                ticket_key: { type: string }
+                child_req_id: { type: string, description: CHILD_REQ_ID — a bare integer identifying the run }
+                severity: { $ref: '#/components/schemas/DefectSeverity' }
+                description: { type: string, minLength: 1 }
+      responses:
+        '200': { $ref: '#/components/responses/Snapshot' }
+
+  /defects/{id}:
+    patch:
+      tags: [defects]
+      summary: Transition or assign a defect
+      description: |
+        Omit `status` to cycle Open → Investigating → Fixed, which is what the table does.
+        Transitioning needs `defect.transition`; assigning needs `defect.assign`.
+        Emits `defect.transitioned`.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status: { $ref: '#/components/schemas/DefectStatus' }
+                assignee: { type: [string, 'null'] }
+      responses:
+        '200': { $ref: '#/components/responses/Snapshot' }
+
+  # ---------------------------------------------------------------------------
+  # Configuration — what makes the app generic
+  # ---------------------------------------------------------------------------
+  /config/columns:
+    post:
+      tags: [configuration]
+      summary: Add a deliverable column
+      description: |
+        Appears at once on the matrix, in the readiness maths, on the module detail and in
+        the audit, for every module. Requires `project.config`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties: { name: { type: string } }
+      responses:
+        '200': { $ref: '#/components/responses/Snapshot' }
+
+  /config/columns/{key}:
+    patch:
+      tags: [configuration]
+      summary: Change whether a column counts, which statuses it takes, or where it sits
+      description: |
+        Each field is applied only if present, so a screen can send whichever the user
+        changed.
+
+        **Changing `allowed` never rewrites cells.** A cell holding a status its column no
+        longer permits keeps it, still counts toward readiness if its tone is done, and is
+        counted into `off_vocabulary` so Configure can report it. Rewriting them would
+        destroy the record of what was actually loaded, which is the one thing this
+        application exists to protect.
+      parameters: [{ name: key, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                counts: { type: boolean }
+                allowed: { type: array, items: { type: string }, minItems: 1 }
+                move: { type: string, enum: [up, down] }
+      responses:
+        '200': { $ref: '#/components/responses/Snapshot' }
+    delete:
+      tags: [configuration]
+      summary: Remove a column
+      description: Its cells go with it, so a reused key cannot resurrect old values.
+      parameters: [{ name: key, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { $ref: '#/components/responses/Snapshot' }
+
+  /config/lists:
+    post:
+      tags: [configuration]
+      summary: Edit node types, pipeline stages, owners or link types
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [list, action, value]
+              properties:
+                list: { type: string, enum: [node_types, stages, owners, link_types] }
+                action: { type: string, enum: [add, remove] }
+                value: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/Snapshot' }
+
+  /projects:
+    post:
+      tags: [configuration]
+      summary: Create a project
+      description: Starts empty, so the team defines its own process. Requires `project.create`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key]
+              properties:
+                key: { type: string, minLength: 2 }
+                name: { type: string }
+                description: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/Snapshot' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------------------
+  # Access
+  # ---------------------------------------------------------------------------
+  /roles/{id}/grants:
+    patch:
+      tags: [access]
+      summary: Grant or revoke one permission on a role
+      description: |
+        **Nobody can grant a permission they do not themselves hold.** Requires
+        `admin.roles.manage`.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [permission, granted]
+              properties:
+                permission: { $ref: '#/components/schemas/PermissionKey' }
+                granted: { type: boolean }
+      responses:
+        '200': { $ref: '#/components/responses/Snapshot' }
+        '403': { $ref: '#/components/responses/Error' }
+
+  /invitations:
+    post:
+      tags: [access]
+      summary: Invite a user
+      description: |
+        Creates the account in `invited` state with a single-use expiring token, and emits
+        `user.invited`. The invitation is committed before delivery is attempted, and a
+        delivery failure never fails the request — the account and its link already exist.
+
+        Nobody can invite someone into a role holding permissions the inviter lacks.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role_id]
+              properties:
+                email: { type: string }
+                display_name: { type: string }
+                role_id: { type: string, format: uuid }
+                scope_project_id:
+                  type: [string, 'null']
+                  format: uuid
+                  description: null is organisation-wide.
+      responses:
+        '200': { $ref: '#/components/responses/Snapshot' }
+
+  /projects/members:
+    post:
+      tags: [access]
+      summary: Add someone to the current project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id, role_id]
+              properties:
+                user_id: { type: string, format: uuid }
+                role_id: { type: string, format: uuid }
+      responses:
+        '200': { $ref: '#/components/responses/Snapshot' }
+
+  /projects/members/{id}:
+    patch:
+      tags: [access]
+      summary: Change a member's role
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role_id]
+              properties: { role_id: { type: string, format: uuid } }
+      responses:
+        '200': { $ref: '#/components/responses/Snapshot' }
+    delete:
+      tags: [access]
+      summary: Remove someone's project access
+      description: |
+        Org-wide access cannot be removed from a project screen, and nobody may remove
+        their own — both refuse with the reason stated.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { $ref: '#/components/responses/Snapshot' }
+        '400': { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------------------
+  # Drift
+  # ---------------------------------------------------------------------------
+  /drift/reports:
+    post:
+      tags: [drift]
+      summary: Report content hashes from one environment
+      security:
+        - ingestToken: []
+        - sessionCookie: []
+      description: |
+        Posted by `agent/report_hashes.py` running on each environment. The caller is a
+        machine, so it presents `DRIFT_INGEST_TOKEN` as a bearer token; a signed-in user
+        with `prod.confirm` may also post, which is what makes it testable by hand.
+
+        **The environment is replaced, not merged.** A file deleted from a server matters as
+        much as one that changed, and a merge cannot see a deletion.
+
+        **Hashes only.** There is no field for file content and there never should be:
+        `mds.rc.add` carries plaintext passwords, and an ingest that accepted content would
+        pull them into the store and onto a screen.
+
+        Entries naming a column the project does not track are dropped rather than
+        rejected — an agent walking `.packinglist` will legitimately find more.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [environment, agent, entries]
+              properties:
+                environment: { $ref: '#/components/schemas/DriftEnvironment' }
+                agent: { type: string }
+                project_key: { type: string }
+                entries:
+                  type: array
+                  maxItems: 5000
+                  items:
+                    type: object
+                    required: [column_key, layer, path, content_hash]
+                    properties:
+                      column_key: { type: string }
+                      layer: { type: string, enum: [java, python, yaml, config] }
+                      path:
+                        type: string
+                        description: Where the agent found it. Metadata — never identity.
+                      content_hash:
+                        type: string
+                        pattern: '^[0-9a-fA-F]{64}$'
+                        description: The identity. sha256 of the bytes.
+                      size_bytes: { type: integer }
+                      built_at: { type: [string, 'null'], format: date-time }
+                      source_modified_at: { type: [string, 'null'], format: date-time }
+                      in_packinglist:
+                        type: boolean
+                        description: '`.packinglist` is the source of truth for what deploys.'
+      responses:
+        '200':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      accepted: { type: integer }
+                      ignored: { type: array, items: { type: string } }
+                      confirmed_promotions: { type: integer }
+        '401': { $ref: '#/components/responses/Error' }
+
+  /drift/promote:
+    post:
+      tags: [drift]
+      summary: Record a promotion
+      description: |
+        **Writes no observation on the target.** Promotion is an intent — "these exact bytes
+        should now be on prod" — and only an agent report from prod turns that into a fact.
+        Writing the hashes forward would make the screen agree with itself and with nothing
+        else.
+
+        The gate is recomputed from the store first. A check that cannot be evaluated reads
+        as closed, not unknown. Requires `prod.confirm`.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                from: { $ref: '#/components/schemas/DriftEnvironment' }
+                to: { $ref: '#/components/schemas/DriftEnvironment' }
+      responses:
+        '200': { $ref: '#/components/responses/Snapshot' }
+        '400':
+          description: Blocked, naming every failing gate
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: tracker_at
+      description: Short-lived access token. The tenant claim inside it is the only source of tenancy.
+    ingestToken:
+      type: http
+      scheme: bearer
+      description: '`DRIFT_INGEST_TOKEN`, for agents that have no session.'
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    SubId:
+      name: subId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    Snapshot:
+      description: The whole project, as it now stands
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data: { $ref: '#/components/schemas/Snapshot' }
+              meta: { type: object, additionalProperties: true }
+    Error:
+      description: Refused
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  schemas:
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { $ref: '#/components/schemas/ErrorCode' }
+            message:
+              type: string
+              description: Written for the person who hit it. Clients render it verbatim.
+            details: {}
+
+    ErrorCode:
+      type: string
+      enum:
+        [bad_request, validation_failed, unauthenticated, forbidden, not_found, conflict, rate_limited, internal]
+
+    PermissionKey:
+      type: string
+      description: The single vocabulary of authorisation, enforced server-side on every request.
+      enum:
+        - project.view
+        - project.create
+        - project.members.manage
+        - project.config
+        - module.create
+        - module.edit
+        - module.clone
+        - deliverable.update
+        - prod.confirm
+        - fni.date
+        - fni.signoff
+        - defect.create
+        - defect.transition
+        - defect.assign
+        - admin.users.manage
+        - admin.roles.manage
+        - admin.audit.view
+
+    StatusKey:
+      type: string
+      description: |
+        The shared status vocabulary. Each column is configured with the subset it may use.
+
+        `""` is a distinct value meaning **nothing recorded** — it is not a status. It has
+        its own tone, renders conspicuously, and counts as a gap on the dashboard. Never
+        coerce it to "not done".
+      enum: ['', notcreated, created, notloaded, lab, prod, loaded, pending, completed, notraised, raised]
+
+    DefectPhase: { type: string, enum: ['Staging test', 'Preprod test', 'Prod deployment'] }
+    DefectSeverity: { type: string, enum: [High, Med, Low] }
+    DefectStatus: { type: string, enum: [Open, Investigating, Fixed] }
+    DriftEnvironment: { type: string, enum: [repo, lab, preprod, prod] }
+    DriftVerdict:
+      type: string
+      enum: ['In step', 'Prod behind', 'Patched in place', 'Never verified', 'Not deployed']
+
+    CellView:
+      type: object
+      required: [column_key, status, rolled_up]
+      properties:
+        column_key: { type: string }
+        status: { $ref: '#/components/schemas/StatusKey' }
+        rolled_up:
+          type: boolean
+          description: Derived from subactivities. Must not be edited directly; the API refuses it.
+        subactivity_count: { type: integer }
+        changed_by: { type: [string, 'null'] }
+        changed_at: { type: [string, 'null'], format: date-time }
+
+    ModuleView:
+      type: object
+      description: A module is a node type plus an activity, and that pair is its identity.
+      properties:
+        id: { type: string, format: uuid }
+        node_type: { type: string }
+        name: { type: string }
+        owner: { type: [string, 'null'] }
+        fni_target_date: { type: [string, 'null'], format: date }
+        closed: { type: boolean }
+        closed_by: { type: [string, 'null'] }
+        readiness:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Done cells ÷ counted columns. Derived, never stored.
+        stage_index: { type: integer, description: Bucketed from readiness across the configured stages. }
+        missing: { type: array, items: { type: string } }
+        blank_count: { type: integer }
+        cells: { type: array, items: { $ref: '#/components/schemas/CellView' } }
+        subactivities: { type: array, items: { type: object } }
+        links: { type: array, items: { type: object } }
+        last_run: { type: [object, 'null'] }
+
+    Snapshot:
+      type: object
+      description: |
+        Everything the ten screens read. Every mutation returns a fresh one, so the client
+        never has to merge a partial update.
+      properties:
+        me:
+          type: object
+          properties:
+            user_id: { type: string, format: uuid }
+            display_name: { type: string }
+            email: { type: string }
+            role_names: { type: array, items: { type: string } }
+            permissions: { type: array, items: { $ref: '#/components/schemas/PermissionKey' } }
+        org: { type: object }
+        project: { type: object }
+        projects: { type: array, items: { type: object } }
+        config: { type: object }
+        modules: { type: array, items: { $ref: '#/components/schemas/ModuleView' } }
+        audit: { type: array, items: { type: object } }
+        defects: { type: array, items: { type: object } }
+        library: { type: array, items: { type: object } }
+        roles: { type: array, items: { type: object } }
+        users: { type: array, items: { type: object } }
+        members: { type: array, items: { type: object } }
+        invitations: { type: array, items: { type: object } }
+        drift:
+          type: object
+          properties:
+            rows: { type: array, items: { type: object } }
+            warnings: { type: array, items: { type: object } }
+            gate: { type: object }
+            reports: { type: array, items: { type: object } }
+            promotions: { type: array, items: { type: object } }

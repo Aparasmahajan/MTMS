@@ -1,0 +1,31 @@
+{
+  "name": "mtms-static",
+  "private": true,
+  "version": "1.0.0",
+  "description": "MTMS — the static build. No server; edits persist in localStorage and sync across tabs.",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "node scripts/build-demo.mjs",
+    "serve": "node scripts/serve-static.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "next": "^14.2.21",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=20.11"
+  }
+}

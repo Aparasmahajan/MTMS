@@ -1,0 +1,5 @@
+cd mtms-backend && ./mvn.sh spring-boot:run
+
+cd mtms-frontend && npm run dev, sign in as parmahaj@mahajan.com / tracker
+
+

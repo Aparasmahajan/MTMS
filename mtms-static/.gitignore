@@ -1,0 +1,29 @@
+node_modules/
+.next/
+/out/
+# The built static site at the project root, and the API routes while `build:demo` has
+# them parked. The leading slash matters: an unanchored `demo/` also matches `lib/demo/`,
+# which holds source the app imports — it was silently kept out of the repository.
+/demo/
+.api-parked/
+*.tsbuildinfo
+next-env.d.ts
+.env
+.env.local
+
+# The file-backed store. Delete it to reseed from lib/server/seed.ts.
+data/tracker.json
+data/tracker.json.tmp
+
+# Python bytecode from running the drift agent locally.
+__pycache__/
+*.pyc
+
+# Playwright
+test-results/
+playwright-report/
+
+# Compiled output from the Java service, which now lives in ../mtms-backend.
+# This copy is a leftover of the split; its build artefacts must never be committed.
+target/
+*.class
