@@ -465,3 +465,179 @@ signed-in user with `prod.confirm` may also post, which is what makes it testabl
 
 Also fixed while here: `scripts/build-demo.mjs` now retries `EBUSY`/`EPERM` on Windows,
 the same way `store.ts` does.
+
+---
+
+## Part 6 — production shape
+
+The single-process write limit is gone, the four production seams exist, and the Java port
+has its first file. **Nothing that needs a server — Postgres, Redis, Kafka, a browser, a
+JDK — has been run**, because none of them is on this machine. Every such file says so at
+the top, and `pending.md` lists them together.
+
+### 6.1 Storage seam and optimistic concurrency · **done, and tested**
+
+`lib/server/storage/` — `driver.ts` (the contract), `file-driver.ts` (default),
+`postgres-driver.ts`, `schema.sql`. Store version → **4**.
+
+The contract is one idea: **every read carries the revision it saw; every write states the
+revision it expects to replace.** A driver refuses a stale write with `RevisionConflict`,
+and `mutate()` re-reads and **re-runs the callback** against fresh data — so a concurrent
+change lands *on top of* another rather than over it. Two instances can no longer lose
+writes.
+
+Postgres holds the document in one row with a `revision` column; the write is
+`UPDATE … WHERE id = $1 AND revision = $4` and a zero row count is the conflict. That was
+the staged choice: it buys the property that matters without rewriting every mutation.
+What it does not buy is SQL over the data — `schema.sql` is that target, with the narrow
+`cells` table, partial unique indexes enforcing that a module cannot hold both its own row
+and subactivity rows, and a note on the three things still to decide (row-level security,
+the missing surrogate key, migrations).
+
+### 6.2 Redis cache · **written**
+
+`lib/server/cache.ts`, in front of `buildSnapshot`. Two rules keep it honest:
+
+- **The key carries the store revision**, so a stale entry is never asked for. There is no
+  invalidation to get wrong.
+- **The key carries the user**, because a snapshot contains that user's permissions and
+  members list. Caching per project alone would serve an admin's view to a viewer — the
+  classic way a cache becomes a security bug.
+
+Without `REDIS_URL` it is an in-process LRU. A Redis that is down logs and falls through to
+the store; it must never take the app down with it.
+
+### 6.3 Kafka, as an outbox · **done, and tested**
+
+`lib/server/events.ts`. All six events the design names are emitted:
+`cell.changed`, `module.closed`, `defect.raised`, `defect.transitioned`,
+`deployment.confirmed`, `user.invited`.
+
+Publishing from inside a mutation would make "the cell changed" and "the event was
+published" two facts that can disagree. So events are appended to the same document as the
+change, in the same `mutate()`, and drained afterwards — the store write is the commit
+point. A failed drain leaves the event pending; a double drain is possible, so **consumers
+must be idempotent** and `id` is there for it. Partitioned by module, so one module's
+changes stay in order.
+
+### 6.4 Refresh tokens · **done, and tested**
+
+`lib/server/sessions.ts`, plus `POST /api/v1/auth/refresh`.
+
+Stored as a hash, so a leaked store cannot be replayed. Rotated on every use. The part
+worth understanding is the **family**: each login starts one, each rotation extends it, and
+a token presented *twice* revokes the whole family — two parties hold it and there is no
+way to tell the legitimate client from the thief. Losing a session is the correct price for
+that ambiguity.
+
+The client refreshes transparently on a 401 and replays once, with a shared in-flight
+promise so several simultaneous 401s cause **one** rotation rather than a self-inflicted
+replay that would revoke the family.
+
+### 6.5 Accessibility · **written**
+
+The matrix is now a real `role="grid"`: `aria-rowcount` / `aria-colcount` over the whole
+grid, `role="row"` with a running `aria-rowindex` that counts group headers and expanded
+subactivities, `rowheader` on the sticky first column, `columnheader` on the header row and
+`gridcell` throughout, plus `aria-expanded` on a module with subactivities. A screen reader
+can now say "row 12 of 41, column 6 of 17" instead of reading a wall of divs.
+
+### 6.6 Playwright · **written, not run**
+
+`playwright.config.ts` and `e2e/matrix.spec.ts` — 12 specs over the journeys only a browser
+can prove: sign-in validation, that a wrong password and an unknown account give the *same*
+message, the grid roles, a cell edit propagating to the dashboard, a roll-up opening rather
+than editing, filters surviving a reload, a viewer being refused **by the API** and not just
+by the UI, the FNI gate, and drift.
+
+Uses `npm run dev` deliberately: the session cookie is `Secure` in production, so a browser
+on plain HTTP would drop it and every test would fail for the wrong reason.
+
+`e2e/` is excluded from `tsconfig.json` so the build stays green without the package.
+
+### 6.7 The Spring Boot port · **started**
+
+`contracts/openapi.yaml` — the contract both implementations answer to, all 27 routes with
+the rules written into the descriptions.
+
+`services/api-java/` starts with `StatusVocabulary.java`, a port of
+`lib/shared/vocabulary.ts`, and `StatusVocabularyTest.java`, the same truth table as the
+TypeScript test case for case. That file is first because it is the only code whose
+behaviour *must* be identical in both: two services may differ in every other way, but if
+they differ about what 58% means the matrix stops being evidence. The rounding note is in
+the source — `Math.round` half-up matches JavaScript, `HALF_EVEN` would not.
+
+### Verified
+
+**189 tests** (20 new), typecheck clean, server build clean, demo build clean.
+
+| Check | Result |
+|---|---|
+| A conflicting write | callback re-runs against fresh data; the third attempt is what lands |
+| Endless conflict | gives up after 5 rather than looping |
+| A losing attempt's edits | discarded — the retry starts from the winner's document, not the dirty one |
+| Cache key | changes per revision **and** per user |
+| Refresh rotation | successor issued; the spent token refused |
+| Replay | revokes the whole family, including the honest successor |
+| Sign-out | revokes the family, not just the token in hand |
+| Token at rest | a sha256, never the token itself |
+| Events | recorded in the same write; partitioned by module |
+| A broker that refuses | event stays pending with the error; the next drain publishes it |
+
+---
+
+## Super admin — the platform level
+
+Previously deferred; built on request. It creates **organisations** (Flow One) and the
+**projects inside them** (CR_AUTOMATION), which is the hierarchy the design bundle already
+describes: Platform → Organisation → Delegated → Project.
+
+### Two boundaries, both deliberate
+
+**Super admin is a flag on the user, not a permission key.** Every key in
+`PERMISSION_KEYS` is granted by a role *inside* one organisation, and that organisation's
+own admin can edit its roles. If "create organisations" were among them, any admin could
+grant it to themselves and mint organisations. `User.is_super_admin` is set in the seed and
+nothing in the app can turn it on — `inviteUser` pins it to `false` explicitly, and the
+typechecker caught the one place that had forgotten to.
+
+**It never touches project data.** The console creates the shell — organisation, roles,
+first admin, empty project — and stops. There is a test asserting no module name, defect or
+ticket key appears anywhere in the platform view: being able to create a thing is not a
+reason to be able to read inside it.
+
+### What it does
+
+| | |
+|---|---|
+| Create an organisation | with its seven standard roles **and** an invited first admin, in one mutation — an organisation with no roles cannot have members and one with no admin cannot be administered, so all three or none |
+| Add a project | empty. No columns, node types or stages: a platform operator pre-filling them would be deciding another team's process |
+| Suspend / restore | a gate on signing in. Nothing is deleted, so the record of what happened survives being switched off. Refuses to suspend the operator's own organisation |
+| Platform log | its own feed, not the project audit — those answer different questions and have different readers |
+
+The first admin arrives by invitation and sets their own password, exactly as every other
+user does. The platform never sets a password for anyone.
+
+Store version → **5** (`users.is_super_admin`, `platform_audit`).
+
+### Verified
+
+**211 tests** (22 new), typecheck clean, server build clean. Plus end-to-end against the
+running app:
+
+| Check | Result |
+|---|---|
+| Super admin reads the platform view | Flow One · 3 projects · 18 modules · 2 admins |
+| A Viewer | `403` |
+| A Sub-admin (nearly every permission in Flow One) | `403` — an org role is never enough |
+| The refusal wording | *"That is not available to your account."* — it does not reveal that super admin exists |
+| Create *Northern Grid* + two projects | both land as **awaiting set-up**, zero columns |
+| The invited admin accepts | lands in **Southern Ring**, sees only `RING_OPS`, holds all 17 permissions as Admin |
+| …and is not a super admin | `403` on the console |
+| …and their invite token replayed | `400`, single-use |
+| Platform events in a project's audit feed | none — they go to `platform_audit` |
+| Suspended organisation signing in | refused, after the password check so it cannot be used to probe which organisations exist |
+
+The demo answers platform routes with an explanation rather than a handler: it carries one
+baked organisation and no way to sign into another, so a created one would be a row leading
+nowhere.

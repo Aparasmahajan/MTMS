@@ -1,0 +1,15 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!--
+  A settings file with nothing in it, on purpose.
+
+  The user-level ~/.m2/settings.xml on this machine activates Nokia profiles whose
+  repositories are unreachable here, and one of them (nei-sdk-repo, a file: URL that does
+  not exist) makes Maven refuse artifacts that are sitting in the local repository. Passing
+  this file with -s replaces those profiles rather than trying to work around them.
+
+  Dependencies still resolve from ~/.m2/repository, which is where everything this project
+  needs already is. Nothing is downloaded; the build is offline (see maven.config).
+-->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">
+  <offline>true</offline>
+</settings>
