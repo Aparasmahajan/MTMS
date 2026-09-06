@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { BLANK, toneOf } from '../../shared/vocabulary';
+import { columnDisplayLabel } from '../../shared/views';
 import type { Actor } from '../auth';
 import {
   addColumn,
@@ -134,7 +135,7 @@ describe('the roll-up guard', () => {
       advanceCell(admin, project, {
         moduleId: module,
         subactivityId: null,
-        columnKey: 'filecr',
+        columnKey: 'filecr_prod',
       }),
       'bad_request',
     );
@@ -148,17 +149,17 @@ describe('the roll-up guard', () => {
     const module = await moduleId(MODULE_FULL_WITH_SUBS);
     const before = await moduleView(admin, MODULE_FULL_WITH_SUBS);
     const first = before.subactivities[0]!;
-    expect(before.cells.find((cell) => cell.column_key === 'filecr')?.status).toBe('prod');
+    expect(before.cells.find((cell) => cell.column_key === 'filecr_prod')?.status).toBe('loaded');
 
     await advanceCell(admin, project, {
       moduleId: module,
       subactivityId: first.id,
-      columnKey: 'filecr',
+      columnKey: 'filecr_prod',
       status: 'notloaded',
     });
 
     const after = await moduleView(admin, MODULE_FULL_WITH_SUBS);
-    const cell = after.cells.find((candidate) => candidate.column_key === 'filecr');
+    const cell = after.cells.find((candidate) => candidate.column_key === 'filecr_prod');
     expect(cell?.status).toBe('notloaded');
     expect(cell?.rolled_up).toBe(true);
     expect(cell?.subactivity_count).toBe(2);
@@ -173,24 +174,24 @@ describe('the roll-up guard', () => {
     const subs = (await moduleView(admin, MODULE_PARTIAL_WITH_SUBS)).subactivities;
     expect(subs).toHaveLength(3);
     expect(
-      subs.every((sub) => sub.cells.find((cell) => cell.column_key === 'filecr')?.status === BLANK),
+      subs.every((sub) => sub.cells.find((cell) => cell.column_key === 'filecr_prod')?.status === BLANK),
     ).toBe(true);
 
     await advanceCell(admin, project, {
       moduleId: module,
       subactivityId: subs[0]!.id,
-      columnKey: 'filecr',
-      status: 'prod',
+      columnKey: 'filecr_prod',
+      status: 'loaded',
     });
     await advanceCell(admin, project, {
       moduleId: module,
       subactivityId: subs[1]!.id,
-      columnKey: 'filecr',
+      columnKey: 'filecr_prod',
       status: 'notloaded',
     });
 
     const cell = (await moduleView(admin, MODULE_PARTIAL_WITH_SUBS)).cells.find(
-      (candidate) => candidate.column_key === 'filecr',
+      (candidate) => candidate.column_key === 'filecr_prod',
     );
     expect(cell?.status).toBe(BLANK);
 
@@ -198,11 +199,11 @@ describe('the roll-up guard', () => {
     await advanceCell(admin, project, {
       moduleId: module,
       subactivityId: subs[2]!.id,
-      columnKey: 'filecr',
-      status: 'prod',
+      columnKey: 'filecr_prod',
+      status: 'loaded',
     });
     const after = (await moduleView(admin, MODULE_PARTIAL_WITH_SUBS)).cells.find(
-      (candidate) => candidate.column_key === 'filecr',
+      (candidate) => candidate.column_key === 'filecr_prod',
     );
     expect(after?.status).toBe('notloaded');
   });
@@ -213,7 +214,7 @@ describe('the roll-up guard', () => {
       advanceCell(admin, project, {
         moduleId: module,
         subactivityId: 'not-a-subactivity',
-        columnKey: 'filecr',
+        columnKey: 'filecr_prod',
       }),
       'not_found',
     );
@@ -485,6 +486,9 @@ describe('removing a column', () => {
         allowed: ['pending', 'completed'],
         counts: true,
         order_index: 0,
+        environment: null,
+        group_key: null,
+        group_label: null,
       });
       store.modules.push({
         id: 'module-cmdb',
@@ -522,7 +526,7 @@ describe('removing a column', () => {
     ).toBe(true);
 
     const snapshot = await snapshotFor(admin);
-    expect(snapshot.config.columns).toHaveLength(13);
+    expect(snapshot.config.columns).toHaveLength(25);
     expect(snapshot.config.columns.some((column) => column.key === 'fni')).toBe(false);
   });
 
@@ -552,7 +556,7 @@ describe('cloning from the library', () => {
     expect(subs).toHaveLength(3);
 
     const cells = await cellsOf(cloned);
-    expect(cells).toHaveLength(3 * 14);
+    expect(cells).toHaveLength(3 * 26);
     expect(cells.every((cell) => cell.status === BLANK)).toBe(true);
   });
 
@@ -588,7 +592,7 @@ describe('the seeded projection', () => {
     const snapshot = await snapshotFor(admin);
 
     expect(snapshot.modules).toHaveLength(18);
-    expect(snapshot.config.columns).toHaveLength(14);
+    expect(snapshot.config.columns).toHaveLength(26);
 
     const fullyInProd = snapshot.modules.filter((module) => module.readiness === 100);
     expect(fullyInProd).toHaveLength(3);
@@ -597,7 +601,7 @@ describe('the seeded projection', () => {
     expect(notStarted).toHaveLength(3);
 
     const blanks = snapshot.modules.reduce((total, module) => total + module.blank_count, 0);
-    expect(blanks).toBe(86);
+    expect(blanks).toBe(118);
   });
 
   it('carries the CFX module at 58% across three subactivities', async () => {
@@ -606,19 +610,36 @@ describe('the seeded projection', () => {
     expect(view.readiness).toBe(58);
     expect(view.subactivities).toHaveLength(3);
     expect(view.cells.every((cell) => cell.rolled_up)).toBe(true);
-    expect(view.blank_count).toBe(4);
-    expect(view.missing).toEqual(['FILECR', 'CLICR', 'NEMO', 'FNI', 'ACCESS']);
+    expect(view.blank_count).toBe(8);
+    expect(view.missing).toEqual(['FILECR·PROD', 'CLICR·PROD', 'NEMO', 'FNI', 'ACCESS']);
   });
 
   it('counts EMAIL and RITM out of readiness but keeps them on the matrix', async () => {
     const snapshot = await snapshotFor(admin);
     const uncounted = snapshot.config.columns.filter((column) => !column.counts);
-    expect(uncounted.map((column) => column.key)).toEqual(['email', 'ritm']);
+    expect(uncounted.map((column) => column.key)).toEqual([
+      // Every lab and preprod column: a tick there records where a deliverable has
+      // been, and readiness has always meant ready in prod.
+      'filecr_lab',
+      'filecr_preprod',
+      'clicr_lab',
+      'clicr_preprod',
+      'html_lab',
+      'html_preprod',
+      'json_lab',
+      'json_preprod',
+      'valid_lab',
+      'valid_preprod',
+      'exec_lab',
+      'exec_preprod',
+      'email',
+      'ritm',
+    ]);
 
     // Every module carries a cell for them all the same — a column that does not count
     // is still tracked, it just does not gate prod.
     for (const module of snapshot.modules) {
-      expect(module.cells).toHaveLength(14);
+      expect(module.cells).toHaveLength(26);
     }
   });
 
@@ -640,7 +661,7 @@ describe('the seeded projection', () => {
     for (const module of snapshot.modules) {
       for (const column of counted) {
         const status = module.cells.find((cell) => cell.column_key === column.key)?.status ?? BLANK;
-        expect(module.missing.includes(column.label)).toBe(toneOf(status) !== 'done');
+        expect(module.missing.includes(columnDisplayLabel(column))).toBe(toneOf(status) !== 'done');
       }
     }
   });

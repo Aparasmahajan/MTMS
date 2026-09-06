@@ -357,7 +357,9 @@ export function ModuleScreen() {
           <Blueprint padded={false}>
             {module.cells.map((cell) => {
               const column = columns.find((candidate) => candidate.key === cell.column_key);
-              if (!column) return null;
+              // A column behind a switched-off environment is in the snapshot with its
+              // cell intact, but it is not part of this project's process right now.
+              if (!column || !column.active) return null;
               const view = cellPresentation(cell, column);
               return (
                 <div
@@ -378,6 +380,7 @@ export function ModuleScreen() {
                         ? `rolled up from ${cell.subactivity_count} subactivities`
                         : view.stamp}
                       {column.counts ? '' : ' · does not count toward prod'}
+                      {column.environment ? ` · ${column.environment}` : ''}
                     </div>
                   </div>
                   <span style={{ fontSize: 12, color: 'var(--color-neutral-700)', flex: 'none' }}>

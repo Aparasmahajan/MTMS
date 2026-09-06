@@ -149,10 +149,42 @@ CREATE TABLE deliverable_columns (
   -- Whether the column enters the readiness percentage.
   counts       boolean NOT NULL DEFAULT true,
   order_index  integer NOT NULL DEFAULT 0,
+  -- The environment this column records, when the deliverable is loaded per environment.
+  -- A deliverable really is loaded onto lab, preprod and prod separately, and the three are
+  -- not a sequence: prod can be loaded while lab is not, because lab was down when the
+  -- window opened. One status per deliverable cannot say that, so each environment gets its
+  -- own column and its own tick. NULL for a column that is not per-environment.
+  environment  text,
+  -- The deliverable these environment columns belong to: 'filecr' for 'filecr_prod'.
+  group_key    text,
+  -- The header spanning a group's environment columns.
+  group_label  text,
   UNIQUE (project_id, key),
-  CHECK (cardinality(allowed) > 0)
+  CHECK (cardinality(allowed) > 0),
+  -- An environment column always belongs to a group, and a grouped one always names an
+  -- environment. Half of the pair is a column the matrix could not head.
+  CHECK ((environment IS NULL) = (group_key IS NULL))
 );
 CREATE INDEX deliverable_columns_order_idx ON deliverable_columns (project_id, order_index);
+CREATE INDEX deliverable_columns_group_idx ON deliverable_columns (project_id, group_key);
+
+-- The environments a project loads onto.
+--
+-- `enabled = false` is the point of the table. A project with no preprod, or whose lab is
+-- down for the release, should not carry a column of permanent blanks dragging every
+-- readiness percentage below 100 — so a disabled environment leaves the matrix and leaves
+-- the maths. Nothing is deleted: the cells recorded against it stay in `cells`, and
+-- switching it back on restores exactly what was there.
+CREATE TABLE project_environments (
+  project_id   uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  key          text NOT NULL,
+  label        text NOT NULL,
+  short_label  text NOT NULL,
+  enabled      boolean NOT NULL DEFAULT true,
+  order_index  integer NOT NULL DEFAULT 0,
+  PRIMARY KEY (project_id, key)
+);
+CREATE INDEX project_environments_order_idx ON project_environments (project_id, order_index);
 
 -- Node types, stages, owners and link types are ordered lists with no data of their own.
 CREATE TABLE project_config_entries (
