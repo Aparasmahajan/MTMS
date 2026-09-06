@@ -34,6 +34,14 @@ export const POST = withoutAuth(async ({ request }) => {
     return fail('unauthenticated', rejection);
   }
 
+  // A suspended organisation is a gate on signing in — nothing is deleted, and the record
+  // of what happened there survives. Checked after the password so the response cannot be
+  // used to discover which organisations exist or are suspended.
+  const tenant = store.tenants.find((candidate) => candidate.id === user.tenant_id);
+  if (!tenant || tenant.status !== 'active') {
+    return fail('forbidden', 'That organisation is suspended. Talk to your administrator.');
+  }
+
   await mutate((data) => {
     const row = data.users.find((candidate) => candidate.id === user.id);
     if (row) row.last_login_at = nowIso();

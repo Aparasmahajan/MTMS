@@ -14,6 +14,7 @@ import type {
   Membership,
   Module,
   ModuleLibraryEntry,
+  PlatformAuditEntry,
   Project,
   ProjectConfig,
   RefreshToken,
@@ -61,6 +62,7 @@ export interface StoreData {
   subactivities: Subactivity[];
   cells: Cell[];
   audit: AuditEntry[];
+  platform_audit: PlatformAuditEntry[];
   library: ModuleLibraryEntry[];
   defects: Defect[];
   links: Link[];
@@ -77,8 +79,9 @@ export interface StoreData {
  * 2: `cell_audit` became `audit`, carrying structural changes as well as cell changes.
  * 3: drift stopped being pre-computed rows — hashes are reported observations.
  * 4: added `revision` (optimistic concurrency), `refresh_tokens` and the `events` outbox.
+ * 5: added `users.is_super_admin` and the `platform_audit` feed.
  */
-export const STORE_VERSION = 4;
+export const STORE_VERSION = 5;
 
 /** How many times a mutation is re-applied before a conflict is given up on. */
 const MAX_CONFLICT_RETRIES = 5;

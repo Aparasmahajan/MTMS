@@ -235,6 +235,11 @@ export interface Snapshot {
     email: string;
     role_names: string[];
     permissions: PermissionKey[];
+    /**
+     * Platform level, above every organisation — not one of `permissions`, because those
+     * are granted by a role an organisation's own admin can edit. See `User.is_super_admin`.
+     */
+    is_super_admin: boolean;
   };
   org: { id: string; name: string };
   project: { id: string; key: string; name: string };

@@ -7,8 +7,8 @@ import { expect, test, type Page } from '@playwright/test';
  * touches — a failure here should tell you what broke for whom.
  */
 
-const ADMIN = { email: 'parmahaj@nokia.com', password: 'tracker' };
-const VIEWER = { email: 'k.menon@nokia.com', password: 'tracker' };
+const ADMIN = { email: 'parmahaj@mahajan.com', password: 'tracker' };
+const VIEWER = { email: 'k.menon@mahajan.com', password: 'tracker' };
 
 async function signIn(page: Page, who: { email: string; password: string }) {
   await page.goto('/login');
@@ -41,7 +41,7 @@ test.describe('signing in', () => {
     await page.getByRole('button', { name: 'Sign in' }).click();
     const wrongPassword = await page.getByRole('alert').textContent();
 
-    await page.getByLabel('Work email').fill('nobody@nokia.com');
+    await page.getByLabel('Work email').fill('nobody@mahajan.com');
     await page.getByLabel('Password').fill('wrong');
     await page.getByRole('button', { name: 'Sign in' }).click();
     await expect(page.getByRole('alert')).toHaveText(wrongPassword ?? '');

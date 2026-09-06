@@ -39,6 +39,15 @@ export const User = z.object({
   tenant_id: uuid,
   email: z.string().email().max(200),
   display_name: z.string().min(1).max(120),
+  /**
+   * Platform level, above tenancy — deliberately NOT a permission key.
+   *
+   * Every permission in `PERMISSION_KEYS` is granted by a role inside one organisation,
+   * and an organisation's admin can edit its own roles. If "create organisations" were one
+   * of those keys, any admin could grant it to themselves. This flag is set outside the
+   * app; nothing in the UI can turn it on.
+   */
+  is_super_admin: z.boolean().default(false),
   status: UserStatus.default('invited'),
   last_login_at: isoDateTime.nullable().default(null),
   created_at: isoDateTime,
@@ -477,6 +486,25 @@ export const DomainEvent = z.object({
   last_error: z.string().nullable().default(null),
 });
 export type DomainEvent = z.infer<typeof DomainEvent>;
+
+/**
+ * Platform actions, which have no project to be audited against.
+ *
+ * Kept apart from `audit` rather than making its `project_id` nullable: those two feeds
+ * answer different questions ("who changed this cell" versus "who created this
+ * organisation"), have different readers, and mixing them would put platform events into
+ * every project's change feed.
+ */
+export const PlatformAuditEntry = z.object({
+  id: uuid,
+  action: z.string(),
+  /** The organisation acted on, when there is one. */
+  tenant_id: uuid.nullable().default(null),
+  what: z.string(),
+  who: z.string(),
+  at: isoDateTime,
+});
+export type PlatformAuditEntry = z.infer<typeof PlatformAuditEntry>;
 
 export const Invitation = z.object({
   id: uuid,
