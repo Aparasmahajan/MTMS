@@ -79,6 +79,16 @@ async function main() {
     console.log('[demo] API routes restored');
   }
 
+  // On Vercel, leave the output where Next.js put it.
+  //
+  // Vercel's Next.js preset detects `output: 'export'` and serves `out/`. Renaming it to
+  // `demo/` means the deployment finds nothing and fails with no useful message. Locally
+  // the rename is worth keeping: `demo/` says what the directory is, and `out/` does not.
+  if (process.env.VERCEL) {
+    console.log('\n[demo] running on Vercel — leaving the export in out/ for the platform to serve');
+    return;
+  }
+
   await withRetry(() => rename(exportDirectory, demoDirectory));
   console.log(`\n[demo] static site written to ${path.relative(process.cwd(), demoDirectory)}/`);
   console.log('[demo] serve it with any static host, e.g.  npx serve demo');
