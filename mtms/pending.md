@@ -29,11 +29,11 @@ cross-reference in this file and in the code comments keeps resolving.
 cd tracker/mtms
 npm install
 npm run dev          # http://localhost:3100
-npm test             # 189 tests — run this before and after any change to the rules
+npm test             # 211 tests — run this before and after any change to the rules
 npm run build:demo   # writes demo/ — the static client demo, no server needed
 ```
 
-Sign in `parmahaj@nokia.com` / `tracker` (Admin), or `k.menon@nokia.com` / `tracker`
+Sign in `parmahaj@mahajan.com` / `tracker` (Admin), or `k.menon@mahajan.com` / `tracker`
 (Viewer) to see permission gating.
 
 ### Where things are
@@ -48,7 +48,8 @@ lib/**/__tests__/   vocabulary · service · columns · modules · projects · a
                     plus harness.ts   ← npm test
 components/     AppShell · TrackerProvider · primitives · screens/ModuleScreen
 app/(app)/      page(dashboard) matrix defects pipeline modules/[id] library access audit drift configure
-app/api/v1/     28 route handlers
+app/platform/   the super admin console — outside the project shell, no project snapshot
+app/api/v1/     31 route handlers
 scripts/        build-demo.mjs
 agent/          report_hashes.py    ← runs on each environment, py2.6+ and py3
 contracts/      openapi.yaml        ← the contract both back ends answer to
@@ -112,7 +113,7 @@ These are not style preferences; each one is load-bearing.
 - **The session cookie is `Secure` in production**, so `next start` over plain HTTP will
   not keep a browser session. Use `npm run dev` locally.
 - **Delete `data/tracker.json` to reseed.** Bumping `STORE_VERSION` in `lib/server/store.ts`
-  forces the same thing on next start. It is at **4** — revision, refresh tokens, outbox.
+  forces the same thing on next start. It is at **5** — is_super_admin and platform_audit.
 - **Every mutation that changes what the matrix shows must call `record()`** in
   `lib/server/service.ts`. A change nobody can attribute is the failure this app exists to
   fix, and `/audit` is only as good as the calls into it.
@@ -189,11 +190,27 @@ handling, and was deliberately not done on a guess.
 The invitation is committed before delivery is attempted, and delivery failure must never
 fail the request — the account and its single-use link already exist. Keep that.
 
-### 4.b Super admin — **do not build without asking**
+### 4.b Super admin — **done**
 
-Organisation creation and first-admin onboarding. The model is built (`Tenant`, org-wide
-`Membership`) and the Configure screen carries a deferral note. The user explicitly deferred
-the screen, twice. Confirm before touching it.
+Built on request, having been deferred twice before. `/platform`, `lib/server/platform.ts`,
+3 routes, 22 tests. See [completed.md](completed.md).
+
+Two invariants to keep:
+
+- **`is_super_admin` is a flag, never a permission key.** Permissions are granted by roles
+  an organisation's own admin can edit; making this one of them would let any admin grant
+  it to themselves. `inviteUser` pins it to `false` explicitly — do not let that default.
+- **The platform view exposes counts and names, never contents.** There is a test asserting
+  no module name, defect or ticket key appears in it. Creating a thing is not a reason to
+  read inside it.
+
+Still open here:
+
+- [ ] **A super admin cannot sign into an organisation they created** to check on it, by
+      design. If that turns out to be needed, it should be an explicit, audited
+      impersonation rather than a quiet widening of the view.
+- [ ] **Nothing deletes an organisation.** Suspend is the only off switch, which is the
+      right default; deletion needs a retention answer first.
 
 ### Worth knowing
 

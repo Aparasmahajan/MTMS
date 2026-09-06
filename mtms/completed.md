@@ -583,3 +583,61 @@ the source — `Math.round` half-up matches JavaScript, `HALF_EVEN` would not.
 | Token at rest | a sha256, never the token itself |
 | Events | recorded in the same write; partitioned by module |
 | A broker that refuses | event stays pending with the error; the next drain publishes it |
+
+---
+
+## Super admin — the platform level
+
+Previously deferred; built on request. It creates **organisations** (Flow One) and the
+**projects inside them** (CR_AUTOMATION), which is the hierarchy the design bundle already
+describes: Platform → Organisation → Delegated → Project.
+
+### Two boundaries, both deliberate
+
+**Super admin is a flag on the user, not a permission key.** Every key in
+`PERMISSION_KEYS` is granted by a role *inside* one organisation, and that organisation's
+own admin can edit its roles. If "create organisations" were among them, any admin could
+grant it to themselves and mint organisations. `User.is_super_admin` is set in the seed and
+nothing in the app can turn it on — `inviteUser` pins it to `false` explicitly, and the
+typechecker caught the one place that had forgotten to.
+
+**It never touches project data.** The console creates the shell — organisation, roles,
+first admin, empty project — and stops. There is a test asserting no module name, defect or
+ticket key appears anywhere in the platform view: being able to create a thing is not a
+reason to be able to read inside it.
+
+### What it does
+
+| | |
+|---|---|
+| Create an organisation | with its seven standard roles **and** an invited first admin, in one mutation — an organisation with no roles cannot have members and one with no admin cannot be administered, so all three or none |
+| Add a project | empty. No columns, node types or stages: a platform operator pre-filling them would be deciding another team's process |
+| Suspend / restore | a gate on signing in. Nothing is deleted, so the record of what happened survives being switched off. Refuses to suspend the operator's own organisation |
+| Platform log | its own feed, not the project audit — those answer different questions and have different readers |
+
+The first admin arrives by invitation and sets their own password, exactly as every other
+user does. The platform never sets a password for anyone.
+
+Store version → **5** (`users.is_super_admin`, `platform_audit`).
+
+### Verified
+
+**211 tests** (22 new), typecheck clean, server build clean. Plus end-to-end against the
+running app:
+
+| Check | Result |
+|---|---|
+| Super admin reads the platform view | Flow One · 3 projects · 18 modules · 2 admins |
+| A Viewer | `403` |
+| A Sub-admin (nearly every permission in Flow One) | `403` — an org role is never enough |
+| The refusal wording | *"That is not available to your account."* — it does not reveal that super admin exists |
+| Create *Northern Grid* + two projects | both land as **awaiting set-up**, zero columns |
+| The invited admin accepts | lands in **Southern Ring**, sees only `RING_OPS`, holds all 17 permissions as Admin |
+| …and is not a super admin | `403` on the console |
+| …and their invite token replayed | `400`, single-use |
+| Platform events in a project's audit feed | none — they go to `platform_audit` |
+| Suspended organisation signing in | refused, after the password check so it cannot be used to probe which organisations exist |
+
+The demo answers platform routes with an explanation rather than a handler: it carries one
+baked organisation and no way to sign into another, so a created one would be a row leading
+nowhere.

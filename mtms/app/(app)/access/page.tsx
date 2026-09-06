@@ -193,7 +193,7 @@ export default function AccessPage() {
             style={{ width: 220 }}
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            placeholder="name@nokia.com"
+            placeholder="name@mahajan.com"
             aria-label="Email"
           />
           <input

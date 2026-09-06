@@ -53,11 +53,11 @@ export async function actorFor(email: string): Promise<Actor> {
   };
 }
 
-export const ADMIN = 'parmahaj@nokia.com';
-export const DEVOPS = 'v.rao@nokia.com';
-export const QA = 's.nair@nokia.com';
-export const DEV = 'r.kaur@nokia.com';
-export const VIEWER = 'k.menon@nokia.com';
+export const ADMIN = 'parmahaj@mahajan.com';
+export const DEVOPS = 'v.rao@mahajan.com';
+export const QA = 's.nair@mahajan.com';
+export const DEV = 'r.kaur@mahajan.com';
+export const VIEWER = 'k.menon@mahajan.com';
 
 export async function projectId(key = 'CR_AUTOMATION'): Promise<string> {
   const store = await getStore();

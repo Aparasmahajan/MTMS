@@ -202,12 +202,12 @@ const LIBRARY_SEED: Omit<ModuleLibraryEntry, 'id' | 'tenant_id'>[] = [
 ];
 
 const USER_SEED = [
-  { name: 'P. Mahajan', email: 'parmahaj@nokia.com', role: 'admin', project: null },
-  { name: 'A. Iyer', email: 'a.iyer@nokia.com', role: 'subadmin', project: null },
-  { name: 'R. Kaur', email: 'r.kaur@nokia.com', role: 'dev', project: PROJECT_ID },
-  { name: 'S. Nair', email: 's.nair@nokia.com', role: 'qa', project: PROJECT_ID },
-  { name: 'V. Rao', email: 'v.rao@nokia.com', role: 'devops', project: PROJECT_ID },
-  { name: 'K. Menon', email: 'k.menon@nokia.com', role: 'viewer', project: PROJECT_ID },
+  { name: 'P. Mahajan', email: 'parmahaj@mahajan.com', role: 'admin', project: null },
+  { name: 'A. Iyer', email: 'a.iyer@mahajan.com', role: 'subadmin', project: null },
+  { name: 'R. Kaur', email: 'r.kaur@mahajan.com', role: 'dev', project: PROJECT_ID },
+  { name: 'S. Nair', email: 's.nair@mahajan.com', role: 'qa', project: PROJECT_ID },
+  { name: 'V. Rao', email: 'v.rao@mahajan.com', role: 'devops', project: PROJECT_ID },
+  { name: 'K. Menon', email: 'k.menon@mahajan.com', role: 'viewer', project: PROJECT_ID },
 ] as const;
 
 /** Pilot only. Every seeded account shares this; real accounts arrive by invitation. */
@@ -239,6 +239,9 @@ export async function buildSeed(): Promise<StoreData> {
     password_hash: passwordHash,
     invite_token_hash: null,
     invite_expires_at: null,
+    // The platform owner. Set here because nothing in the UI can grant it — see the
+    // comment on `User.is_super_admin`.
+    is_super_admin: user.email === 'parmahaj@mahajan.com',
   }));
 
   const memberships: Membership[] = USER_SEED.map((user) => ({
@@ -604,7 +607,7 @@ export async function buildSeed(): Promise<StoreData> {
     {
       id: id('invite:n.desai'),
       tenant_id: TENANT_ID,
-      email: 'n.desai@nokia.com',
+      email: 'n.desai@mahajan.com',
       display_name: 'N. Desai',
       role_id: id('role:qa'),
       project_id: PROJECT_ID,
@@ -615,7 +618,7 @@ export async function buildSeed(): Promise<StoreData> {
     {
       id: id('invite:t.bose'),
       tenant_id: TENANT_ID,
-      email: 't.bose@nokia.com',
+      email: 't.bose@mahajan.com',
       display_name: 'T. Bose',
       role_id: id('role:subadmin'),
       project_id: null,
@@ -653,5 +656,6 @@ export async function buildSeed(): Promise<StoreData> {
     drift_promotions: [],
     refresh_tokens: [],
     events: [],
+    platform_audit: [],
   };
 }

@@ -228,15 +228,29 @@ export function AppShell({ children }: { children: ReactNode }) {
               }}
             >
               <span>Organisations &amp; admins</span>
-              <span
-                style={{
-                  fontFamily: 'var(--font-heading)',
-                  letterSpacing: '.1em',
-                  textTransform: 'uppercase',
-                }}
-              >
-                super admin — later
-              </span>
+              {snapshot.me.is_super_admin ? (
+                <Link
+                  href="/platform"
+                  style={{
+                    fontFamily: 'var(--font-heading)',
+                    letterSpacing: '.1em',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  super admin →
+                </Link>
+              ) : (
+                // Anyone else is told where it lives without being told they cannot reach it.
+                <span
+                  style={{
+                    fontFamily: 'var(--font-heading)',
+                    letterSpacing: '.1em',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  super admin
+                </span>
+              )}
             </div>
           </div>
         ) : null}

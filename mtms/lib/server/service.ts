@@ -457,6 +457,9 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
       email: actor.email,
       role_names: access.roleNames,
       permissions: [...access.permissions],
+      is_super_admin: store.users.some(
+        (user) => user.id === actor.userId && user.is_super_admin,
+      ),
     },
     org: { id: tenant.id, name: tenant.name },
     project: { id: project.id, key: project.key, name: project.name },
@@ -1881,6 +1884,9 @@ export async function inviteUser(
       tenant_id: actor.tenantId,
       email,
       display_name: input.displayName.trim() || email,
+      // Never, and stated rather than defaulted: an organisation's admin invites people
+      // into their own organisation, and must not be able to mint a platform operator.
+      is_super_admin: false,
       status: 'invited',
       last_login_at: null,
       created_at: at,

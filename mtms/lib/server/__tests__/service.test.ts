@@ -313,7 +313,7 @@ describe('permissions', () => {
     await refused(cloneFromLibrary(viewer, project, entry), 'forbidden');
     await refused(
       inviteUser(viewer, project, {
-        email: 'new@nokia.com',
+        email: 'new@mahajan.com',
         displayName: 'New',
         roleId: await roleId('viewer'),
         scopeProjectId: project,
@@ -413,17 +413,17 @@ describe('granting permissions', () => {
 describe('inviting a user', () => {
   it('creates the account, the membership and the invitation', async () => {
     const result = await inviteUser(admin, project, {
-      email: 'N.Desai2@Nokia.com',
+      email: 'N.Desai2@mahajan.com',
       displayName: 'N. Desai',
       roleId: await roleId('qa'),
       scopeProjectId: project,
     });
 
-    expect(result.email).toBe('n.desai2@nokia.com');
+    expect(result.email).toBe('n.desai2@mahajan.com');
     expect(result.inviteToken).toBeTruthy();
 
     const store = await getStore();
-    const user = store.users.find((candidate) => candidate.email === 'n.desai2@nokia.com');
+    const user = store.users.find((candidate) => candidate.email === 'n.desai2@mahajan.com');
     expect(user?.status).toBe('invited');
     expect(user?.password_hash).toBe('');
     expect(user?.invite_token_hash).toBeTruthy();
@@ -432,7 +432,7 @@ describe('inviting a user', () => {
     ).toBe(true);
 
     const snapshot = await snapshotFor(admin);
-    expect(snapshot.invitations.some((invite) => invite.email === 'n.desai2@nokia.com')).toBe(true);
+    expect(snapshot.invitations.some((invite) => invite.email === 'n.desai2@mahajan.com')).toBe(true);
   });
 
   it('refuses a role holding permissions the actor lacks', async () => {
@@ -443,7 +443,7 @@ describe('inviting a user', () => {
 
     const error = await refused(
       inviteUser(admin, project, {
-        email: 'new@nokia.com',
+        email: 'new@mahajan.com',
         displayName: 'New',
         roleId: await roleId('release'),
         scopeProjectId: project,
@@ -456,7 +456,7 @@ describe('inviting a user', () => {
   it('refuses an email that already has an account', async () => {
     await refused(
       inviteUser(admin, project, {
-        email: 'k.menon@nokia.com',
+        email: 'k.menon@mahajan.com',
         displayName: 'K. Menon',
         roleId: await roleId('viewer'),
         scopeProjectId: project,
