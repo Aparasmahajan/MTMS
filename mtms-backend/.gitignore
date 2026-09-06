@@ -1,0 +1,14 @@
+target/
+*.class
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+# Local overrides. application.yml is committed; anything with a real secret is not.
+application-local.yml
+.env
