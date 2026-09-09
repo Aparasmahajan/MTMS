@@ -134,7 +134,18 @@ final class Rows {
               rs.getString("full_name"),
               Sql.textArray(rs, "allowed"),
               rs.getBoolean("counts"),
-              rs.getInt("order_index"));
+              rs.getInt("order_index"),
+              rs.getString("environment"),
+              rs.getString("group_key"),
+              rs.getString("group_label"));
+
+  static final RowMapper<Projects.Environment> ENVIRONMENT =
+      (rs, n) ->
+          new Projects.Environment(
+              rs.getString("key"),
+              rs.getString("label"),
+              rs.getString("short_label"),
+              rs.getBoolean("enabled"));
 
   static final RowMapper<Modules.Module> MODULE =
       (rs, n) ->

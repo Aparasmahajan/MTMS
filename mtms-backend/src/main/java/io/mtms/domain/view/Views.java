@@ -137,6 +137,13 @@ public final class Views {
    *     the record of what was actually loaded — so a cell can outlive its column's vocabulary,
    *     and Configure says so rather than hiding it.
    */
+  /**
+   * @param active whether the column is on the grid and in the maths. False only for a column
+   *     whose environment is switched off. Derived, never stored — the flag lives on the
+   *     environment, so turning preprod back on brings all six of its columns back at once.
+   *     Every column is still projected onto every module, inactive ones included, so the cells
+   *     behind a hidden environment stay addressable and come back untouched.
+   */
   public record ColumnView(
       String id,
       String projectId,
@@ -146,9 +153,14 @@ public final class Views {
       List<String> allowed,
       boolean counts,
       int orderIndex,
-      int offVocabulary) {
+      String environment,
+      String groupKey,
+      String groupLabel,
+      int offVocabulary,
+      boolean active) {
 
-    public static ColumnView of(Projects.DeliverableColumn column, int offVocabulary) {
+    public static ColumnView of(
+        Projects.DeliverableColumn column, int offVocabulary, boolean active) {
       return new ColumnView(
           column.id().toString(),
           column.projectId().toString(),
@@ -158,7 +170,11 @@ public final class Views {
           column.allowed(),
           column.counts(),
           column.orderIndex(),
-          offVocabulary);
+          column.environment(),
+          column.groupKey(),
+          column.groupLabel(),
+          offVocabulary,
+          active);
     }
   }
 
@@ -168,5 +184,6 @@ public final class Views {
       List<Projects.Stage> stages,
       List<String> owners,
       List<String> linkTypes,
+      List<Projects.Environment> environments,
       List<String> phases) {}
 }

@@ -116,7 +116,7 @@ export const DeliverableColumn = z.object({
   id: uuid,
   project_id: uuid,
   key: z.string().min(1).max(40),
-  /** Short header shown on the matrix. */
+  /** Short header shown on the matrix. For an environment column, the environment. */
   label: z.string().min(1).max(12),
   /** Full meaning, shown in the header `title` and on the module detail. */
   full: z.string().min(1).max(200),
@@ -125,6 +125,19 @@ export const DeliverableColumn = z.object({
   /** Whether the column enters the readiness percentage. */
   counts: z.boolean().default(true),
   order_index: z.number().int().nonnegative().default(0),
+  /**
+   * The environment this column records, when the deliverable is tracked per environment.
+   *
+   * A deliverable really is loaded onto lab, preprod and prod separately, and the three
+   * are not a sequence: prod can be loaded while lab is not, because lab was down when
+   * the window opened. One status per deliverable cannot say that, so each environment
+   * gets its own column and its own tick. Null for a column that is not per-environment.
+   */
+  environment: z.string().max(24).nullable().default(null),
+  /** The deliverable these environment columns belong to — `filecr` for `filecr_prod`. */
+  group_key: z.string().max(40).nullable().default(null),
+  /** The header spanning a group's environment columns. */
+  group_label: z.string().max(12).nullable().default(null),
 });
 export type DeliverableColumn = z.infer<typeof DeliverableColumn>;
 
@@ -135,7 +148,35 @@ export const Stage = z.object({
 export type Stage = z.infer<typeof Stage>;
 
 /**
- * The four editable sets on the Configure screen. Ordered lists rather than entities:
+ * A place a deliverable gets loaded onto.
+ *
+ * `enabled: false` is the whole point of the entity. A project that has no preprod, or
+ * whose lab is down for the release, should not carry a column of permanent blanks that
+ * drags every readiness percentage below 100 — so a disabled environment leaves the
+ * matrix and leaves the maths. Its cells are **kept**: switching it back on restores
+ * exactly what was recorded, which is why this is a flag and not a delete.
+ */
+/**
+ * The environment readiness is measured against.
+ *
+ * Readiness has always meant "ready in production", so only the prod column of a
+ * per-environment deliverable counts. A lab tick is the record of where something has
+ * been, not part of the definition of done — if it counted, a release that skipped lab
+ * because lab was down could never reach 100% and its FNI could never be signed.
+ */
+export const PROD_ENVIRONMENT = 'prod';
+
+export const Environment = z.object({
+  key: z.string().min(1).max(24),
+  label: z.string().min(1).max(40),
+  /** Column header — three or four characters, so the grid stays narrow. */
+  short: z.string().min(1).max(6),
+  enabled: z.boolean().default(true),
+});
+export type Environment = z.infer<typeof Environment>;
+
+/**
+ * The editable sets on the Configure screen. Ordered lists rather than entities:
  * they carry no data of their own, and reordering them re-buckets the pipeline.
  */
 export const ProjectConfig = z.object({
@@ -144,6 +185,7 @@ export const ProjectConfig = z.object({
   stages: z.array(Stage).default([]),
   owners: z.array(z.string().min(1).max(120)).default([]),
   link_types: z.array(z.string().min(1).max(40)).default([]),
+  environments: z.array(Environment).default([]),
 });
 export type ProjectConfig = z.infer<typeof ProjectConfig>;
 

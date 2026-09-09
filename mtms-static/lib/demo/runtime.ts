@@ -1,7 +1,11 @@
 import { ApiError } from '@/lib/client/api';
 import { clearSnapshot, loadSnapshot, saveSnapshot } from '@/lib/demo/persistence';
 import { optimisticAdvance, withDerived } from '@/lib/client/optimistic';
-import { DEFECT_STATUS_ORDER, type DefectStatus } from '@/lib/shared/domain';
+import {
+  DEFECT_STATUS_ORDER,
+  PROD_ENVIRONMENT,
+  type DefectStatus,
+} from '@/lib/shared/domain';
 import { hasPermission, permissionDeniedReason, type PermissionKey } from '@/lib/shared/permissions';
 import { promotionGate } from '@/lib/shared/promotion';
 import { BLANK, readiness, rollUp, statusEntry, STATUS_SETS, toneOf } from '@/lib/shared/vocabulary';
@@ -175,7 +179,7 @@ function reroll(snapshot: Snapshot, module: ModuleView): ModuleView {
 }
 
 function subReadiness(snapshot: Snapshot, cells: readonly CellView[]): number {
-  const counted = snapshot.config.columns.filter((column) => column.counts);
+  const counted = snapshot.config.columns.filter((column) => column.counts && column.active);
   return readiness(
     counted.map((column) => cells.find((cell) => cell.column_key === column.key)?.status ?? BLANK),
   );
@@ -690,6 +694,11 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
       counts: true,
       order_index: snapshot.config.columns.length,
       off_vocabulary: 0,
+      // A column added by hand is a plain one — see `addColumn` on the server.
+      environment: null,
+      group_key: null,
+      group_label: null,
+      active: true,
     };
 
     const blank: CellView = {
@@ -804,6 +813,68 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
           ),
         },
         { scope: 'project', label: 'CONFIG', what: `column removed: ${column?.full ?? key}` },
+      ),
+    );
+  }
+
+  /**
+   * The client mirror of `setEnvironmentEnabled`.
+   *
+   * Nothing is removed here either — the columns keep their cells and only `active`
+   * moves, which is what every readiness figure on the screen is recomputed against.
+   */
+  const environmentPatch = at('config/environments/:key', 'PATCH');
+  if (environmentPatch) {
+    must(snapshot, 'project.config');
+    const key = environmentPatch.key!;
+    const environment = snapshot.config.environments.find((entry) => entry.key === key);
+    if (!environment) {
+      throw new ApiError('not_found', 'That environment is not configured on this project.', 404);
+    }
+    const enabled = body.enabled === true;
+    if (!enabled && key === PROD_ENVIRONMENT) {
+      throw new ApiError(
+        'bad_request',
+        'Prod cannot be switched off — readiness is measured against it, and the FNI gate reads that percentage.',
+        400,
+      );
+    }
+
+    const environments = snapshot.config.environments.map((entry) =>
+      entry.key === key ? { ...entry, enabled } : entry,
+    );
+    const columns = snapshot.config.columns.map((column) =>
+      column.environment === key ? { ...column, active: enabled } : column,
+    );
+    const config = { ...snapshot.config, environments, columns };
+    const affected = columns.filter((column) => column.environment === key).length;
+
+    return plain(
+      audited(
+        {
+          ...snapshot,
+          config,
+          modules: snapshot.modules.map((module) =>
+            withDerived(
+              {
+                ...module,
+                subactivities: module.subactivities.map((sub) => ({
+                  ...sub,
+                  readiness: subReadiness({ ...snapshot, config }, sub.cells),
+                })),
+              },
+              columns,
+              config.stages.length,
+            ),
+          ),
+        },
+        {
+          scope: 'project',
+          label: 'CONFIG',
+          what: enabled
+            ? `switched ${environment.label} back on — its ${affected} ${affected === 1 ? 'column is' : 'columns are'} back on the matrix, holding what was recorded before`
+            : `switched ${environment.label} off — its ${affected} ${affected === 1 ? 'column leaves' : 'columns leave'} the matrix and the readiness maths, keeping every cell`,
+        },
       ),
     );
   }

@@ -13,7 +13,12 @@ import type {
   Role,
   Subactivity,
 } from '../shared/domain';
-import { DEFECT_STATUS_ORDER, DRIFT_ENVIRONMENTS, projectKeySchema } from '../shared/domain';
+import {
+  DEFECT_STATUS_ORDER,
+  DRIFT_ENVIRONMENTS,
+  PROD_ENVIRONMENT,
+  projectKeySchema,
+} from '../shared/domain';
 import {
   buildPromotion,
   confirmPromotions,
@@ -49,6 +54,7 @@ import type {
   Snapshot,
   SubactivityView,
 } from '../shared/views';
+import { columnDisplayLabel } from '../shared/views';
 import type { Actor } from './auth';
 import { badRequest, conflict, forbidden, notFound, validationFailed } from './errors';
 import { emit } from './events';
@@ -145,13 +151,36 @@ export function defaultProjectId(store: StoreData, actor: Actor): string {
 
 function configFor(store: StoreData, projectId: string): ProjectConfig {
   const config = store.project_config.find((entry) => entry.project_id === projectId);
-  return config ?? { project_id: projectId, node_types: [], stages: [], owners: [], link_types: [] };
+  return (
+    config ?? {
+      project_id: projectId,
+      node_types: [],
+      stages: [],
+      owners: [],
+      link_types: [],
+      environments: [],
+    }
+  );
 }
 
 function columnsFor(store: StoreData, projectId: string): DeliverableColumn[] {
   return store.columns
     .filter((column) => column.project_id === projectId)
     .sort((a, b) => a.order_index - b.order_index);
+}
+
+/**
+ * Whether a column is on the grid and in the maths.
+ *
+ * Only an environment can switch one off, and it switches off every column that records
+ * it at once. A column naming an environment the project does not configure at all is
+ * active — an unknown environment is a column nobody has disabled, and treating it as
+ * hidden would make deliverables disappear because of a typo in a config list.
+ */
+function isActiveColumn(config: ProjectConfig, column: DeliverableColumn): boolean {
+  if (!column.environment) return true;
+  const environment = config.environments.find((entry) => entry.key === column.environment);
+  return environment ? environment.enabled : true;
 }
 
 /**
@@ -207,8 +236,12 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
   require_(access, 'project.view', 'open this project');
 
   const config = configFor(store, projectId);
+  // Every column is projected onto every module, including those behind a switched-off
+  // environment: the cells stay addressable and come back untouched when it is switched
+  // on again. `active` is what decides the grid and the maths.
   const columns = columnsFor(store, projectId);
-  const countedColumns = columns.filter((column) => column.counts);
+  const activeColumns = columns.filter((column) => isActiveColumn(config, column));
+  const countedColumns = activeColumns.filter((column) => column.counts);
   const cellIndex = indexCells(store.cells);
 
   const statusOf = (moduleId: string, subactivityId: string | null, columnKey: string): Cell =>
@@ -295,8 +328,8 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
       stage_index: stageIndex(percent, config.stages.length),
       missing: countedColumns
         .filter((column) => toneOf(statusFor(column.key)) !== 'done')
-        .map((column) => column.label),
-      blank_count: columns.filter((column) => statusFor(column.key) === BLANK).length,
+        .map(columnDisplayLabel),
+      blank_count: activeColumns.filter((column) => statusFor(column.key) === BLANK).length,
       cells,
       subactivities: subactivityViews,
       links: store.links
@@ -476,11 +509,13 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
       columns: columns.map((column) => ({
         ...column,
         off_vocabulary: offVocabularyCount(store, projectId, column),
+        active: isActiveColumn(config, column),
       })),
       node_types: config.node_types,
       stages: config.stages,
       owners: config.owners,
       link_types: config.link_types,
+      environments: config.environments,
       phases: ['Staging test', 'Preprod test', 'Prod deployment'],
     },
     modules,
@@ -591,7 +626,7 @@ export async function advanceCell(
         : nextStatus(current, column.allowed);
     if (input.status !== undefined && !column.allowed.includes(input.status)) {
       throw validationFailed(
-        `${column.label} cannot take that status. It allows: ${column.allowed
+        `${columnDisplayLabel(column)} cannot take that status. It allows: ${column.allowed
           .map((key) => statusEntry(key).label)
           .join(', ')}.`,
       );
@@ -615,7 +650,7 @@ export async function advanceCell(
 
     record(store, projectId, actor, {
       scope: 'cell',
-      label: column.label,
+      label: columnDisplayLabel(column),
       what: `${statusEntry(current).label} → ${statusEntry(next).label}`,
       moduleId: module.id,
       subactivityId: input.subactivityId,
@@ -645,8 +680,11 @@ export async function advanceCell(
  * client. Mirrors the projection in `buildSnapshot`.
  */
 function moduleReadiness(store: StoreData, module: Module): { percent: number; fniDone: boolean } {
+  const config = configFor(store, module.project_id);
   const columns = columnsFor(store, module.project_id);
-  const counted = columns.filter((column) => column.counts);
+  // Same filter as the projection, or the gate would demand a tick in an environment the
+  // grid does not even show.
+  const counted = columns.filter((column) => column.counts && isActiveColumn(config, column));
   const subs = store.subactivities.filter((sub) => sub.module_id === module.id);
   const index = indexCells(store.cells);
 
@@ -774,13 +812,21 @@ export async function confirmLoadedInProd(
     const module = findModule(store, projectId, moduleId);
     if (module.fni_closed_at) throw badRequest('This module is closed.');
 
-    const columns = columnsFor(store, projectId).filter((column) => column.counts);
+    const config = configFor(store, projectId);
+    const columns = columnsFor(store, projectId).filter(
+      (column) => column.counts && isActiveColumn(config, column),
+    );
     const subs = store.subactivities.filter((sub) => sub.module_id === module.id);
     const targets: (string | null)[] = subs.length ? subs.map((sub) => sub.id) : [null];
     const at = nowIso();
     let changed = 0;
 
     for (const column of columns) {
+      // "Loaded in prod" is a claim about prod. Ticking lab and preprod as well would
+      // assert two loads nobody performed — and asserting a lab load that never happened
+      // is precisely the record this split was built to keep straight.
+      if (column.environment && column.environment !== PROD_ENVIRONMENT) continue;
+
       const done = column.allowed.find((status) => toneOf(status) === 'done');
       if (!done) continue;
 
@@ -811,7 +857,7 @@ export async function confirmLoadedInProd(
 
         record(store, projectId, actor, {
           scope: 'cell',
-          label: column.label,
+          label: columnDisplayLabel(column),
           what: `${statusEntry(current).label} → ${statusEntry(done).label} (prod confirmation)`,
           moduleId: module.id,
           subactivityId: target,
@@ -1355,6 +1401,7 @@ export async function createProject(
       stages: [],
       owners: [],
       link_types: [],
+      environments: [],
     });
 
     // Recorded against the new project, which is where someone would look for it.
@@ -1399,6 +1446,11 @@ export async function addColumn(
       allowed: [...STATUS_SETS.simple],
       counts: true,
       order_index: columns.length,
+      // A column added here is a plain one. Splitting a deliverable across environments
+      // is a decision about the deliverable, not about the name someone typed in a box.
+      environment: null,
+      group_key: null,
+      group_label: null,
     });
 
     // A project with columns has been stood up; that is what `configured` means, and it
@@ -1454,7 +1506,7 @@ export async function setColumnCounts(
     record(store, projectId, actor, {
       scope: 'project',
       label: 'CONFIG',
-      what: `${column.label} now ${counts ? 'counts toward prod' : 'is informational only'}`,
+      what: `${columnDisplayLabel(column)} now ${counts ? 'counts toward prod' : 'is informational only'}`,
     });
   });
 }
@@ -1502,7 +1554,7 @@ export async function setColumnStatuses(
       scope: 'project',
       label: 'CONFIG',
       what:
-        `${column.label} statuses ${before} → ${deduped.map((key) => statusEntry(key).label).join(', ')}` +
+        `${columnDisplayLabel(column)} statuses ${before} → ${deduped.map((key) => statusEntry(key).label).join(', ')}` +
         (stranded > 0
           ? ` — ${stranded} ${stranded === 1 ? 'cell keeps a status' : 'cells keep a status'} no longer in the list`
           : ''),
@@ -1547,7 +1599,57 @@ export async function moveColumn(
     record(store, projectId, actor, {
       scope: 'project',
       label: 'CONFIG',
-      what: `moved ${moving.label} ${direction === 'up' ? 'earlier' : 'later'} on the matrix`,
+      what: `moved ${columnDisplayLabel(moving)} ${direction === 'up' ? 'earlier' : 'later'} on the matrix`,
+    });
+  });
+}
+
+/**
+ * Switches an environment on or off for a project.
+ *
+ * Off is not a delete. Every cell recorded against it stays in the store; the columns
+ * simply leave the grid and leave the readiness maths, and switching the environment
+ * back on brings them and their contents back exactly as they were. That is what makes
+ * this safe to use for "preprod is down this release" as well as for "we have no
+ * preprod" — the two are the same operation, and neither destroys a record.
+ *
+ * Prod cannot be switched off. Readiness is measured against it, so a project with no
+ * prod would have a percentage that means nothing and an FNI gate with nothing to check.
+ */
+export async function setEnvironmentEnabled(
+  actor: Actor,
+  projectId: string,
+  environmentKey: string,
+  enabled: boolean,
+): Promise<void> {
+  await mutate((store) => {
+    const access = resolveAccess(store, actor, projectId);
+    require_(access, 'project.config', 'switch an environment on or off');
+
+    const config = store.project_config.find((entry) => entry.project_id === projectId);
+    const environment = config?.environments.find((entry) => entry.key === environmentKey);
+    if (!config || !environment) {
+      throw notFound('That environment is not configured on this project.');
+    }
+    if (!enabled && environmentKey === PROD_ENVIRONMENT) {
+      throw badRequest(
+        'Prod cannot be switched off — readiness is measured against it, and the FNI gate reads that percentage.',
+      );
+    }
+    if (environment.enabled === enabled) return;
+
+    environment.enabled = enabled;
+
+    const affected = columnsFor(store, projectId).filter(
+      (column) => column.environment === environmentKey,
+    ).length;
+
+    record(store, projectId, actor, {
+      scope: 'project',
+      label: 'CONFIG',
+      what: enabled
+        ? `switched ${environment.label} back on — its ${affected} ${affected === 1 ? 'column is' : 'columns are'} back on the matrix, holding what was recorded before`
+        : `switched ${environment.label} off — its ${affected} ${affected === 1 ? 'column leaves' : 'columns leave'} the matrix and the readiness maths, keeping every cell`,
     });
   });
 }
@@ -1565,7 +1667,14 @@ export async function updateConfigList(
 
     let config = store.project_config.find((entry) => entry.project_id === projectId);
     if (!config) {
-      config = { project_id: projectId, node_types: [], stages: [], owners: [], link_types: [] };
+      config = {
+        project_id: projectId,
+        node_types: [],
+        stages: [],
+        owners: [],
+        link_types: [],
+        environments: [],
+      };
       store.project_config.push(config);
     }
 
