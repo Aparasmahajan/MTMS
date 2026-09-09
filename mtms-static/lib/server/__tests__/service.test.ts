@@ -105,7 +105,7 @@ describe('the FNI gate', () => {
 
     const view = await moduleView(admin, MODULE_FULL);
     expect(view.closed).toBe(true);
-    expect(view.closed_by).toBe('P. Mahajan');
+    expect(view.closed_by).toBe('Nitin');
   });
 
   it('recomputes readiness from the store rather than trusting the caller', async () => {
@@ -349,7 +349,7 @@ describe('permissions', () => {
     const snapshot = await snapshotFor(admin);
     const entries = snapshot.audit.filter((entry) => entry.module_id === module);
     expect(entries.length).toBeGreaterThan(0);
-    expect(entries.every((entry) => entry.who === 'V. Rao')).toBe(true);
+    expect(entries.every((entry) => entry.who === 'Narayana')).toBe(true);
     expect(entries[0]?.what).toContain('prod confirmation');
   });
 });
@@ -415,7 +415,7 @@ describe('inviting a user', () => {
   it('creates the account, the membership and the invitation', async () => {
     const result = await inviteUser(admin, project, {
       email: 'N.Desai2@mahajan.com',
-      displayName: 'N. Desai',
+      displayName: 'Aditya',
       roleId: await roleId('qa'),
       scopeProjectId: project,
     });
@@ -457,8 +457,8 @@ describe('inviting a user', () => {
   it('refuses an email that already has an account', async () => {
     await refused(
       inviteUser(admin, project, {
-        email: 'k.menon@mahajan.com',
-        displayName: 'K. Menon',
+        email: 'dhruv@azalio.io',
+        displayName: 'Dhruv',
         roleId: await roleId('viewer'),
         scopeProjectId: project,
       }),

@@ -35,7 +35,7 @@ async function openMatrix(page: Page) {
  * The status of the first editable RITM cell.
  *
  * Just the status, not the whole label: once a cell has been touched the label gains
- * "· P. Mahajan, just now", and that stamp is relative, so comparing full labels would make
+ * "· Paras, just now", and that stamp is relative, so comparing full labels would make
  * these tests start failing a minute after they were written.
  */
 async function ritmStatus(page: Page): Promise<string> {

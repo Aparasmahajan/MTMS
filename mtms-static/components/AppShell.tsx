@@ -386,8 +386,9 @@ export function AppShell({ children }: { children: ReactNode }) {
               textWrap: 'pretty',
             }}
           >
-            Demo — everything is editable and every number is derived by the real rules, but
-            nothing is saved. Reload to start over.
+            Demo — everything is editable and every number is derived by the real rules. Your
+            edits are kept in this browser and survive a reload; nobody else sees them. Reset
+            puts it back to the seed.
           </div>
         ) : null}
       </header>

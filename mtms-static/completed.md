@@ -309,7 +309,7 @@ configured, so nothing was sent. Send them this single-use link: …"*.
 | Duplicate key | `409` |
 | Add the first column to it | `configured: true` · audit *"added the deliverable column Smoke test"* |
 | Members of a fresh project | both org-wide, `editable: false`, reason stated |
-| Add R. Kaur as Developer | `200` · editable · audit *"ACCESS — added R. Kaur as Developer"* |
+| Add Bhavnish as Developer | `200` · editable · audit *"ACCESS — added Bhavnish as Developer"* |
 | Add the same person again | `409` |
 | Remove your own org-wide access | `400`, pointing at the Access screen |
 | Invitation | `delivery_state: logged`, accept link returned |
@@ -367,7 +367,7 @@ controls disabling themselves and stating the reason.
 | Check | Result |
 |---|---|
 | Dashboard opens on the seeded projection | 3 fully in prod · 12 part way · 3 not started · **86** blank cells |
-| Click a blank NEMO cell | → *Not Created · P. Mahajan, just now* — advanced **and** stamped |
+| Click a blank NEMO cell | → *Not Created · Paras, just now* — advanced **and** stamped |
 | Click a rolled-up module cell | opens its subactivities; does not edit |
 | Navigate Matrix → Dashboard in-app | blank cells **86 → 85** — the edit propagated and every figure recomputed |
 | Switch role to Viewer | matrix footer: *"You do not have update deliverable status (deliverable.update) in this project — cells are read-only for you."* |

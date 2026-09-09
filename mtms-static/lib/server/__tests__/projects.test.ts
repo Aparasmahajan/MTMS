@@ -132,7 +132,7 @@ describe('creating a project', () => {
       );
     }
 
-    const subadmin = await actorFor('a.iyer@mahajan.com');
+    const subadmin = await actorFor('sanjay@azalio.io');
     await refused(
       createProject(subadmin, project, { key: 'NOPE_PROJECT', name: '', description: '' }),
       'forbidden',

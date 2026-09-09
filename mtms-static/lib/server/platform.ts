@@ -58,6 +58,35 @@ function recordPlatform(
 // Reading
 // ---------------------------------------------------------------------------
 
+/**
+ * One person's administrator access to one project.
+ *
+ * Many administrators to a project and many projects to an administrator, both — the
+ * membership row is `(user, project, role)`, so both directions are just rows.
+ */
+export interface ProjectAdminView {
+  user_id: string;
+  membership_id: string;
+  display_name: string;
+  email: string;
+  status: string;
+  /** True when the access is organisation-wide, covering every project including this one. */
+  org_wide: boolean;
+}
+
+export interface PlatformProjectView {
+  id: string;
+  key: string;
+  name: string;
+  configured: boolean;
+  module_count: number;
+  /**
+   * Everyone who can administer this project. A project with none is a project nobody can
+   * configure, so the console shows the count rather than leaving it to be discovered.
+   */
+  admins: ProjectAdminView[];
+}
+
 export interface OrganisationView {
   id: string;
   name: string;
@@ -71,7 +100,7 @@ export interface OrganisationView {
   module_count: number;
   /** Who can administer it, so an organisation is never left without an owner. */
   admins: { display_name: string; email: string; status: string }[];
-  projects: { id: string; key: string; name: string; configured: boolean; module_count: number }[];
+  projects: PlatformProjectView[];
 }
 
 export interface PlatformView {
@@ -124,6 +153,30 @@ export function buildPlatformView(store: StoreData, actor: Actor): PlatformView 
           name: project.name,
           configured: project.configured,
           module_count: store.modules.filter((module) => module.project_id === project.id).length,
+          admins: store.memberships
+            .filter(
+              (membership) =>
+                membership.tenant_id === tenant.id &&
+                adminRoleIds.has(membership.role_id) &&
+                // An organisation-wide membership administers every project, this one
+                // included — leaving it out would report projects as unowned when they
+                // are not.
+                (membership.project_id === null || membership.project_id === project.id),
+            )
+            .flatMap<ProjectAdminView>((membership) => {
+              const user = users.find((candidate) => candidate.id === membership.user_id);
+              if (!user) return [];
+              return [
+                {
+                  user_id: user.id,
+                  membership_id: membership.id,
+                  display_name: user.display_name,
+                  email: user.email,
+                  status: user.status,
+                  org_wide: membership.project_id === null,
+                },
+              ];
+            }),
         })),
       };
     });
@@ -321,6 +374,153 @@ export async function createOrganisationProject(
     });
 
     return { projectId, key };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Assigning administrators to a project
+// ---------------------------------------------------------------------------
+
+/**
+ * Gives someone administrator access to one project, inviting them if they are new.
+ *
+ * This is the step that was missing between "super admin creates a project" and "an
+ * admin runs it". Until now only an organisation's *existing* admin could grant access,
+ * which is no help to a brand-new organisation's second project — there is nobody in it
+ * yet to do the granting.
+ *
+ * Both directions fall out of the membership row: a project may have as many
+ * administrators as it needs, and one administrator may hold as many projects as they
+ * need. Nothing here is a special case.
+ *
+ * A new person arrives by invitation and sets their own password, exactly as every other
+ * user does. The platform never sets a password for anyone.
+ */
+export async function addProjectAdmin(
+  actor: Actor,
+  projectId: string,
+  input: { email: string; displayName?: string },
+): Promise<{ email: string; inviteToken: string | null; invited: boolean; projectKey: string }> {
+  return mutate((store) => {
+    requireSuperAdmin(store, actor);
+
+    const project = store.projects.find((candidate) => candidate.id === projectId);
+    if (!project) throw notFound('That project does not exist.');
+
+    const email = input.email.trim().toLowerCase();
+    if (!email.includes('@')) throw validationFailed('That does not look like an email address.');
+
+    const adminRole = store.roles.find(
+      (role) => role.tenant_id === project.tenant_id && role.key === 'admin',
+    );
+    if (!adminRole) throw notFound('That organisation has no admin role.');
+
+    const at = nowIso();
+    let user = store.users.find(
+      (candidate) => candidate.tenant_id === project.tenant_id && candidate.email === email,
+    );
+    let inviteToken: string | null = null;
+    const invited = user === undefined;
+
+    if (!user) {
+      const invite = newInviteToken();
+      inviteToken = invite.token;
+      user = {
+        id: randomUUID(),
+        tenant_id: project.tenant_id,
+        email,
+        display_name: input.displayName?.trim() || email,
+        is_super_admin: false,
+        status: 'invited',
+        last_login_at: null,
+        created_at: at,
+        password_hash: '',
+        invite_token_hash: invite.hash,
+        invite_expires_at: invite.expiresAt,
+      };
+      store.users.push(user);
+      store.invitations.push({
+        id: randomUUID(),
+        tenant_id: project.tenant_id,
+        email,
+        display_name: user.display_name,
+        role_id: adminRole.id,
+        project_id: projectId,
+        invited_by: actor.displayName,
+        invited_at: at,
+        accepted_at: null,
+      });
+    }
+
+    // An organisation-wide membership already covers this project, so a second row scoped
+    // to it would grant nothing and show as a duplicate administrator.
+    const already = store.memberships.some(
+      (membership) =>
+        membership.user_id === user!.id &&
+        membership.role_id === adminRole.id &&
+        (membership.project_id === projectId || membership.project_id === null),
+    );
+    if (already) throw conflict(`${email} already administers ${project.key}.`);
+
+    store.memberships.push({
+      id: randomUUID(),
+      tenant_id: project.tenant_id,
+      user_id: user.id,
+      project_id: projectId,
+      role_id: adminRole.id,
+      created_at: at,
+    });
+
+    recordPlatform(store, actor, {
+      action: 'project.admin.added',
+      tenantId: project.tenant_id,
+      what: `made ${email} an administrator of ${project.key}`,
+    });
+
+    return { email, inviteToken, invited, projectKey: project.key };
+  });
+}
+
+/**
+ * Takes one administrator's access to one project away.
+ *
+ * An organisation-wide membership is refused here on purpose. It grants every project at
+ * once, so revoking it from a single project's row would quietly take away far more than
+ * the row it was clicked on — that belongs on the organisation's own Access screen, where
+ * the scope is visible.
+ */
+export async function removeProjectAdmin(
+  actor: Actor,
+  projectId: string,
+  membershipId: string,
+): Promise<void> {
+  await mutate((store) => {
+    requireSuperAdmin(store, actor);
+
+    const project = store.projects.find((candidate) => candidate.id === projectId);
+    if (!project) throw notFound('That project does not exist.');
+
+    const index = store.memberships.findIndex((candidate) => candidate.id === membershipId);
+    if (index < 0) throw notFound('That access does not exist.');
+    const membership = store.memberships[index] as (typeof store.memberships)[number];
+
+    if (membership.project_id === null) {
+      throw validationFailed(
+        'That access is organisation-wide, so it covers every project. Change it on the organisation’s own Access screen.',
+      );
+    }
+    if (membership.project_id !== projectId) {
+      throw validationFailed('That access is not on this project.');
+    }
+
+    const user = store.users.find((candidate) => candidate.id === membership.user_id);
+    store.memberships.splice(index, 1);
+
+    recordPlatform(store, actor, {
+      action: 'project.admin.removed',
+      tenantId: project.tenant_id,
+      what: `removed ${user?.email ?? 'an administrator'} from ${project.key}`,
+    });
   });
 }
 

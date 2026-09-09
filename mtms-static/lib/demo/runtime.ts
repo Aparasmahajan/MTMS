@@ -1,5 +1,18 @@
 import { ApiError } from '@/lib/client/api';
-import { clearSnapshot, loadSnapshot, saveSnapshot } from '@/lib/demo/persistence';
+import {
+  clearSnapshot,
+  loadSnapshot,
+  loadWorkspace,
+  saveSnapshot,
+  saveWorkspace,
+} from '@/lib/demo/persistence';
+import {
+  blankProjectSnapshot,
+  demoPlatformView,
+  projectSummaries,
+  seedWorkspace,
+  type DemoWorkspace,
+} from '@/lib/demo/workspace';
 import { optimisticAdvance, withDerived } from '@/lib/client/optimistic';
 import {
   DEFECT_STATUS_ORDER,
@@ -34,6 +47,18 @@ import type { CellView, ModuleView, Snapshot, SubactivityView } from '@/lib/shar
 
 let current: Snapshot | null = null;
 
+/**
+ * Everything above one project: the other projects' snapshots, and the organisations and
+ * administrators the super admin console reads. `current` stays the snapshot every
+ * project screen renders, so nothing below this line had to learn about the workspace.
+ */
+let workspace: DemoWorkspace | null = null;
+
+export function demoWorkspace(): DemoWorkspace {
+  if (!workspace) throw new ApiError('internal', 'The demo has not been started.', 500);
+  return workspace;
+}
+
 export function initDemoRuntime(snapshot: Snapshot): void {
   if (current) return;
 
@@ -42,6 +67,12 @@ export function initDemoRuntime(snapshot: Snapshot): void {
   // snapshot itself unmutated, so a client-side navigation back to a static page still
   // renders what was built.
   current = loadSnapshot() ?? structuredCloneish(snapshot);
+
+  // The workspace is rebuilt from the seed when this browser has none, and the current
+  // snapshot is folded back into it so a restored edit is not lost behind a fresh copy.
+  workspace = loadWorkspace() ?? seedWorkspace(snapshot);
+  workspace.snapshots[current.project.id] = current;
+  workspace.current_project_id = current.project.id;
 }
 
 /**
@@ -54,6 +85,10 @@ export function initDemoRuntime(snapshot: Snapshot): void {
  */
 export function adoptSnapshot(snapshot: Snapshot): void {
   current = snapshot;
+  if (workspace) {
+    workspace.snapshots[snapshot.project.id] = snapshot;
+    workspace.current_project_id = snapshot.project.id;
+  }
 }
 
 export function demoSnapshot(): Snapshot {
@@ -64,8 +99,11 @@ export function demoSnapshot(): Snapshot {
 /** Puts the demo back to the seeded state, and forgets what was saved. */
 export function resetDemo(seed: Snapshot): Snapshot {
   current = structuredCloneish(seed);
+  workspace = seedWorkspace(seed);
+  workspace.snapshots[current.project.id] = current;
   clearSnapshot();
   saveSnapshot(current);
+  saveWorkspace(workspace);
   return current;
 }
 
@@ -233,8 +271,22 @@ function match(path: string, pattern: string): Record<string, string> | null {
   return params;
 }
 
-export function demoRequest(path: string, method: string, body: Body): Result {
+export function demoRequest(
+  path: string,
+  method: string,
+  body: Body,
+): { data: unknown; meta: Record<string, unknown> } {
   const snapshot = demoSnapshot();
+
+  // The super admin console is above the project line: it answers with a `PlatformView`,
+  // not a `Snapshot`, so it never enters the pipeline below — there is no drift gate to
+  // recompute and no project snapshot to persist.
+  if (path.startsWith('/api/v1/platform/')) {
+    const result = routePlatform(snapshot, path, method, body);
+    saveWorkspace(demoWorkspace());
+    return result;
+  }
+
   const next = route(snapshot, path, method, body);
 
   // The promotion gate reads module readiness and the drift verdicts, so it has to be
@@ -253,6 +305,11 @@ export function demoRequest(path: string, method: string, body: Body): Result {
   // The single write point for the whole in-browser store: persist, and tell the other
   // tabs. Every mutation funnels through here, so there is one place to get this right
   // rather than one per handler.
+  if (workspace) {
+    workspace.snapshots[data.project.id] = data;
+    workspace.current_project_id = data.project.id;
+    saveWorkspace(workspace);
+  }
   saveSnapshot(data);
 
   return { data, meta: next.meta };
@@ -1047,29 +1104,39 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
       throw new ApiError('validation_failed', 'A project with that key already exists.', 422);
     }
     const id = newId();
+    const created = addProjectToWorkspace(snapshot, {
+      id,
+      key,
+      name: String(body.name ?? '').trim() || key,
+    });
     return {
-      data: {
-        ...snapshot,
-        projects: [
-          ...snapshot.projects,
-          { id, key, name: String(body.name ?? '').trim() || key, configured: false, module_count: 0 },
-        ],
-      },
+      data: { ...snapshot, projects: created },
       meta: { project_id: id },
     };
   }
 
+  /**
+   * Switching project.
+   *
+   * Every project the demo knows about has its own snapshot in the workspace, so this is
+   * a real switch: a project created a minute ago opens empty, with the set-up prompt and
+   * the Configure screen, which is exactly what a new project looks like.
+   */
   if (at('projects/select', 'POST')) {
-    // Only the seeded project has data baked in; the demo says so rather than showing
-    // an empty app as though it were a bug.
-    if (body.project_id !== snapshot.project.id) {
-      throw new ApiError(
-        'bad_request',
-        'The demo carries data for CR_AUTOMATION only. Other projects show as unconfigured, which is what a new project really looks like.',
-        400,
-      );
-    }
-    return plain(snapshot);
+    const target = String(body.project_id ?? '');
+    const space = demoWorkspace();
+    const next = space.snapshots[target];
+    if (!next) throw new ApiError('not_found', 'That project is not in this demo.', 404);
+
+    return plain({
+      ...next,
+      // The switcher, the signed-in person and their permissions belong to the session,
+      // not to the project being opened.
+      me: snapshot.me,
+      // Scoped to the organisation being opened, so a project created in another one
+      // never appears in this switcher.
+      projects: projectSummaries(space, next.org.id),
+    });
   }
 
   if (at('projects/members', 'POST')) {
@@ -1171,17 +1238,7 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
     );
   }
 
-  // -- platform --------------------------------------------------------------
-  if (path.startsWith('/api/v1/platform/')) {
-    // The super admin console creates organisations, each with its own roles, users and
-    // projects. The demo carries one baked organisation and no way to sign into another,
-    // so a created one would be a row that leads nowhere — worse than saying so.
-    throw new ApiError(
-      'bad_request',
-      'The super admin console creates organisations and their first administrators, which needs a real server. The demo carries one organisation, Flow One.',
-      400,
-    );
-  }
+
 
   throw new ApiError(
     'not_found',
@@ -1207,5 +1264,300 @@ export function switchDemoRole(roleId: string): Snapshot {
     ...snapshot,
     me: { ...snapshot.me, role_names: [role.name], permissions: role.permissions },
   };
+  // The workspace holds this project's snapshot too; leaving it behind would resurrect
+  // the previous role the next time the project is switched away from and back.
+  if (workspace) workspace.snapshots[current.project.id] = current;
   return current;
+}
+
+// ---------------------------------------------------------------------------
+// The super admin console
+// ---------------------------------------------------------------------------
+
+/**
+ * Adds a project to the workspace and returns the switcher's new contents.
+ *
+ * The project gets its own blank snapshot, so it is a real project from the moment it is
+ * created — switch into it and you get the set-up prompt and the Configure screen, which
+ * is what a new project actually looks like.
+ */
+function addProjectToWorkspace(
+  from: Snapshot,
+  project: { id: string; key: string; name: string },
+  organisationId?: string,
+): Snapshot['projects'] {
+  const space = demoWorkspace();
+  const orgId = organisationId ?? from.org.id;
+  const organisation = space.organisations.find((candidate) => candidate.id === orgId);
+  if (!organisation) throw new ApiError('not_found', 'That organisation does not exist.', 404);
+
+  space.snapshots[project.id] = blankProjectSnapshot(from, project, {
+    id: organisation.id,
+    name: organisation.name,
+  });
+  organisation.project_ids.push(project.id);
+
+  return projectSummaries(space, from.org.id);
+}
+
+function recordPlatform(actor: Snapshot['me'], action: string, what: string): void {
+  demoWorkspace().audit.unshift({
+    id: newId(),
+    action,
+    what,
+    who: actor.display_name,
+    at: new Date().toISOString(),
+  });
+}
+
+function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40);
+}
+
+/**
+ * The client mirror of `lib/server/platform.ts`.
+ *
+ * It refuses the same things for the same reasons — super admin is a flag on the account
+ * and not a permission a role can grant, an organisation cannot suspend itself, an
+ * organisation-wide administrator is not removed from one project's row — so a client
+ * watching the console sees the real boundaries rather than a screen that always says yes.
+ */
+function routePlatform(
+  snapshot: Snapshot,
+  path: string,
+  method: string,
+  body: Body,
+): { data: unknown; meta: Record<string, unknown> } {
+  const at = (pattern: string, verb: string) => (method === verb ? match(path, pattern) : null);
+  const space = demoWorkspace();
+
+  if (!snapshot.me.is_super_admin) {
+    // Deliberately the same wording as any other refusal: whether super admin exists at
+    // all is not something an ordinary user learns from an error message.
+    throw new ApiError('forbidden', 'That is not available to your account.', 403);
+  }
+
+  const view = () => ({ data: demoPlatformView(space, snapshot.me), meta: {} });
+
+  if (at('platform/organisations', 'GET')) return view();
+
+  if (at('platform/organisations', 'POST')) {
+    const name = String(body.name ?? '').trim();
+    if (!name) throw new ApiError('validation_failed', 'An organisation needs a name.', 422);
+
+    const slug = (String(body.slug ?? '').trim() || slugify(name)).toLowerCase();
+    if (space.organisations.some((organisation) => organisation.slug === slug)) {
+      throw new ApiError('conflict', `An organisation with the slug "${slug}" already exists.`, 409);
+    }
+
+    const adminEmail = String(body.admin_email ?? '').trim().toLowerCase();
+    if (!adminEmail.includes('@')) {
+      throw new ApiError('validation_failed', 'That does not look like an email address.', 422);
+    }
+
+    const id = newId();
+    space.organisations.push({
+      id,
+      name,
+      slug,
+      status: 'active',
+      created_at: new Date().toISOString(),
+      // Empty. Its own administrator decides what projects it needs.
+      project_ids: [],
+      admins: [
+        {
+          display_name: String(body.admin_name ?? '').trim() || adminEmail,
+          email: adminEmail,
+          status: 'invited',
+        },
+      ],
+    });
+
+    recordPlatform(
+      snapshot.me,
+      'organisation.created',
+      `created ${name} and invited ${adminEmail} as its admin`,
+    );
+
+    return {
+      data: demoPlatformView(space, snapshot.me),
+      meta: {
+        tenant_id: id,
+        admin_email: adminEmail,
+        // The static demo has no invitation store to redeem against, and a link that 404s
+        // is worse than none — so the console is told there is nothing to send.
+        accept_url: null,
+      },
+    };
+  }
+
+  const orgProjects = at('platform/organisations/:id/projects', 'POST');
+  if (orgProjects) {
+    const key = String(body.key ?? '').trim().toUpperCase();
+    if (!/^[A-Z][A-Z0-9_]*$/.test(key)) {
+      throw new ApiError(
+        'validation_failed',
+        'A project key is uppercase letters, digits and underscores, starting with a letter — like CR_AUTOMATION.',
+        422,
+      );
+    }
+
+    const organisation = space.organisations.find((candidate) => candidate.id === orgProjects.id);
+    if (!organisation) throw new ApiError('not_found', 'That organisation does not exist.', 404);
+
+    const clash = organisation.project_ids
+      .map((projectId) => space.snapshots[projectId])
+      .some((existing) => existing?.project.key === key);
+    if (clash) {
+      throw new ApiError('conflict', `${organisation.name} already has a project called ${key}.`, 409);
+    }
+
+    const id = newId();
+    addProjectToWorkspace(
+      snapshot,
+      { id, key, name: String(body.name ?? '').trim() || key },
+      organisation.id,
+    );
+
+    // The console answers with a PlatformView, so the snapshot the tracker is holding
+    // would not otherwise learn about the new project and it would be missing from the
+    // switcher until a reload. Refreshed here, and only when the project landed in the
+    // organisation this session is actually signed in to.
+    if (organisation.id === snapshot.org.id) {
+      current = { ...snapshot, projects: projectSummaries(space, snapshot.org.id) };
+      space.snapshots[snapshot.project.id] = current;
+      saveSnapshot(current);
+    }
+
+    recordPlatform(
+      snapshot.me,
+      'project.created',
+      `created the project ${key} in ${organisation.name}`,
+    );
+
+    return { data: demoPlatformView(space, snapshot.me), meta: { project_id: id, key } };
+  }
+
+  const orgStatus = at('platform/organisations/:id/status', 'PATCH');
+  if (orgStatus) {
+    const organisation = space.organisations.find((candidate) => candidate.id === orgStatus.id);
+    if (!organisation) throw new ApiError('not_found', 'That organisation does not exist.', 404);
+
+    const status = String(body.status ?? '').toLowerCase();
+    if (status !== 'active' && status !== 'suspended') {
+      throw new ApiError('validation_failed', 'Status must be "active" or "suspended".', 422);
+    }
+    // Locking yourself out of your own organisation is a support call, not a feature.
+    if (status === 'suspended' && organisation.id === snapshot.org.id) {
+      throw new ApiError(
+        'validation_failed',
+        'You cannot suspend the organisation your own account belongs to.',
+        422,
+      );
+    }
+
+    organisation.status = status;
+    recordPlatform(
+      snapshot.me,
+      status === 'suspended' ? 'organisation.suspended' : 'organisation.restored',
+      `${status === 'suspended' ? 'suspended' : 'restored'} ${organisation.name}`,
+    );
+    return view();
+  }
+
+  const addAdmin = at('platform/projects/:id/admins', 'POST');
+  if (addAdmin) {
+    const target = space.snapshots[addAdmin.id as string];
+    if (!target) throw new ApiError('not_found', 'That project does not exist.', 404);
+
+    const email = String(body.email ?? '').trim().toLowerCase();
+    if (!email.includes('@')) {
+      throw new ApiError('validation_failed', 'That does not look like an email address.', 422);
+    }
+
+    const organisation = space.organisations.find((candidate) =>
+      candidate.project_ids.includes(addAdmin.id as string),
+    );
+    // An organisation-wide administrator already holds this project, so a second row
+    // scoped to it would grant nothing and show as a duplicate.
+    if (organisation?.admins.some((admin) => admin.email === email)) {
+      throw new ApiError('conflict', `${email} already administers ${target.project.key}.`, 409);
+    }
+
+    const existing = space.project_admins[addAdmin.id as string] ?? [];
+    if (existing.some((admin) => admin.email === email)) {
+      throw new ApiError('conflict', `${email} already administers ${target.project.key}.`, 409);
+    }
+
+    // Somebody already in the organisation keeps their name and active status; somebody
+    // new is invited, exactly as the server does it.
+    const known = target.users.find((user) => user.email === email);
+    space.project_admins[addAdmin.id as string] = [
+      ...existing,
+      {
+        user_id: known?.id ?? newId(),
+        membership_id: newId(),
+        display_name: known?.display_name ?? (String(body.display_name ?? '').trim() || email),
+        email,
+        status: known?.status ?? 'invited',
+        org_wide: false,
+      },
+    ];
+
+    recordPlatform(
+      snapshot.me,
+      'project.admin.added',
+      `made ${email} an administrator of ${target.project.key}`,
+    );
+
+    return {
+      data: demoPlatformView(space, snapshot.me),
+      meta: {
+        admin_email: email,
+        project_key: target.project.key,
+        invited: known === undefined,
+        accept_url: null,
+      },
+    };
+  }
+
+  const dropAdmin = at('platform/projects/:id/admins/:membershipId', 'DELETE');
+  if (dropAdmin) {
+    const projectId = dropAdmin.id as string;
+    const membershipId = dropAdmin.membershipId as string;
+    const target = space.snapshots[projectId];
+    if (!target) throw new ApiError('not_found', 'That project does not exist.', 404);
+
+    if (membershipId.startsWith('org:')) {
+      throw new ApiError(
+        'validation_failed',
+        'That access is organisation-wide, so it covers every project. Change it on the organisation’s own Access screen.',
+        422,
+      );
+    }
+
+    const existing = space.project_admins[projectId] ?? [];
+    const going = existing.find((admin) => admin.membership_id === membershipId);
+    if (!going) throw new ApiError('not_found', 'That access does not exist.', 404);
+
+    space.project_admins[projectId] = existing.filter(
+      (admin) => admin.membership_id !== membershipId,
+    );
+    recordPlatform(
+      snapshot.me,
+      'project.admin.removed',
+      `removed ${going.email} from ${target.project.key}`,
+    );
+    return view();
+  }
+
+  throw new ApiError(
+    'not_found',
+    `The demo has no handler for ${method} ${path}. Add one in lib/demo/runtime.ts.`,
+    404,
+  );
 }
