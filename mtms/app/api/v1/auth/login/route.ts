@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { fail, parseBody, setAuthCookie, withoutAuth } from '@/lib/server/api';
-import { issueAccessToken, verifyPassword } from '@/lib/server/auth';
+import { fail, parseBody, setSessionCookies, withoutAuth } from '@/lib/server/api';
+import { verifyPassword } from '@/lib/server/auth';
+import { startSession } from '@/lib/server/sessions';
 import { getStore, mutate, nowIso } from '@/lib/server/store';
 
 const Body = z.object({
@@ -33,21 +34,28 @@ export const POST = withoutAuth(async ({ request }) => {
     return fail('unauthenticated', rejection);
   }
 
+  // A suspended organisation is a gate on signing in — nothing is deleted, and the record
+  // of what happened there survives. Checked after the password so the response cannot be
+  // used to discover which organisations exist or are suspended.
+  const tenant = store.tenants.find((candidate) => candidate.id === user.tenant_id);
+  if (!tenant || tenant.status !== 'active') {
+    return fail('forbidden', 'That organisation is suspended. Talk to your administrator.');
+  }
+
   await mutate((data) => {
     const row = data.users.find((candidate) => candidate.id === user.id);
     if (row) row.last_login_at = nowIso();
   });
 
-  const { token, expiresIn } = issueAccessToken({
+  const session = await startSession({
     userId: user.id,
     tenantId: user.tenant_id,
     email: user.email,
     displayName: user.display_name,
   });
 
-  return setAuthCookie(
+  return setSessionCookies(
     NextResponse.json({ data: { display_name: user.display_name, email: user.email } }),
-    token,
-    expiresIn,
+    session,
   );
 });

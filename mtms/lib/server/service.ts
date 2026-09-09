@@ -51,6 +51,7 @@ import type {
 } from '../shared/views';
 import type { Actor } from './auth';
 import { badRequest, conflict, forbidden, notFound, validationFailed } from './errors';
+import { emit } from './events';
 import { mutate, nowIso, type StoreData } from './store';
 
 /**
@@ -456,6 +457,9 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
       email: actor.email,
       role_names: access.roleNames,
       permissions: [...access.permissions],
+      is_super_admin: store.users.some(
+        (user) => user.id === actor.userId && user.is_super_admin,
+      ),
     },
     org: { id: tenant.id, name: tenant.name },
     project: { id: project.id, key: project.key, name: project.name },
@@ -616,6 +620,23 @@ export async function advanceCell(
       moduleId: module.id,
       subactivityId: input.subactivityId,
     });
+
+    // Partitioned by module, so a consumer sees one module's cell changes in the order
+    // they happened even when several people are editing different modules at once.
+    emit(store, {
+      name: 'cell.changed',
+      tenantId: actor.tenantId,
+      projectId,
+      partitionKey: module.id,
+      actor: actor.displayName,
+      payload: {
+        module_id: module.id,
+        subactivity_id: input.subactivityId,
+        column_key: column.key,
+        from: current,
+        to: next,
+      },
+    });
   });
 }
 
@@ -714,6 +735,14 @@ export async function signOffFni(
       }
       module.fni_closed_at = nowIso();
       module.fni_closed_by = actor.displayName;
+      emit(store, {
+        name: 'module.closed',
+        tenantId: actor.tenantId,
+        projectId,
+        partitionKey: module.id,
+        actor: actor.displayName,
+        payload: { module_id: module.id, node_type: module.node_type, name: module.name },
+      });
     } else {
       module.fni_closed_at = null;
       module.fni_closed_by = null;
@@ -789,6 +818,17 @@ export async function confirmLoadedInProd(
         });
         changed++;
       }
+    }
+
+    if (changed > 0) {
+      emit(store, {
+        name: 'deployment.confirmed',
+        tenantId: actor.tenantId,
+        projectId,
+        partitionKey: module.id,
+        actor: actor.displayName,
+        payload: { module_id: module.id, cells_changed: changed },
+      });
     }
 
     return { changed };
@@ -1107,8 +1147,23 @@ export async function createDefect(
     require_(access, 'defect.create', 'log a defect');
     findModule(store, projectId, input.moduleId);
 
+    const defectId = randomUUID();
+    emit(store, {
+      name: 'defect.raised',
+      tenantId: actor.tenantId,
+      projectId,
+      partitionKey: input.moduleId,
+      actor: actor.displayName,
+      payload: {
+        defect_id: defectId,
+        module_id: input.moduleId,
+        severity: input.severity,
+        phase: input.phase,
+        ticket_key: input.ticketKey.trim(),
+      },
+    });
     store.defects.push({
-      id: randomUUID(),
+      id: defectId,
       project_id: projectId,
       module_id: input.moduleId,
       phase: input.phase,
@@ -1146,6 +1201,15 @@ export async function transitionDefect(
       const index = DEFECT_STATUS_ORDER.indexOf(defect.status);
       defect.status = DEFECT_STATUS_ORDER[(index + 1) % DEFECT_STATUS_ORDER.length] as DefectStatus;
     }
+
+    emit(store, {
+      name: 'defect.transitioned',
+      tenantId: actor.tenantId,
+      projectId,
+      partitionKey: defect.module_id,
+      actor: actor.displayName,
+      payload: { defect_id: defect.id, from: before, to: defect.status },
+    });
 
     record(store, projectId, actor, {
       scope: 'module',
@@ -1820,6 +1884,9 @@ export async function inviteUser(
       tenant_id: actor.tenantId,
       email,
       display_name: input.displayName.trim() || email,
+      // Never, and stated rather than defaulted: an organisation's admin invites people
+      // into their own organisation, and must not be able to mint a platform operator.
+      is_super_admin: false,
       status: 'invited',
       last_login_at: null,
       created_at: at,
@@ -1837,6 +1904,14 @@ export async function inviteUser(
       created_at: at,
     });
 
+    emit(store, {
+      name: 'user.invited',
+      tenantId: actor.tenantId,
+      projectId: input.scopeProjectId,
+      partitionKey: email,
+      actor: actor.displayName,
+      payload: { email, role: role.name, scope_project_id: input.scopeProjectId },
+    });
     store.invitations.push({
       id: randomUUID(),
       tenant_id: actor.tenantId,

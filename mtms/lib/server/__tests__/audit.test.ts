@@ -195,7 +195,7 @@ describe('invitation delivery', () => {
 
   const message = () =>
     invitationMessage({
-      email: 'n.desai@nokia.com',
+      email: 'n.desai@mahajan.com',
       displayName: 'N. Desai',
       invitedBy: 'P. Mahajan',
       orgName: 'Flow One',
@@ -204,7 +204,7 @@ describe('invitation delivery', () => {
 
   it('writes an invitation a person could read', () => {
     const mail = message();
-    expect(mail.to).toBe('n.desai@nokia.com');
+    expect(mail.to).toBe('n.desai@mahajan.com');
     expect(mail.subject).toContain('Flow One');
     expect(mail.body).toContain('P. Mahajan has invited you');
     expect(mail.body).toContain('https://tracker.test/accept-invite?token=abc');
@@ -241,7 +241,7 @@ describe('invitation delivery', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe('https://relay.test/send');
-    expect(JSON.parse(String(init?.body)).to).toBe('n.desai@nokia.com');
+    expect(JSON.parse(String(init?.body)).to).toBe('n.desai@mahajan.com');
   });
 
   it('reports a transport that is down without losing the invitation', async () => {

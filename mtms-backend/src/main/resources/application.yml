@@ -1,0 +1,108 @@
+# MTMS API — default configuration.
+#
+# The defaults here run the service with no Postgres, no Redis and no Kafka: storage is
+# in-memory and seeded, the cache is a local map, and events are logged. That is deliberate,
+# and it is the same choice lib/server/store.ts makes with its file driver — a developer
+# should be able to clone this and see the matrix without installing three daemons first.
+#
+# Everything real is one profile away. See application-postgres.yml.
+
+server:
+  port: 8080
+  shutdown: graceful
+  # Behind a load balancer the client address and scheme arrive in headers; without this,
+  # generated links and rate-limit keys would all refer to the proxy.
+  forward-headers-strategy: framework
+
+spring:
+  application:
+    name: mtms-api
+
+  lifecycle:
+    # Finish in-flight requests before the process exits, so a rolling deploy does not
+    # answer a click with a connection reset.
+    timeout-per-shutdown-phase: 20s
+
+  jackson:
+    # The wire is snake_case, matching the TypeScript service exactly. Set once here rather
+    # than annotated onto two hundred record components.
+    property-naming-strategy: SNAKE_CASE
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+
+  # No database, cache or broker in the default profile. Excluding the autoconfiguration is
+  # what keeps startup from failing on a missing datasource URL rather than falling back.
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration
+      - org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+      - org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration
+
+mtms:
+  # memory | postgres
+  storage: memory
+  # memory | redis
+  cache:
+    type: memory
+  events:
+    # logging | kafka
+    publisher: logging
+    topic: mtms.domain-events
+    drain-interval-ms: 5000
+
+  ticket-base-url: https://tms.internal/browse
+  app-base-url: http://localhost:3000
+  seed-on-empty-database: true
+
+  cors:
+    allowed-origins:
+      - http://localhost:3000
+      - http://localhost:3001
+
+  security:
+    # Development only, and long enough to satisfy the length check in SecurityProperties.
+    # In any real deployment this comes from the environment: MTMS_SECURITY_JWT_SECRET.
+    jwt-secret: ${MTMS_SECURITY_JWT_SECRET:dev-only-secret-do-not-use-in-production-0123456789}
+    access-token-lifetime: 15m
+    refresh-token-lifetime: 30d
+    secure-cookies: false
+    write-rate-limit-per-minute: 300
+
+# Writes only, per user — the same shape as the TypeScript limiter. Reads are not limited:
+# the projection is cached and a user hammering refresh is not the threat model.
+resilience4j:
+  ratelimiter:
+    instances:
+      writes:
+        limit-for-period: 300
+        limit-refresh-period: 60s
+        timeout-duration: 0s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when-authorized
+  metrics:
+    tags:
+      application: mtms-api
+
+logging:
+  level:
+    io.mtms: INFO
+    org.springframework.jdbc.core: INFO
+  pattern:
+    # The correlation id is what makes one user's click followable across instances.
+    console: "%d{HH:mm:ss.SSS} %-5level [%X{correlationId:-—}] %logger{28} - %msg%n"
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html

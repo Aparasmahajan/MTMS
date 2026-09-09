@@ -39,6 +39,15 @@ export const User = z.object({
   tenant_id: uuid,
   email: z.string().email().max(200),
   display_name: z.string().min(1).max(120),
+  /**
+   * Platform level, above tenancy — deliberately NOT a permission key.
+   *
+   * Every permission in `PERMISSION_KEYS` is granted by a role inside one organisation,
+   * and an organisation's admin can edit its own roles. If "create organisations" were one
+   * of those keys, any admin could grant it to themselves. This flag is set outside the
+   * app; nothing in the UI can turn it on.
+   */
+  is_super_admin: z.boolean().default(false),
   status: UserStatus.default('invited'),
   last_login_at: isoDateTime.nullable().default(null),
   created_at: isoDateTime,
@@ -420,6 +429,82 @@ export type DriftWarningKind = z.infer<typeof DriftWarningKind>;
 // ---------------------------------------------------------------------------
 // Invitations
 // ---------------------------------------------------------------------------
+
+/**
+ * A refresh token, stored as a hash so a leaked store cannot be replayed.
+ *
+ * Rotation: using one revokes it and issues a successor in the same family. If a token
+ * that has already been used comes back, the whole family is revoked — that is the
+ * signature of a stolen token being replayed alongside the legitimate one.
+ */
+export const RefreshToken = z.object({
+  id: uuid,
+  token_hash: z.string(),
+  user_id: uuid,
+  tenant_id: uuid,
+  /** Rotation chain. Revoking a family logs out every descendant of one login. */
+  family_id: uuid,
+  issued_at: isoDateTime,
+  expires_at: isoDateTime,
+  revoked_at: isoDateTime.nullable().default(null),
+  /** Set when this token was exchanged, so a replay is detectable. */
+  used_at: isoDateTime.nullable().default(null),
+});
+export type RefreshToken = z.infer<typeof RefreshToken>;
+
+/**
+ * Domain events, in an outbox.
+ *
+ * The design calls for Kafka. Writing to a broker inside a mutation would make the store
+ * write and the publish two things that can disagree, so events are recorded in the same
+ * document as the change that produced them and drained afterwards. That is the outbox
+ * pattern, and it is what makes "the cell changed" and "the event was published" the same
+ * fact rather than two hopeful ones.
+ */
+export const DomainEventName = z.enum([
+  'cell.changed',
+  'module.closed',
+  'defect.raised',
+  'defect.transitioned',
+  'deployment.confirmed',
+  'user.invited',
+]);
+export type DomainEventName = z.infer<typeof DomainEventName>;
+
+export const DomainEvent = z.object({
+  id: uuid,
+  name: DomainEventName,
+  tenant_id: uuid,
+  project_id: uuid.nullable().default(null),
+  /** Kafka partition key: everything about one module stays in order. */
+  partition_key: z.string(),
+  payload: z.record(z.unknown()).default({}),
+  occurred_at: isoDateTime,
+  actor: z.string(),
+  published_at: isoDateTime.nullable().default(null),
+  attempts: z.number().int().nonnegative().default(0),
+  last_error: z.string().nullable().default(null),
+});
+export type DomainEvent = z.infer<typeof DomainEvent>;
+
+/**
+ * Platform actions, which have no project to be audited against.
+ *
+ * Kept apart from `audit` rather than making its `project_id` nullable: those two feeds
+ * answer different questions ("who changed this cell" versus "who created this
+ * organisation"), have different readers, and mixing them would put platform events into
+ * every project's change feed.
+ */
+export const PlatformAuditEntry = z.object({
+  id: uuid,
+  action: z.string(),
+  /** The organisation acted on, when there is one. */
+  tenant_id: uuid.nullable().default(null),
+  what: z.string(),
+  who: z.string(),
+  at: isoDateTime,
+});
+export type PlatformAuditEntry = z.infer<typeof PlatformAuditEntry>;
 
 export const Invitation = z.object({
   id: uuid,

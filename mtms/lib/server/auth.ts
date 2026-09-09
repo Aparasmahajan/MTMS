@@ -132,3 +132,31 @@ export function verifyAccessToken(token: string): Actor | null {
     return null;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Refresh tokens
+// ---------------------------------------------------------------------------
+
+export const REFRESH_COOKIE = 'mtms_rt';
+export const REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
+
+/**
+ * Rotation with replay detection.
+ *
+ * An access token is short-lived and stateless; a refresh token is long-lived, so it is
+ * stored — as a **hash**, so a leaked store cannot be replayed — and rotated on every use.
+ *
+ * The part worth understanding is the family. Each login starts one, and each rotation
+ * issues a successor within it. If a token that has *already been used* comes back, two
+ * parties hold the same token: the legitimate client and whoever copied it. There is no way
+ * to tell which is which, so the whole family is revoked and both are forced to sign in
+ * again. Losing a session is the correct price for that ambiguity.
+ */
+export function newRefreshToken(): { token: string; hash: string; expiresAt: string } {
+  const token = randomBytes(32).toString('base64url');
+  return {
+    token,
+    hash: hashToken(token),
+    expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_SECONDS * 1000).toISOString(),
+  };
+}

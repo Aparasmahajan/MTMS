@@ -93,7 +93,7 @@ function SignInCard() {
               type="email"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
-              placeholder="name@nokia.com"
+              placeholder="name@mahajan.com"
               autoComplete="username"
             />
           </label>
