@@ -71,7 +71,7 @@ describe('creating a project', () => {
 
     // It does not inherit CR_AUTOMATION's fourteen columns — that is the whole point.
     const original = await snapshotOf(admin, project);
-    expect(original.config.columns).toHaveLength(14);
+    expect(original.config.columns).toHaveLength(26);
   });
 
   it('appears in the switcher as not configured, then configured once it has a column', async () => {

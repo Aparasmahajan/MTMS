@@ -641,3 +641,58 @@ running app:
 The demo answers platform routes with an explanation rather than a handler: it carries one
 baked organisation and no way to sign into another, so a created one would be a row leading
 nowhere.
+
+---
+
+## Per-environment deliverable columns
+
+A deliverable is loaded onto lab, preprod and prod **separately**, and the three are not a
+sequence. Prod can be loaded with lab blank, because lab was down when the window opened.
+One status per deliverable could never record that — "Loaded in lab" and "Loaded in prod"
+were points on a single journey, and a cell held exactly one of them.
+
+Each per-environment deliverable is now **one column per environment**, each holding its
+own Not Loaded / Loaded tick. Six deliverables — FILECR, CLICR, HTML, JSON.Y, VALID.Y,
+EXEC.Y — become eighteen columns under six spanning headers, so the matrix carries 26
+columns where it carried 14.
+
+### What counts, and what does not
+
+Only the **prod** column enters readiness. A lab tick is the record of where something has
+been, not part of the definition of done: if lab counted, a release that skipped lab
+because lab was down could never reach 100% and its FNI could never be signed. Twelve
+counted columns, exactly as before the split — every seeded percentage is unchanged.
+
+`counts` is still a per-column toggle on Configure, so a project that genuinely wants its
+lab load to count can say so.
+
+### Switching an environment off
+
+An environment can be switched off on Configure. Its columns leave the grid and leave the
+maths together, and **every cell recorded against them stays in the store**. Switching it
+back on restores exactly what was there, which is why this is a flag and not a delete —
+the same operation serves "we have no preprod" and "preprod is down this release", and
+neither destroys a record.
+
+Prod cannot be switched off: readiness is measured against it, and the FNI gate reads that
+percentage.
+
+| Where | What changed |
+|---|---|
+| `DeliverableColumn` | `environment`, `group_key`, `group_label` — null on a plain column |
+| `ProjectConfig` | `environments`: key, label, short, `enabled` |
+| `ColumnView` | derived `active` — false only when its environment is switched off |
+| Matrix | two-tier header, 48px environment cells, faint dividers inside a group |
+| Configure | an Environments panel; the column table names columns `FILECR·PROD` |
+| Drift | a deliverable joins the matrix by its **prod** column, not by its own key |
+| `confirmLoadedInProd` | ticks prod only — ticking lab would assert a load nobody performed |
+
+Store version → **7**; demo localStorage key → **v3**.
+
+### Verified
+
+**224 tests** in each Next.js project (13 new), **46** in the Java backend (7 new).
+Typecheck clean in all three TypeScript projects, `BUILD SUCCESS` on the backend, and the
+static export builds. End-to-end against the running app: the grouped header renders,
+switching Preprod off removes six columns and leaves every readiness figure untouched, and
+prod's toggle is disabled with the reason on it.

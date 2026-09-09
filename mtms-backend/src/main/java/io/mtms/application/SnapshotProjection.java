@@ -67,14 +67,19 @@ public final class SnapshotProjection {
     // controller so that every path into the projection is covered by the same line.
     actor.require(PermissionKey.PROJECT_VIEW);
 
+    // Every column is projected onto every module, including those behind a switched-off
+    // environment: the cells stay addressable and come back untouched when it is switched on
+    // again. `activeColumns` is what decides the grid and the maths.
     List<Projects.DeliverableColumn> columns = data.orderedColumns();
+    List<Projects.DeliverableColumn> activeColumns =
+        columns.stream().filter(column -> data.config().isActive(column)).toList();
     List<Projects.DeliverableColumn> countedColumns =
-        columns.stream().filter(Projects.DeliverableColumn::counts).toList();
+        activeColumns.stream().filter(Projects.DeliverableColumn::counts).toList();
 
     Map<String, Modules.Cell> cellIndex = indexCells(data.cells());
     List<Views.ModuleView> modules =
         data.modules().stream()
-            .map(module -> moduleView(module, data, columns, countedColumns, cellIndex))
+            .map(module -> moduleView(module, data, columns, activeColumns, countedColumns, cellIndex))
             .toList();
 
     Map<UUID, String> moduleLabels = new HashMap<>();
@@ -127,6 +132,7 @@ public final class SnapshotProjection {
       Modules.Module module,
       ProjectData data,
       List<Projects.DeliverableColumn> columns,
+      List<Projects.DeliverableColumn> activeColumns,
       List<Projects.DeliverableColumn> countedColumns,
       Map<String, Modules.Cell> cellIndex) {
 
@@ -209,10 +215,10 @@ public final class SnapshotProjection {
                 column ->
                     StatusVocabulary.toneOf(statusIn(cells, column.key()))
                         != StatusVocabulary.Tone.DONE)
-            .map(Projects.DeliverableColumn::label)
+            .map(Projects.DeliverableColumn::displayLabel)
             .toList(),
         (int)
-            columns.stream()
+            activeColumns.stream()
                 .filter(column -> StatusVocabulary.BLANK.equals(statusIn(cells, column.key())))
                 .count(),
         cells,
@@ -268,7 +274,10 @@ public final class SnapshotProjection {
   private Views.ConfigView configView(ProjectData data, List<Projects.DeliverableColumn> columns) {
     List<Views.ColumnView> columnViews =
         columns.stream()
-            .map(column -> Views.ColumnView.of(column, offVocabularyCount(data, column)))
+            .map(
+                column ->
+                    Views.ColumnView.of(
+                        column, offVocabularyCount(data, column), data.config().isActive(column)))
             .toList();
 
     return new Views.ConfigView(
@@ -277,6 +286,7 @@ public final class SnapshotProjection {
         data.config().stages(),
         data.config().owners(),
         data.config().linkTypes(),
+        data.config().environments(),
         DEFECT_PHASES);
   }
 

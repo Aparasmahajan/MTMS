@@ -87,6 +87,8 @@ public final class DriftAnalysis {
   /** One deliverable, with its hash and observations on each environment. */
   public record Resolved(
       String columnKey,
+      /** The cell that would claim prod, when the deliverable is split per environment. */
+      String prodColumnKey,
       Drift.Layer layer,
       String scope,
       String cadence,
@@ -121,16 +123,38 @@ public final class DriftAnalysis {
         byEnvironment.put(environment, compositeHash(rows));
       }
 
-      String label =
+      // A drift deliverable names the artefact, not one environment's column — the row
+      // already carries a hash per environment. So it joins to the matrix by the group:
+      // `filecr` is three columns, and the one that claims prod is `filecr_prod`.
+      Optional<Projects.DeliverableColumn> own =
           columns.stream()
               .filter(column -> column.key().equals(deliverable.columnKey()))
-              .map(Projects.DeliverableColumn::label)
-              .findFirst()
+              .findFirst();
+      List<Projects.DeliverableColumn> group =
+          columns.stream()
+              .filter(column -> deliverable.columnKey().equals(column.groupKey()))
+              .toList();
+
+      String label =
+          own.map(Projects.DeliverableColumn::label)
+              .or(
+                  () ->
+                      group.stream().map(Projects.DeliverableColumn::groupLabel).findFirst())
               .orElseGet(() -> deliverable.columnKey().toUpperCase());
+
+      String prodColumnKey =
+          group.stream()
+              .filter(
+                  column -> Projects.PROD_ENVIRONMENT.equals(column.environment()))
+              .map(Projects.DeliverableColumn::key)
+              .findFirst()
+              .or(() -> own.map(Projects.DeliverableColumn::key))
+              .orElseGet(deliverable::columnKey);
 
       resolved.add(
           new Resolved(
               deliverable.columnKey(),
+              prodColumnKey,
               deliverable.layer(),
               deliverable.scope(),
               deliverable.cadence(),
@@ -325,7 +349,7 @@ public final class DriftAnalysis {
                 .filter(
                     module ->
                         module.cells().stream()
-                            .filter(cell -> cell.columnKey().equals(entry.columnKey()))
+                            .filter(cell -> cell.columnKey().equals(entry.prodColumnKey()))
                             .findFirst()
                             .map(
                                 cell ->

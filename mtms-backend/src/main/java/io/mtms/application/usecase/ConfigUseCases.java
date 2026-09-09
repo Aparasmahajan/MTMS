@@ -92,10 +92,18 @@ public class ConfigUseCases {
             full == null ? column.full() : full,
             allowed == null ? column.allowed() : List.copyOf(allowed),
             counts == null ? column.counts() : counts,
-            column.orderIndex()));
+            column.orderIndex(),
+            // Carried through, not defaulted: which environment a column records and which
+            // deliverable it belongs to are not things this endpoint can change.
+            column.environment(),
+            column.groupKey(),
+            column.groupLabel()));
 
     support.recordProjectChange(
-        actor, projectId, "CONFIG", "column updated — " + (label == null ? column.label() : label));
+        actor,
+        projectId,
+        "CONFIG",
+        "column updated — " + (label == null ? column.displayLabel() : label));
     support.bump(projectId);
   }
 
@@ -106,7 +114,8 @@ public class ConfigUseCases {
     Projects.DeliverableColumn column = requireColumn(projectId, key);
 
     projects.deleteColumn(projectId, key);
-    support.recordProjectChange(actor, projectId, "CONFIG", "column removed — " + column.label());
+    support.recordProjectChange(
+        actor, projectId, "CONFIG", "column removed — " + column.displayLabel());
     support.bump(projectId);
   }
 
@@ -132,6 +141,68 @@ public class ConfigUseCases {
 
     projects.removeConfigValue(projectId, list, value);
     support.recordProjectChange(actor, projectId, "CONFIG", list.wire() + " — removed " + value);
+    support.bump(projectId);
+  }
+
+  /**
+   * Switches an environment on or off for the current project.
+   *
+   * <p>Off is not a delete. Every cell recorded against it stays in storage; the columns
+   * simply leave the grid and leave the readiness maths, and switching the environment back
+   * on brings them and their contents back exactly as they were. That is what makes this safe
+   * for "preprod is down this release" as well as for "we have no preprod" — the two are the
+   * same operation, and neither destroys a record.
+   *
+   * <p>Prod cannot be switched off. Readiness is measured against it, so a project with no
+   * prod would have a percentage that means nothing and an FNI gate with nothing to check.
+   */
+  @Transactional
+  public void setEnvironmentEnabled(Actor actor, String key, boolean enabled) {
+    actor.require(PermissionKey.PROJECT_CONFIG);
+    UUID projectId = actor.projectId();
+
+    Projects.Environment environment =
+        projects.config(projectId).environments().stream()
+            .filter(candidate -> candidate.key().equals(key))
+            .findFirst()
+            .orElseThrow(
+                () ->
+                    ServiceException.notFound(
+                        "That environment is not configured on this project."));
+
+    if (!enabled && Projects.PROD_ENVIRONMENT.equals(key)) {
+      throw ServiceException.validation(
+          "Prod cannot be switched off — readiness is measured against it, and the FNI gate"
+              + " reads that percentage.");
+    }
+    if (environment.enabled() == enabled) {
+      return;
+    }
+
+    projects.setEnvironmentEnabled(projectId, key, enabled);
+
+    long affected =
+        projects.columns(projectId).stream()
+            .filter(column -> key.equals(column.environment()))
+            .count();
+
+    support.recordProjectChange(
+        actor,
+        projectId,
+        "CONFIG",
+        enabled
+            ? "switched "
+                + environment.label()
+                + " back on — its "
+                + affected
+                + (affected == 1 ? " column is" : " columns are")
+                + " back on the matrix, holding what was recorded before"
+            : "switched "
+                + environment.label()
+                + " off — its "
+                + affected
+                + (affected == 1 ? " column leaves" : " columns leave")
+                + " the matrix and the readiness maths, keeping every cell");
     support.bump(projectId);
   }
 

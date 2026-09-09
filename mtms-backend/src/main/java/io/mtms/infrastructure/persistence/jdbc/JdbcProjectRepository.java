@@ -252,8 +252,9 @@ public class JdbcProjectRepository implements ProjectRepository {
               connection.prepareStatement(
                   """
                   INSERT INTO deliverable_columns
-                        (id, project_id, key, label, full_name, allowed, counts, order_index)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        (id, project_id, key, label, full_name, allowed, counts, order_index,
+                         environment, group_key, group_label)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                   """);
           statement.setObject(1, column.id());
           statement.setObject(2, column.projectId());
@@ -263,6 +264,9 @@ public class JdbcProjectRepository implements ProjectRepository {
           statement.setArray(6, connection.createArrayOf("text", Sql.toArray(column.allowed())));
           statement.setBoolean(7, column.counts());
           statement.setInt(8, column.orderIndex());
+          statement.setString(9, column.environment());
+          statement.setString(10, column.groupKey());
+          statement.setString(11, column.groupLabel());
           return statement;
         });
   }
@@ -346,7 +350,49 @@ public class JdbcProjectRepository implements ProjectRepository {
         List.copyOf(lists.getOrDefault("node_types", List.of())),
         stageLabels.stream().map(label -> new Projects.Stage(stageId(label), label)).toList(),
         List.copyOf(lists.getOrDefault("owners", List.of())),
-        List.copyOf(lists.getOrDefault("link_types", List.of())));
+        List.copyOf(lists.getOrDefault("link_types", List.of())),
+        jdbc.query(
+            """
+            SELECT key, label, short_label, enabled
+              FROM project_environments
+             WHERE project_id = ?
+             ORDER BY order_index
+            """,
+            Rows.ENVIRONMENT,
+            projectId));
+  }
+
+  // --- Environments ----------------------------------------------------------
+
+  @Override
+  public void insertEnvironment(UUID projectId, Projects.Environment environment, int orderIndex) {
+    jdbc.update(
+        """
+        INSERT INTO project_environments (project_id, key, label, short_label, enabled, order_index)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT (project_id, key) DO UPDATE
+           SET label = EXCLUDED.label,
+               short_label = EXCLUDED.short_label,
+               enabled = EXCLUDED.enabled,
+               order_index = EXCLUDED.order_index
+        """,
+        projectId,
+        environment.key(),
+        environment.label(),
+        environment.shortLabel(),
+        environment.enabled(),
+        orderIndex);
+  }
+
+  @Override
+  public void setEnvironmentEnabled(UUID projectId, String key, boolean enabled) {
+    // One flag. Nothing here touches `cells`: switching an environment off hides its columns
+    // and keeps every value recorded against them, so switching it on restores the lot.
+    jdbc.update(
+        "UPDATE project_environments SET enabled = ? WHERE project_id = ? AND key = ?",
+        enabled,
+        projectId,
+        key);
   }
 
   /**
