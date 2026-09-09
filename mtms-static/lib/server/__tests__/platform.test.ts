@@ -41,7 +41,7 @@ describe('who is a super admin', () => {
 
   it('refuses an organisation admin who is not the platform owner', async () => {
     // The Sub-admin holds nearly every permission inside Flow One. That must not be enough.
-    const subAdmin = await actorFor('a.iyer@mahajan.com');
+    const subAdmin = await actorFor('sanjay@azalio.io');
     await refused(
       createOrganisation(subAdmin, { name: 'Someone Else', adminEmail: 'a@b.com' }),
       'forbidden',
@@ -250,7 +250,7 @@ describe('the platform view', () => {
     expect(flowOne.project_count).toBe(3);
     expect(flowOne.configured_project_count).toBe(1);
     expect(flowOne.module_count).toBe(18);
-    expect(flowOne.admins.map((admin) => admin.email)).toContain('parmahaj@mahajan.com');
+    expect(flowOne.admins.map((admin) => admin.email)).toContain('nitin@azalio.io');
 
     // Counts and names only. No cell, defect, audit entry or module name anywhere in it.
     const serialised = JSON.stringify(view);
