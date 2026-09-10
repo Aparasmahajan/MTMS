@@ -22,11 +22,11 @@ Then open <http://localhost:3100> and sign in as any seeded account with the pas
 
 | Email | Role | What it demonstrates |
 |---|---|---|
-| `parmahaj@mahajan.com` | Admin | everything |
-| `a.iyer@mahajan.com` | Sub-admin | everything except creating projects and editing roles |
-| `v.rao@mahajan.com` | DevOps | deliverables and prod confirmation, no FNI sign-off |
-| `r.kaur@mahajan.com` | Developer | deliverables and defects only |
-| `k.menon@mahajan.com` | Viewer | read-only — every control disabled *and explaining itself* |
+| `nitin@azalio.io` | Admin | everything |
+| `sanjay@azalio.io` | Sub-admin | everything except creating projects and editing roles |
+| `narayana@azalio.io` | DevOps | deliverables and prod confirmation, no FNI sign-off |
+| `paras@azalio.io` | Developer | deliverables and defects only |
+| `dhruv@azalio.io` | Viewer | read-only — every control disabled *and explaining itself* |
 
 Signing in as the Viewer is the fastest way to see that permissions are real: the controls
 render, state their reason, and the API refuses the write independently.

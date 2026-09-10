@@ -89,7 +89,7 @@ public class Seeder implements ApplicationRunner {
       return;
     }
 
-    log.info("Seeding the demo organisation — sign in as parmahaj@mahajan.com / {}", SEED_PASSWORD);
+    log.info("Seeding the demo organisation — sign in as nitin@azalio.io / {}", SEED_PASSWORD);
 
     seedTenantAndRoles();
     seedUsers();
@@ -132,14 +132,24 @@ public class Seeder implements ApplicationRunner {
     String hash = passwords.hash(SEED_PASSWORD);
     Instant createdAt = daysAgo(300);
 
+    // The team, and the role each one holds. A job title and a role are not the same
+    // thing, and this is where they meet: a test manager needs QA's permissions, a PM
+    // needs the release manager's, an SME reviews what QA reviews. Two are judgement
+    // rather than translation — Dhruv is read-only, which is what an intern joining a
+    // live release should be, and Nitin holds the platform above the organisation as
+    // well as an admin role inside it. The boolean is organisation-wide membership.
     List<UserSeed> seeds =
         List.of(
-            new UserSeed("P. Mahajan", "parmahaj@mahajan.com", "admin", true),
-            new UserSeed("A. Iyer", "a.iyer@mahajan.com", "subadmin", true),
-            new UserSeed("R. Kaur", "r.kaur@mahajan.com", "dev", false),
-            new UserSeed("S. Nair", "s.nair@mahajan.com", "qa", false),
-            new UserSeed("V. Rao", "v.rao@mahajan.com", "devops", false),
-            new UserSeed("K. Menon", "k.menon@mahajan.com", "viewer", false));
+            new UserSeed("Nitin", "nitin@azalio.io", "admin", true),
+            new UserSeed("Anand", "anand@azalio.io", "admin", true),
+            new UserSeed("Sanjay", "sanjay@azalio.io", "release", false),
+            new UserSeed("Ritu", "ritu@azalio.io", "release", false),
+            new UserSeed("Vinayak", "vinayak@azalio.io", "qa", false),
+            new UserSeed("Muskan", "muskan@azalio.io", "qa", false),
+            new UserSeed("Paras", "paras@azalio.io", "dev", false),
+            new UserSeed("Bhavnish", "bhavnish@azalio.io", "dev", false),
+            new UserSeed("Dhruv", "dhruv@azalio.io", "viewer", false),
+            new UserSeed("Narayana", "narayana@azalio.io", "devops", false));
 
     for (UserSeed seed : seeds) {
       UUID userId = id("user:" + seed.email());
@@ -153,7 +163,7 @@ public class Seeder implements ApplicationRunner {
                   seed.name(),
                   // The first account is the platform admin. Set here rather than through any
                   // screen, because no screen may grant this — see PermissionKey.
-                  "parmahaj@mahajan.com".equals(seed.email()),
+                  "nitin@azalio.io".equals(seed.email()),
                   Tenancy.UserStatus.ACTIVE,
                   null,
                   createdAt),
@@ -295,7 +305,7 @@ public class Seeder implements ApplicationRunner {
             "Loaded in prod")
         .forEach(value -> projects.addConfigValue(PROJECT_ID, Projects.ConfigList.STAGES, value, 0));
 
-    List.of("P. Mahajan", "A. Iyer", "R. Kaur", "S. Nair")
+    List.of("Paras", "Bhavnish", "Sanjay", "Ritu", "Vinayak", "Muskan", "Narayana")
         .forEach(value -> projects.addConfigValue(PROJECT_ID, Projects.ConfigList.OWNERS, value, 0));
 
     List.of("RITM", "Jira", "Repo", "Run log", "Report", "Confluence")
@@ -391,7 +401,7 @@ public class Seeder implements ApplicationRunner {
             new ModuleSeed("a18", "DSR", "10005_SAPC_CCPC_PREFERENCE_CHANGE_IN_DSR",
                 with(notStarted(), "oh", B), List.of()));
 
-    List<String> owners = List.of("P. Mahajan", "A. Iyer", "R. Kaur", "S. Nair");
+    List<String> owners = List.of("Paras", "Bhavnish", "Sanjay", "Ritu", "Vinayak", "Muskan", "Narayana");
     int index = 0;
 
     for (ModuleSeed seed : seeds) {
@@ -475,7 +485,7 @@ public class Seeder implements ApplicationRunner {
     }
     modules.upsertCell(
         new Modules.Cell(
-            moduleId, subactivityId, columnKey, status, "V. Rao", daysAgo(3 + (index % 30))));
+            moduleId, subactivityId, columnKey, status, "Narayana", daysAgo(3 + (index % 30))));
   }
 
   private void seedLibrary() {
