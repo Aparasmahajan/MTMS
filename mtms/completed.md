@@ -309,7 +309,7 @@ configured, so nothing was sent. Send them this single-use link: …"*.
 | Duplicate key | `409` |
 | Add the first column to it | `configured: true` · audit *"added the deliverable column Smoke test"* |
 | Members of a fresh project | both org-wide, `editable: false`, reason stated |
-| Add R. Kaur as Developer | `200` · editable · audit *"ACCESS — added R. Kaur as Developer"* |
+| Add Paras as Developer | `200` · editable · audit *"ACCESS — added Paras as Developer"* |
 | Add the same person again | `409` |
 | Remove your own org-wide access | `400`, pointing at the Access screen |
 | Invitation | `delivery_state: logged`, accept link returned |
@@ -367,7 +367,7 @@ controls disabling themselves and stating the reason.
 | Check | Result |
 |---|---|
 | Dashboard opens on the seeded projection | 3 fully in prod · 12 part way · 3 not started · **86** blank cells |
-| Click a blank NEMO cell | → *Not Created · P. Mahajan, just now* — advanced **and** stamped |
+| Click a blank NEMO cell | → *Not Created · Nitin, just now* — advanced **and** stamped |
 | Click a rolled-up module cell | opens its subactivities; does not edit |
 | Navigate Matrix → Dashboard in-app | blank cells **86 → 85** — the edit propagated and every figure recomputed |
 | Switch role to Viewer | matrix footer: *"You do not have update deliverable status (deliverable.update) in this project — cells are read-only for you."* |
@@ -696,3 +696,65 @@ Typecheck clean in all three TypeScript projects, `BUILD SUCCESS` on the backend
 static export builds. End-to-end against the running app: the grouped header renders,
 switching Preprod off removes six columns and leaves every readiness figure untouched, and
 prod's toggle is disabled with the reason on it.
+
+---
+
+## Part 7 — the super admin console, live in the static demo
+
+The demo used to refuse every `/api/v1/platform/*` call: *"…needs a real server."* The
+console was therefore the one part of the product a client could not be shown. It now
+works, end to end, with no backend.
+
+### What changed
+
+The demo was a reducer over **one** `Snapshot`, which is all a project screen reads. The
+console sits above that line, so `lib/demo/workspace.ts` holds the rest — a snapshot per
+project, plus the organisations and administrators the console reads. Two rules:
+
+- **Anything derivable is derived.** Module counts and the configured flag come from each
+  project's live snapshot, so the console cannot drift from the matrix.
+- **A created project is a real, empty project.** It gets its own blank snapshot, can be
+  switched into, configured and filled in. A console creating rows that led nowhere would
+  demonstrate the opposite of what it is for.
+
+Project switching is now real. It used to refuse anything but CR_AUTOMATION.
+
+### Administrators
+
+Many administrators to a project and many projects to an administrator — both fall out of
+the membership row `(user, project, role)`. What was missing was a way for a **super
+admin** to write those rows: until now only an organisation's existing admin could, which
+is no help to a new organisation's second project, because nobody is in it yet.
+
+`addProjectAdmin` invites a new person or grants an existing one. `removeProjectAdmin`
+refuses to touch an organisation-wide membership — it covers every project, so revoking it
+from one project's row would take away far more than the row it was clicked on.
+
+### The team
+
+The seeded people are the real ones. Job titles are not roles, and the mapping is where
+they meet — a test manager needs QA's permissions, a PM needs the release manager's:
+
+| Person | Role | Why |
+|---|---|---|
+| Nitin | Admin **+ super admin** | Platform operator. The flag is on the account, not a role |
+| Anand | Admin | Technical manager |
+| Sanjay, Ritu | Release mgr | PMs — the role that runs modules, prod confirmation and FNI |
+| Vinayak, Muskan | QA | Test manager, and the SME who reviews alongside |
+| Paras, Bhavnish | Developer | |
+| Dhruv | Viewer | Intern: sees everything, changes nothing |
+| Narayana | DevOps | Confirms prod loads |
+
+Emails are `firstname@azalio.io`. The demo signs in as Nitin so the console is reachable;
+the role switcher then swaps the permission set without changing the account.
+
+Also fixed: the demo banner claimed *"nothing is saved"*, which stopped being true when
+localStorage persistence landed.
+
+### Verified in the built demo, not just in tests
+
+Created `BILLING_SYNC` from the console → assigned Ritu → switched to it in the tracker →
+it opened as an empty project with the set-up prompt → added a column and a node type →
+the matrix rendered. The platform log recorded both platform actions.
+
+**224 tests** in each Next.js project, **22** in the frontend, **46** in the backend.

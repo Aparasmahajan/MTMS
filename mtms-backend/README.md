@@ -14,7 +14,7 @@ changing a PATH that other Nokia tooling depends on.
 ./mvn.sh spring-boot:run   # http://localhost:8080
 ```
 
-Sign in as `parmahaj@mahajan.com` / `tracker`. The demo organisation is seeded on first start.
+Sign in as `nitin@azalio.io` / `tracker`. The demo organisation is seeded on first start.
 
 **The build is offline.** This machine reaches neither Maven Central nor the Nokia mirror,
 so every dependency is pinned to something already in `~/.m2` and `.mvn/maven.config`
