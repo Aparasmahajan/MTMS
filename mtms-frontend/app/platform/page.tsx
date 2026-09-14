@@ -28,6 +28,7 @@ export default function PlatformPage() {
   const [adminEmail, setAdminEmail] = useState('');
   const [adminName, setAdminName] = useState('');
   const [projectDrafts, setProjectDrafts] = useState<Record<string, string>>({});
+  const [adminDrafts, setAdminDrafts] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     try {
@@ -94,6 +95,30 @@ export default function PlatformPage() {
         `${meta.key} created, empty. Its administrator defines the deliverable columns, node types and stages on the Configure screen — a project arrives with no process of its own.`,
       );
     }
+  }
+
+  /**
+   * Assigns an administrator to one project.
+   *
+   * Somebody already in the organisation is simply granted the project. Somebody new is
+   * invited, and the single-use link comes back in `meta` — there is no mail transport
+   * yet, so it has to be handed over rather than sent.
+   */
+  async function addAdmin(projectId: string, projectKey: string) {
+    const email = (adminDrafts[projectId] ?? '').trim();
+    if (!email) return;
+
+    const meta = await run(() =>
+      send<PlatformView>(`/api/v1/platform/projects/${projectId}/admins`, 'POST', { email }),
+    );
+    if (!meta) return;
+
+    setAdminDrafts((current) => ({ ...current, [projectId]: '' }));
+    setNotice(
+      meta.invited
+        ? `${meta.admin_email} is invited as an administrator of ${projectKey}. There is no mail transport yet, so send them this single-use link: ${window.location.origin}${meta.accept_url}`
+        : `${meta.admin_email} now administers ${projectKey}. They already had an account in this organisation, so there is nothing to send.`,
+    );
   }
 
   if (!view) {
@@ -278,45 +303,152 @@ export default function PlatformPage() {
 
           <div className="bordered">
             {organisation.projects.map((project) => (
-              <div
-                key={project.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'baseline',
-                  gap: 'var(--space-3)',
-                  padding: 'var(--space-3) var(--space-4)',
-                  borderBottom: '1px solid var(--color-divider)',
-                }}
-              >
-                <span
+              <div key={project.id} style={{ borderBottom: '1px solid var(--color-divider)' }}>
+                <div
                   style={{
-                    fontFamily: 'var(--font-heading)',
-                    fontSize: 16,
-                    letterSpacing: '.06em',
-                    textTransform: 'uppercase',
-                    width: 200,
-                    flex: 'none',
+                    display: 'flex',
+                    alignItems: 'baseline',
+                    gap: 'var(--space-3)',
+                    padding: 'var(--space-3) var(--space-4) var(--space-2)',
                   }}
                 >
-                  {project.key}
-                </span>
-                <span style={{ flex: 1, fontSize: 13, color: 'var(--color-neutral-700)' }}>
-                  {project.module_count} {project.module_count === 1 ? 'module' : 'modules'}
-                </span>
-                <span
+                  <span
+                    style={{
+                      fontFamily: 'var(--font-heading)',
+                      fontSize: 16,
+                      letterSpacing: '.06em',
+                      textTransform: 'uppercase',
+                      width: 200,
+                      flex: 'none',
+                    }}
+                  >
+                    {project.key}
+                  </span>
+                  <span style={{ flex: 1, fontSize: 13, color: 'var(--color-neutral-700)' }}>
+                    {project.module_count} {project.module_count === 1 ? 'module' : 'modules'}
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: 'var(--font-heading)',
+                      fontSize: 12,
+                      letterSpacing: '.08em',
+                      textTransform: 'uppercase',
+                      padding: '2px 8px',
+                      border: '1px solid var(--color-neutral-400)',
+                      background: project.configured ? 'var(--color-accent-200)' : 'transparent',
+                      color: project.configured ? 'var(--color-accent-800)' : 'var(--color-neutral-700)',
+                    }}
+                  >
+                    {project.configured ? 'configured' : 'awaiting set-up'}
+                  </span>
+                </div>
+
+                {/*
+                  Administrators. A project may have several and a person may hold several
+                  projects, so this is a list rather than one owner field. A project with
+                  none says so plainly — nobody can configure it until someone is assigned.
+                */}
+                <div
                   style={{
-                    fontFamily: 'var(--font-heading)',
-                    fontSize: 12,
-                    letterSpacing: '.08em',
-                    textTransform: 'uppercase',
-                    padding: '2px 8px',
-                    border: '1px solid var(--color-neutral-400)',
-                    background: project.configured ? 'var(--color-accent-200)' : 'transparent',
-                    color: project.configured ? 'var(--color-accent-800)' : 'var(--color-neutral-700)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 'var(--space-2)',
+                    flexWrap: 'wrap',
+                    padding: '0 var(--space-4) var(--space-3) var(--space-4)',
                   }}
                 >
-                  {project.configured ? 'configured' : 'awaiting set-up'}
-                </span>
+                  <span
+                    className="kicker"
+                    style={{ fontSize: 11, width: 200, flex: 'none', letterSpacing: '.09em' }}
+                  >
+                    Administrators
+                  </span>
+
+                  {project.admins.length === 0 ? (
+                    <span style={{ fontSize: 12, color: 'var(--color-text)' }}>
+                      None — nobody can configure this project yet.
+                    </span>
+                  ) : null}
+
+                  {project.admins.map((admin) => (
+                    <span
+                      key={admin.membership_id}
+                      title={
+                        admin.org_wide
+                          ? `${admin.email} administers every project in ${organisation.name}`
+                          : `${admin.email} administers ${project.key}`
+                      }
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        fontSize: 12,
+                        padding: '1px 8px',
+                        border: '1px solid var(--color-neutral-400)',
+                        background: admin.org_wide ? 'transparent' : 'var(--color-accent-100)',
+                        color: 'var(--color-neutral-700)',
+                      }}
+                    >
+                      {admin.display_name}
+                      {admin.status === 'invited' ? (
+                        <span style={{ color: 'var(--color-neutral-600)' }}>· invited</span>
+                      ) : null}
+                      {admin.org_wide ? (
+                        <span style={{ color: 'var(--color-neutral-600)' }}>· org-wide</span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="mono"
+                          disabled={busy}
+                          title={`Remove ${admin.email} from ${project.key}`}
+                          aria-label={`Remove ${admin.email} from ${project.key}`}
+                          onClick={() =>
+                            void run(() =>
+                              send<PlatformView>(
+                                `/api/v1/platform/projects/${project.id}/admins/${admin.membership_id}`,
+                                'DELETE',
+                              ),
+                            )
+                          }
+                          style={{
+                            border: 0,
+                            background: 'transparent',
+                            padding: 0,
+                            cursor: busy ? 'not-allowed' : 'pointer',
+                            color: 'var(--color-neutral-600)',
+                          }}
+                        >
+                          ×
+                        </button>
+                      )}
+                    </span>
+                  ))}
+
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void addAdmin(project.id, project.key);
+                    }}
+                    style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}
+                  >
+                    <input
+                      className="input"
+                      style={{ width: 220, height: 28, fontSize: 12 }}
+                      value={adminDrafts[project.id] ?? ''}
+                      onChange={(event) =>
+                        setAdminDrafts((current) => ({
+                          ...current,
+                          [project.id]: event.target.value,
+                        }))
+                      }
+                      placeholder="name@company.com"
+                      aria-label={`Assign an administrator to ${project.key}`}
+                    />
+                    <button type="submit" className="btn btn-secondary" disabled={busy}>
+                      Assign
+                    </button>
+                  </form>
+                </div>
               </div>
             ))}
 

@@ -273,13 +273,38 @@ const LIBRARY_SEED: Omit<ModuleLibraryEntry, 'id' | 'tenant_id'>[] = [
   { node_type: 'EIR', name: '1030_IMEI_BLACKLIST_LOADING_EIR', version: 'v1', used_in_projects: 1, subactivity_names: [] },
 ];
 
+/**
+ * The team, and the role each one holds.
+ *
+ * A job title and a role are not the same thing, and the mapping is where they meet: a
+ * test manager needs QA's permissions, a PM needs the release manager's, an SME reviews
+ * what QA reviews. Two are worth stating because they are judgement rather than
+ * translation — Dhruv is read-only, which is what an intern joining a live release
+ * should be, and Nitin holds the platform above the organisation as well as an admin
+ * role inside it.
+ *
+ * `project: null` means organisation-wide: that person owns every project in Flow One,
+ * including ones not created yet.
+ */
 const USER_SEED = [
-  { name: 'P. Mahajan', email: 'parmahaj@mahajan.com', role: 'admin', project: null },
-  { name: 'A. Iyer', email: 'a.iyer@mahajan.com', role: 'subadmin', project: null },
-  { name: 'R. Kaur', email: 'r.kaur@mahajan.com', role: 'dev', project: PROJECT_ID },
-  { name: 'S. Nair', email: 's.nair@mahajan.com', role: 'qa', project: PROJECT_ID },
-  { name: 'V. Rao', email: 'v.rao@mahajan.com', role: 'devops', project: PROJECT_ID },
-  { name: 'K. Menon', email: 'k.menon@mahajan.com', role: 'viewer', project: PROJECT_ID },
+  // Platform operator. Super admin is a flag on the account, not a role — see below.
+  { name: 'Nitin', email: 'nitin@azalio.io', role: 'admin', project: null },
+  // Technical manager.
+  { name: 'Anand', email: 'anand@azalio.io', role: 'admin', project: null },
+  // Project managers — the release manager role runs modules, prod confirmation and FNI.
+  { name: 'Sanjay', email: 'sanjay@azalio.io', role: 'release', project: PROJECT_ID },
+  { name: 'Ritu', email: 'ritu@azalio.io', role: 'release', project: PROJECT_ID },
+  // Test manager, and the SME who reviews alongside them.
+  { name: 'Vinayak', email: 'vinayak@azalio.io', role: 'qa', project: PROJECT_ID },
+  { name: 'Muskan', email: 'muskan@azalio.io', role: 'qa', project: PROJECT_ID },
+  // Developers.
+  { name: 'Paras', email: 'paras@azalio.io', role: 'dev', project: PROJECT_ID },
+  { name: 'Bhavnish', email: 'bhavnish@azalio.io', role: 'dev', project: PROJECT_ID },
+  // Intern: sees everything, changes nothing. Every mutating control renders and explains
+  // why it is disabled, which is the clearest demonstration of the permission model there is.
+  { name: 'Dhruv', email: 'dhruv@azalio.io', role: 'viewer', project: PROJECT_ID },
+  // DevOps — the only role besides release that may confirm a prod load.
+  { name: 'Narayana', email: 'narayana@azalio.io', role: 'devops', project: PROJECT_ID },
 ] as const;
 
 /** Pilot only. Every seeded account shares this; real accounts arrive by invitation. */
@@ -313,7 +338,7 @@ export async function buildSeed(): Promise<StoreData> {
     invite_expires_at: null,
     // The platform owner. Set here because nothing in the UI can grant it — see the
     // comment on `User.is_super_admin`.
-    is_super_admin: user.email === 'parmahaj@mahajan.com',
+    is_super_admin: user.email === 'nitin@azalio.io',
   }));
 
   const memberships: Membership[] = USER_SEED.map((user) => ({
@@ -370,7 +395,7 @@ export async function buildSeed(): Promise<StoreData> {
         { id: id('stage:s5'), label: 'Moving to prod' },
         { id: id('stage:s6'), label: 'Loaded in prod' },
       ],
-      owners: ['P. Mahajan', 'A. Iyer', 'R. Kaur', 'S. Nair'],
+      owners: ['Paras', 'Bhavnish', 'Sanjay', 'Ritu', 'Vinayak', 'Muskan', 'Narayana'],
       link_types: ['RITM', 'Jira', 'Repo', 'Run log', 'Report', 'Confluence'],
       environments: ENVIRONMENT_SEED.map((environment) => ({ ...environment })),
     },
@@ -448,7 +473,7 @@ export async function buildSeed(): Promise<StoreData> {
   const cells: Cell[] = [];
 
   const fniDates: Record<string, string> = { a12: '2026-09-10', a16: '2026-09-08' };
-  const owners: Record<string, string> = { a16: 'P. Mahajan', a12: 'A. Iyer' };
+  const owners: Record<string, string> = { a16: 'Paras', a12: 'Sanjay' };
 
   for (const seed of MODULE_SEED) {
     const moduleId = id(`module:${seed.ref}`);
@@ -503,11 +528,11 @@ export async function buildSeed(): Promise<StoreData> {
   };
 
   const auditSeed: { ref: string; column: string; what: string; who: string; days: number }[] = [
-    { ref: 'a12', column: 'fni', what: 'Completed → Pending, waiting on access', who: 'A. Iyer', days: 1 },
-    { ref: 'a16', column: 'nemo', what: 'set Not Created', who: 'S. Nair', days: 2 },
-    { ref: 'a10', column: 'exec_prod', what: 'Not Loaded → Loaded', who: 'P. Mahajan', days: 2 },
-    { ref: 'a3', column: 'nemo', what: 'Created', who: 'R. Kaur', days: 3 },
-    { ref: 'a14', column: 'oh', what: 'set Not Created', who: 'A. Iyer', days: 6 },
+    { ref: 'a12', column: 'fni', what: 'Completed → Pending, waiting on access', who: 'Sanjay', days: 1 },
+    { ref: 'a16', column: 'nemo', what: 'set Not Created', who: 'Vinayak', days: 2 },
+    { ref: 'a10', column: 'exec_prod', what: 'Not Loaded → Loaded', who: 'Paras', days: 2 },
+    { ref: 'a3', column: 'nemo', what: 'Created', who: 'Bhavnish', days: 3 },
+    { ref: 'a14', column: 'oh', what: 'set Not Created', who: 'Sanjay', days: 6 },
   ];
 
   const audit: AuditEntry[] = auditSeed.map((entry, index) => ({
@@ -532,27 +557,27 @@ export async function buildSeed(): Promise<StoreData> {
     {
       ref: 'a16', run: '751', phase: 'Prod deployment' as const, ticket: 'CRAUT-2291', severity: 'High' as const,
       text: 'Comparison report showed 5 false errors — the python script on prod was an older build than the repo copy',
-      by: 'P. Mahajan', days: 2, status: 'Open' as const,
+      by: 'Paras', days: 2, status: 'Open' as const,
     },
     {
       ref: 'a1', run: '744', phase: 'Preprod test' as const, ticket: 'CRAUT-2287', severity: 'High' as const,
       text: 'py2 str() on a non-ASCII announcement name aborted the postcheck',
-      by: 'S. Nair', days: 1, status: 'Investigating' as const,
+      by: 'Vinayak', days: 1, status: 'Investigating' as const,
     },
     {
       ref: 'a12', run: '748', phase: 'Prod deployment' as const, ticket: 'CRAUT-2301', severity: 'Med' as const,
       text: 'Node access expired mid-run, activity had to be re-scheduled',
-      by: 'A. Iyer', days: 1, status: 'Open' as const,
+      by: 'Sanjay', days: 1, status: 'Open' as const,
     },
     {
       ref: 'a2', run: '739', phase: 'Staging test' as const, ticket: 'CRAUT-2244', severity: 'Low' as const,
       text: 'MOP link in the summary report pointed at the previous attempt',
-      by: 'R. Kaur', days: 7, status: 'Fixed' as const,
+      by: 'Bhavnish', days: 7, status: 'Fixed' as const,
     },
     {
       ref: 'a3', run: '', phase: 'Staging test' as const, ticket: 'CRAUT-2312', severity: 'Med' as const,
       text: 'Deletion subactivity left an orphan SIP filter entry after rollback',
-      by: 'S. Nair', days: 0, status: 'Open' as const,
+      by: 'Vinayak', days: 0, status: 'Open' as const,
     },
   ];
 
@@ -742,22 +767,22 @@ export async function buildSeed(): Promise<StoreData> {
     {
       id: id('invite:n.desai'),
       tenant_id: TENANT_ID,
-      email: 'n.desai@mahajan.com',
-      display_name: 'N. Desai',
+      email: 'aditya@azalio.io',
+      display_name: 'Aditya',
       role_id: id('role:qa'),
       project_id: PROJECT_ID,
-      invited_by: 'P. Mahajan',
+      invited_by: 'Paras',
       invited_at: daysAgo(2),
       accepted_at: null,
     },
     {
       id: id('invite:t.bose'),
       tenant_id: TENANT_ID,
-      email: 't.bose@mahajan.com',
-      display_name: 'T. Bose',
+      email: 'sneha@azalio.io',
+      display_name: 'Sneha',
       role_id: id('role:subadmin'),
       project_id: null,
-      invited_by: 'P. Mahajan',
+      invited_by: 'Paras',
       invited_at: daysAgo(4),
       accepted_at: daysAgo(3),
     },

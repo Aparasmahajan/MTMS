@@ -12,7 +12,7 @@ cd ../mtms-backend && ./mvn.sh spring-boot:run     # :8080
 cd ../mtms-frontend && npm run dev                 # :3000
 ```
 
-Sign in as `parmahaj@mahajan.com` / `tracker`.
+Sign in as `nitin@azalio.io` / `tracker`.
 
 Copy `.env.example` to `.env.local` if the service is anywhere other than
 `http://localhost:8080`.

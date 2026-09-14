@@ -33,7 +33,7 @@ npm test             # 224 tests — run this before and after any change to the
 npm run build:demo   # writes demo/ — the static client demo, no server needed
 ```
 
-Sign in `parmahaj@mahajan.com` / `tracker` (Admin), or `k.menon@mahajan.com` / `tracker`
+Sign in `nitin@azalio.io` / `tracker` (Admin), or `dhruv@azalio.io` / `tracker`
 (Viewer) to see permission gating.
 
 ### Where things are

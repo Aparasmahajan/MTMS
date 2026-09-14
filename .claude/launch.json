@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mtms-demo",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "-l", "4200", "mtms-static/demo"],
+      "port": 4200
+    }
+  ]
+}

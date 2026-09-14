@@ -18,5 +18,12 @@
  */
 export const IS_DEMO = process.env.NEXT_PUBLIC_DEMO === '1';
 
-/** Who the static build is signed in as before anyone touches the role switcher. */
-export const DEMO_SIGNED_IN_AS = 'parmahaj@nokia.com';
+/**
+ * Who the static build is signed in as before anyone touches the role switcher.
+ *
+ * Nitin, because he is the super admin: the demo opens on the whole product, including
+ * the console above the organisation. The switcher then swaps the permission set without
+ * changing the account, so the platform console stays reachable while a client watches
+ * the project screens gate themselves as DevOps or as an intern.
+ */
+export const DEMO_SIGNED_IN_AS = 'nitin@azalio.io';

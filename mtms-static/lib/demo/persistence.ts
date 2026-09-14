@@ -1,3 +1,4 @@
+import type { DemoWorkspace } from '@/lib/demo/workspace';
 import type { Snapshot } from '@/lib/shared/views';
 
 /**
@@ -30,6 +31,13 @@ import type { Snapshot } from '@/lib/shared/views';
 // Bumped when the shape or the vocabulary changes: a returning visitor holds a snapshot
 // whose columns carry the OLD allowed sets, and would never be offered preprod.
 const STORAGE_KEY = 'mtms.static.snapshot.v3';
+/**
+ * Everything above one project — the other projects' snapshots, and the organisations and
+ * administrators the super admin console reads. A second key rather than one combined
+ * value so the snapshot slot keeps its shape: the provider and the cross-tab channel both
+ * carry a `Snapshot` and neither needs to learn about the workspace.
+ */
+const WORKSPACE_KEY = 'mtms.static.workspace.v1';
 const CHANNEL_NAME = 'mtms.static.snapshot';
 
 type Listener = (snapshot: Snapshot) => void;
@@ -85,11 +93,40 @@ export function saveSnapshot(snapshot: Snapshot): void {
   }
 }
 
+/** The workspace this browser last saved, or null to build one from the baked seed. */
+export function loadWorkspace(): DemoWorkspace | null {
+  if (!browser()) return null;
+  try {
+    const raw = window.localStorage.getItem(WORKSPACE_KEY);
+    return raw ? (JSON.parse(raw) as DemoWorkspace) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Persists the workspace.
+ *
+ * Not broadcast on the channel. The channel carries the snapshot a project screen renders,
+ * which is what has to be live in every tab; the console's own list is re-read when it
+ * loads, so a second tab sitting on the console sees a new project on its next visit
+ * rather than the instant it is created. Worth stating rather than implying otherwise.
+ */
+export function saveWorkspace(workspace: DemoWorkspace): void {
+  if (!browser()) return;
+  try {
+    window.localStorage.setItem(WORKSPACE_KEY, JSON.stringify(workspace));
+  } catch {
+    /* see saveSnapshot — a demo that cannot persist still works for the life of the tab */
+  }
+}
+
 /** Forgets everything, in every tab. Used by the demo's reset control. */
 export function clearSnapshot(): void {
   if (!browser()) return;
   try {
     window.localStorage.removeItem(STORAGE_KEY);
+    window.localStorage.removeItem(WORKSPACE_KEY);
   } catch {
     /* nothing useful to do */
   }
