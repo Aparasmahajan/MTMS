@@ -18,6 +18,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -190,21 +191,48 @@ public class Seeder implements ApplicationRunner {
             false, false, daysAgo(30)));
   }
 
-  private record ColumnSeed(String key, String label, String full, String set, boolean counts) {}
+  /**
+   * The environments a deliverable is loaded onto, in promotion order.
+   *
+   * <p>All three ship enabled. A project without a preprod, or one whose lab is down for a
+   * release, switches it off on Configure and the six preprod columns leave the grid and the
+   * readiness maths together — see {@code Projects.Environment}.
+   */
+  private static final List<Projects.Environment> ENVIRONMENTS =
+      List.of(
+          new Projects.Environment("lab", "Lab", "LAB", true),
+          new Projects.Environment("preprod", "Preprod", "PRE", true),
+          new Projects.Environment(Projects.PROD_ENVIRONMENT, "Prod", "PROD", true));
+
+  /**
+   * @param set the status set the column draws on. {@code "load"} is not one of them any more:
+   *     a deliverable that is loaded onto each environment separately becomes one column per
+   *     environment, each taking a plain Not Loaded / Loaded tick, because the three loads are
+   *     independent facts rather than one journey. Prod can be ticked with lab blank, which is
+   *     what a single status could never say.
+   * @param perEnvironment whether to expand this entry into one column per environment.
+   */
+  private record ColumnSeed(
+      String key, String label, String full, String set, boolean counts, boolean perEnvironment) {
+
+    ColumnSeed(String key, String label, String full, String set, boolean counts) {
+      this(key, label, full, set, counts, false);
+    }
+  }
 
   /** The seeded set for CR_AUTOMATION, in sheet order. */
   private static final List<ColumnSeed> COLUMNS =
       List.of(
           new ColumnSeed("oh", "OH", "Order Hub entry created", "create", true),
-          new ColumnSeed("filecr", "FILECR", "NEI code for File CR", "load", true),
-          new ColumnSeed("clicr", "CLICR", "NEI code for CLICR", "load", true),
+          new ColumnSeed("filecr", "FILECR", "NEI code for File CR", "simple", true, true),
+          new ColumnSeed("clicr", "CLICR", "NEI code for CLICR", "simple", true, true),
           new ColumnSeed("nemo", "NEMO",
               "OM configuration so the BST workflow can call the NEI", "create", true),
-          new ColumnSeed("html", "HTML", "HTML report files for File CR and CLICR", "load", true),
+          new ColumnSeed("html", "HTML", "HTML report files for File CR and CLICR", "simple", true, true),
           new ColumnSeed("json", "JSON.Y",
-              "json.yaml template — shared by File CR and CLICR", "load", true),
-          new ColumnSeed("valid", "VALID.Y", "validation.yaml — File CR", "load", true),
-          new ColumnSeed("exec", "EXEC.Y", "execution.yaml — CLICR", "load", true),
+              "json.yaml template — shared by File CR and CLICR", "simple", true, true),
+          new ColumnSeed("valid", "VALID.Y", "validation.yaml — File CR", "simple", true, true),
+          new ColumnSeed("exec", "EXEC.Y", "execution.yaml — CLICR", "simple", true, true),
           new ColumnSeed("bst", "BST", "BST workflow logic", "simple", true),
           new ColumnSeed("lookup", "LOOKUP",
               "Business service logic / application properties for BST", "simple", true),
@@ -218,16 +246,46 @@ public class Seeder implements ApplicationRunner {
   private void seedColumnsAndConfig() {
     int order = 0;
     for (ColumnSeed seed : COLUMNS) {
-      projects.insertColumn(
-          new Projects.DeliverableColumn(
-              id("column:" + seed.key()),
-              PROJECT_ID,
-              seed.key(),
-              seed.label(),
-              seed.full(),
-              io.mtms.domain.StatusVocabulary.STATUS_SETS.get(seed.set()),
-              seed.counts(),
-              order++));
+      List<String> allowed = io.mtms.domain.StatusVocabulary.STATUS_SETS.get(seed.set());
+
+      if (!seed.perEnvironment()) {
+        projects.insertColumn(
+            new Projects.DeliverableColumn(
+                id("column:" + seed.key()),
+                PROJECT_ID,
+                seed.key(),
+                seed.label(),
+                seed.full(),
+                allowed,
+                seed.counts(),
+                order++));
+        continue;
+      }
+
+      for (Projects.Environment environment : ENVIRONMENTS) {
+        String key = seed.key() + "_" + environment.key();
+        projects.insertColumn(
+            new Projects.DeliverableColumn(
+                id("column:" + key),
+                PROJECT_ID,
+                key,
+                environment.shortLabel(),
+                seed.full() + " — loaded on " + environment.label().toLowerCase(),
+                allowed,
+                // Only prod enters readiness — see Projects.PROD_ENVIRONMENT. The toggle is
+                // still per column on Configure, so a project that wants its lab load to
+                // count can say so.
+                seed.counts() && environment.key().equals(Projects.PROD_ENVIRONMENT),
+                order++,
+                environment.key(),
+                seed.key(),
+                seed.label()));
+      }
+    }
+
+    int environmentOrder = 0;
+    for (Projects.Environment environment : ENVIRONMENTS) {
+      projects.insertEnvironment(PROJECT_ID, environment, environmentOrder++);
     }
 
     List.of("MRF", "DLU", "SBC", "EIR", "CFX", "DSR")
@@ -350,7 +408,7 @@ public class Seeder implements ApplicationRunner {
       if (seed.subactivities().isEmpty()) {
         // No subactivities: the module owns its row directly.
         seed.values().forEach((columnKey, status) ->
-            writeCell(moduleId, null, columnKey, status, position));
+            writeSheetValue(moduleId, null, columnKey, status, position));
       } else {
         // With subactivities the module's own row must not exist — its cells are a roll-up.
         int order = 0;
@@ -359,9 +417,53 @@ public class Seeder implements ApplicationRunner {
           modules.insertSubactivity(new Modules.Subactivity(subId, moduleId, name, order++));
           final int subIndex = order;
           seed.values().forEach((columnKey, status) ->
-              writeCell(moduleId, subId, columnKey, status, position + subIndex));
+              writeSheetValue(moduleId, subId, columnKey, status, position + subIndex));
         }
       }
+    }
+  }
+
+  /**
+   * How far the sheet's single load status had got, as a tick per environment.
+   *
+   * <p>The sheet recorded one value per deliverable, so "loaded in prod" is evidence that lab
+   * and preprod were passed on the way. Read forward, not invented: a value of {@code lab}
+   * ticks lab and leaves the two ahead of it Not Loaded, and a blank stays blank everywhere,
+   * because a blank means nobody said.
+   */
+  private static final Map<String, Integer> LOAD_REACH =
+      Map.of("notloaded", 0, "lab", 1, "preprod", 2, "prod", 3);
+
+  private static final Set<String> PER_ENVIRONMENT =
+      COLUMNS.stream()
+          .filter(ColumnSeed::perEnvironment)
+          .map(ColumnSeed::key)
+          .collect(java.util.stream.Collectors.toUnmodifiableSet());
+
+  /**
+   * Writes one sheet value, fanning a per-environment deliverable out across its columns.
+   *
+   * <p>The seeded rows are the DevOps sheet's, one value per deliverable. The matrix now
+   * carries one column per environment, so this is where the sheet meets the new shape.
+   */
+  private void writeSheetValue(
+      UUID moduleId, UUID subactivityId, String sheetKey, String status, int index) {
+
+    if (!PER_ENVIRONMENT.contains(sheetKey)) {
+      writeCell(moduleId, subactivityId, sheetKey, status, index);
+      return;
+    }
+    if (status == null || status.isEmpty()) {
+      return; // Blank on the sheet is blank on every environment.
+    }
+
+    Integer reach = LOAD_REACH.get(status);
+    int position = 0;
+    for (Projects.Environment environment : ENVIRONMENTS) {
+      String perEnvironment = reach == null ? status : (position < reach ? "loaded" : "notloaded");
+      writeCell(
+          moduleId, subactivityId, sheetKey + "_" + environment.key(), perEnvironment, index);
+      position++;
     }
   }
 

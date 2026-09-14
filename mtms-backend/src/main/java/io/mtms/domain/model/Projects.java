@@ -50,12 +50,61 @@ public final class Projects {
       String full,
       List<String> allowed,
       boolean counts,
-      int orderIndex) {}
+      int orderIndex,
+      String environment,
+      String groupKey,
+      String groupLabel) {
+
+    /** A plain column: one tracked thing, not split across environments. */
+    public DeliverableColumn(
+        UUID id,
+        UUID projectId,
+        String key,
+        String label,
+        String full,
+        List<String> allowed,
+        boolean counts,
+        int orderIndex) {
+      this(id, projectId, key, label, full, allowed, counts, orderIndex, null, null, null);
+    }
+
+    /**
+     * What the column is called away from the grid — in the change feed, in a blocker, in a
+     * notice. On the matrix an environment column can be headed PROD, because the group header
+     * above it says which deliverable it belongs to; anywhere else that header is not there.
+     */
+    public String displayLabel() {
+      return groupLabel == null ? label : groupLabel + "·" + label;
+    }
+  }
 
   public record Stage(String id, String label) {}
 
   /**
-   * The four editable lists on the Configure screen.
+   * The environment readiness is measured against.
+   *
+   * <p>Readiness has always meant "ready in production", so only the prod column of a
+   * per-environment deliverable counts. A lab tick is the record of where something has been,
+   * not part of the definition of done — if it counted, a release that skipped lab because lab
+   * was down could never reach 100% and its FNI could never be signed.
+   */
+  public static final String PROD_ENVIRONMENT = "prod";
+
+  /**
+   * A place a deliverable gets loaded onto.
+   *
+   * <p>{@code enabled == false} is the whole point of the entity. A project that has no
+   * preprod, or whose lab is down for the release, should not carry a column of permanent
+   * blanks dragging every readiness percentage below 100 — so a disabled environment leaves
+   * the matrix and leaves the maths. Its cells are <em>kept</em>: switching it back on restores
+   * exactly what was recorded, which is why this is a flag and not a delete.
+   *
+   * @param shortLabel the column header — three or four characters, so the grid stays narrow.
+   */
+  public record Environment(String key, String label, String shortLabel, boolean enabled) {}
+
+  /**
+   * The editable lists on the Configure screen.
    *
    * <p>Ordered lists rather than entities: they carry no data of their own, and reordering the
    * stages re-buckets the whole pipeline without touching a single module.
@@ -65,10 +114,40 @@ public final class Projects {
       List<String> nodeTypes,
       List<Stage> stages,
       List<String> owners,
-      List<String> linkTypes) {
+      List<String> linkTypes,
+      List<Environment> environments) {
+
+    /** A configuration with nothing tracked per environment. */
+    public ProjectConfig(
+        UUID projectId,
+        List<String> nodeTypes,
+        List<Stage> stages,
+        List<String> owners,
+        List<String> linkTypes) {
+      this(projectId, nodeTypes, stages, owners, linkTypes, List.of());
+    }
 
     public static ProjectConfig empty(UUID projectId) {
-      return new ProjectConfig(projectId, List.of(), List.of(), List.of(), List.of());
+      return new ProjectConfig(projectId, List.of(), List.of(), List.of(), List.of(), List.of());
+    }
+
+    /**
+     * Whether a column is on the grid and in the maths.
+     *
+     * <p>Only an environment can switch one off, and it switches off every column recording it
+     * at once. A column naming an environment the project does not configure at all is active:
+     * an unknown environment is one nobody has disabled, and treating it as hidden would make
+     * deliverables disappear because of a typo.
+     */
+    public boolean isActive(DeliverableColumn column) {
+      if (column.environment() == null) {
+        return true;
+      }
+      return environments.stream()
+          .filter(environment -> environment.key().equals(column.environment()))
+          .findFirst()
+          .map(Environment::enabled)
+          .orElse(true);
     }
   }
 

@@ -204,7 +204,7 @@ describe('the event outbox', () => {
     await advanceCell(actor, await projectId(), {
       moduleId: await moduleId(MODULE_NOT_STARTED),
       subactivityId: null,
-      columnKey: 'filecr',
+      columnKey: 'filecr_prod',
     });
 
     const events = (await getStore()).events;
@@ -215,8 +215,8 @@ describe('the event outbox', () => {
   it('partitions by module, so one module’s changes stay in order', async () => {
     const actor = await actorFor(ADMIN);
     const id = await moduleId(MODULE_NOT_STARTED);
-    await advanceCell(actor, await projectId(), { moduleId: id, subactivityId: null, columnKey: 'filecr' });
-    await advanceCell(actor, await projectId(), { moduleId: id, subactivityId: null, columnKey: 'clicr' });
+    await advanceCell(actor, await projectId(), { moduleId: id, subactivityId: null, columnKey: 'filecr_prod' });
+    await advanceCell(actor, await projectId(), { moduleId: id, subactivityId: null, columnKey: 'clicr_prod' });
 
     const keys = (await getStore()).events.map((event) => event.partition_key);
     expect(new Set(keys)).toEqual(new Set([id]));
@@ -247,7 +247,7 @@ describe('the event outbox', () => {
     await advanceCell(actor, await projectId(), {
       moduleId: await moduleId(MODULE_NOT_STARTED),
       subactivityId: null,
-      columnKey: 'filecr',
+      columnKey: 'filecr_prod',
     });
 
     const result = await drainEvents();
@@ -270,7 +270,7 @@ describe('the event outbox', () => {
     await advanceCell(actor, await projectId(), {
       moduleId: await moduleId(MODULE_NOT_STARTED),
       subactivityId: null,
-      columnKey: 'filecr',
+      columnKey: 'filecr_prod',
     });
 
     const failed = await drainEvents();
@@ -297,7 +297,7 @@ describe('the projection still matches after all of this', () => {
     const snapshot = buildSnapshot(await getStore(), actor, await projectId());
 
     expect(snapshot.modules).toHaveLength(18);
-    expect(snapshot.config.columns).toHaveLength(14);
+    expect(snapshot.config.columns).toHaveLength(26);
     expect(snapshot.modules.filter((module) => module.readiness === 100)).toHaveLength(3);
   });
 });

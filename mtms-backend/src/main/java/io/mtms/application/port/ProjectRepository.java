@@ -70,4 +70,16 @@ public interface ProjectRepository {
   void addConfigValue(UUID projectId, Projects.ConfigList list, String value, int orderIndex);
 
   void removeConfigValue(UUID projectId, Projects.ConfigList list, String value);
+
+  // --- Environments ----------------------------------------------------------
+
+  void insertEnvironment(UUID projectId, Projects.Environment environment, int orderIndex);
+
+  /**
+   * Switches an environment on or off.
+   *
+   * <p>Off is not a delete. Every cell recorded against it stays exactly where it is; only
+   * the flag moves, and the projection stops drawing and counting the columns that name it.
+   */
+  void setEnvironmentEnabled(UUID projectId, String key, boolean enabled);
 }

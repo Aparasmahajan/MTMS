@@ -30,6 +30,10 @@ export const STATUS_VOCABULARY: Record<string, StatusEntry> = {
   created: { label: 'Created', tone: 'done', mark: '●' },
   notloaded: { label: 'Not Loaded', tone: 'none', mark: '○' },
   lab: { label: 'Loaded in lab', tone: 'part', mark: '◐' },
+  // A distinct glyph, not just a distinct label. Status here is carried by fill,
+  // outline and glyph — never colour — so two statuses that share a mark are
+  // indistinguishable on the grid however different their names are.
+  preprod: { label: 'Loaded in preprod', tone: 'part', mark: '◑' },
   prod: { label: 'Loaded in prod', tone: 'done', mark: '●' },
   loaded: { label: 'Loaded', tone: 'done', mark: '●' },
   pending: { label: 'Pending', tone: 'part', mark: '◐' },
@@ -86,7 +90,7 @@ export const TONE_STYLE: Record<Tone, ToneStyle> = {
 /** The named subsets the seeded columns draw on. Columns may use any subset. */
 export const STATUS_SETS = {
   create: ['notcreated', 'created'],
-  load: ['notloaded', 'lab', 'prod'],
+  load: ['notloaded', 'lab', 'preprod', 'prod'],
   simple: ['notloaded', 'loaded'],
   sign: ['pending', 'completed'],
   ritm: ['notraised', 'raised'],

@@ -143,24 +143,31 @@ describe('setting the statuses a column can take', () => {
 describe('reordering columns', () => {
   it('moves a column one place and keeps the sequence dense', async () => {
     const before = (await config()).columns.map((entry) => entry.key);
-    expect(before.slice(0, 3)).toEqual(['oh', 'filecr', 'clicr']);
+    expect(before.slice(0, 3)).toEqual(['oh', 'filecr_lab', 'filecr_preprod']);
 
-    await moveColumn(admin, project, 'clicr', 'up');
+    await moveColumn(admin, project, 'filecr_lab', 'up');
 
     const after = (await config()).columns;
-    expect(after.map((entry) => entry.key).slice(0, 3)).toEqual(['oh', 'clicr', 'filecr']);
+    expect(after.map((entry) => entry.key).slice(0, 3)).toEqual([
+      'filecr_lab',
+      'oh',
+      'filecr_preprod',
+    ]);
     expect(after.map((entry) => entry.order_index)).toEqual(after.map((_, index) => index));
   });
 
   it('moves a column down', async () => {
     await moveColumn(admin, project, 'oh', 'down');
-    expect((await config()).columns.map((entry) => entry.key).slice(0, 2)).toEqual(['filecr', 'oh']);
+    expect((await config()).columns.map((entry) => entry.key).slice(0, 2)).toEqual([
+      'filecr_lab',
+      'oh',
+    ]);
   });
 
   it('is reversible', async () => {
     const before = (await config()).columns.map((entry) => entry.key);
-    await moveColumn(admin, project, 'json', 'up');
-    await moveColumn(admin, project, 'json', 'down');
+    await moveColumn(admin, project, 'json_lab', 'up');
+    await moveColumn(admin, project, 'json_lab', 'down');
     expect((await config()).columns.map((entry) => entry.key)).toEqual(before);
   });
 
@@ -182,7 +189,7 @@ describe('reordering columns', () => {
   });
 
   it('refuses a viewer', async () => {
-    await refused(moveColumn(viewer, project, 'clicr', 'up'), 'forbidden');
+    await refused(moveColumn(viewer, project, 'clicr_lab', 'up'), 'forbidden');
   });
 
   it('reorders the matrix without touching any cell', async () => {

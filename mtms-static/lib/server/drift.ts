@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
   DRIFT_ENVIRONMENTS,
+  PROD_ENVIRONMENT,
   type DriftEnvironment,
   type DriftObservation,
   type DriftVerdict,
@@ -52,6 +53,7 @@ export function compositeHash(observations: readonly DriftObservation[]): string
 
 interface Resolved {
   columnKey: string;
+  prodColumnKey: string;
   layer: string;
   scope: string;
   cadence: string;
@@ -78,13 +80,25 @@ function resolve(store: StoreData, projectId: string): Resolved[] {
       byEnvironment[environment] = compositeHash(rows);
     }
 
+    /**
+     * A drift deliverable names the artefact, not one environment's column — the row
+     * already carries a hash per environment. So it joins to the matrix by the group:
+     * `filecr` is three columns, and the one that claims prod is `filecr_prod`.
+     */
+    const own = columns.find((column) => column.key === deliverable.column_key);
+    const group = columns.filter((column) => column.group_key === deliverable.column_key);
+    const prodColumn = group.find((column) => column.environment === PROD_ENVIRONMENT);
+
     return {
       columnKey: deliverable.column_key,
+      /** The cell that would claim prod, when the deliverable is split per environment. */
+      prodColumnKey: prodColumn?.key ?? own?.key ?? deliverable.column_key,
       layer: deliverable.layer,
       scope: deliverable.scope,
       cadence: deliverable.cadence,
       label:
-        columns.find((column) => column.key === deliverable.column_key)?.label ??
+        own?.label ??
+        group[0]?.group_label ??
         deliverable.column_key.toUpperCase(),
       byEnvironment,
       observations,
@@ -241,7 +255,7 @@ export function driftWarnings(
     const verdict = verdictFor(entry.byEnvironment);
     if (verdict !== 'In step') {
       const claiming = modules.filter((module) => {
-        const cell = module.cells.find((candidate) => candidate.column_key === entry.columnKey);
+        const cell = module.cells.find((candidate) => candidate.column_key === entry.prodColumnKey);
         return cell ? toneOf(cell.status) === 'done' : false;
       });
       if (claiming.length > 0) {

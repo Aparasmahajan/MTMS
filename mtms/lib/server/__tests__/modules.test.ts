@@ -80,10 +80,10 @@ describe('creating a module directly', () => {
     expect(module.node_type).toBe('SBC');
     expect(module.readiness).toBe(0);
     expect(module.subactivities).toHaveLength(0);
-    expect(module.blank_count).toBe(14);
+    expect(module.blank_count).toBe(26);
 
     const cells = await cellsOf(created);
-    expect(cells).toHaveLength(14);
+    expect(cells).toHaveLength(26);
     expect(cells.every((cell) => cell.status === BLANK)).toBe(true);
     expect((await snapshot()).modules).toHaveLength(19);
   });
@@ -214,7 +214,7 @@ describe('adding a subactivity', () => {
     // The cells moved rather than being copied: nothing is left on the module's own row.
     const cells = await cellsOf(module);
     expect(cells.filter((cell) => cell.subactivity_id === null)).toHaveLength(0);
-    expect(cells.filter((cell) => cell.subactivity_id === subactivityId)).toHaveLength(14);
+    expect(cells.filter((cell) => cell.subactivity_id === subactivityId)).toHaveLength(26);
   });
 
   it('starts a second subactivity blank, which pulls the roll-up back to blank', async () => {

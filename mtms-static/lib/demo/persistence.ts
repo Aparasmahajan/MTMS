@@ -27,7 +27,9 @@ import type { Snapshot } from '@/lib/shared/views';
  * and showing a half-populated screen is worse than starting from the seed — so the key
  * changes when the shape does, and the old value is simply never read again.
  */
-const STORAGE_KEY = 'mtms.static.snapshot.v1';
+// Bumped when the shape or the vocabulary changes: a returning visitor holds a snapshot
+// whose columns carry the OLD allowed sets, and would never be offered preprod.
+const STORAGE_KEY = 'mtms.static.snapshot.v3';
 const CHANNEL_NAME = 'mtms.static.snapshot';
 
 type Listener = (snapshot: Snapshot) => void;

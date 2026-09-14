@@ -1,6 +1,6 @@
-import type { DeliverableColumn } from '@/lib/shared/domain';
 import { BLANK, nextStatus, readiness, rollUp, stageIndex, toneOf } from '@/lib/shared/vocabulary';
-import type { CellView, ModuleView, Snapshot } from '@/lib/shared/views';
+import { columnDisplayLabel } from '@/lib/shared/views';
+import type { CellView, ColumnView, ModuleView, Snapshot } from '@/lib/shared/views';
 
 /**
  * The optimistic mirror of `advanceCell`.
@@ -69,8 +69,17 @@ export function optimisticAdvance(
   return { ...snapshot, modules };
 }
 
-function readinessOf(cells: readonly CellView[], columns: readonly DeliverableColumn[]): number {
-  const counted = columns.filter((column) => column.counts);
+/**
+ * The columns that are in the maths. A column behind a switched-off environment is still
+ * in the snapshot, cells and all, and must not be counted — the same filter the server
+ * applies in `buildSnapshot`, or the optimistic percentage would jump and then snap back.
+ */
+function activeColumns(columns: readonly ColumnView[]): ColumnView[] {
+  return columns.filter((column) => column.active);
+}
+
+function readinessOf(cells: readonly CellView[], columns: readonly ColumnView[]): number {
+  const counted = activeColumns(columns).filter((column) => column.counts);
   return readiness(
     counted.map((column) => cells.find((cell) => cell.column_key === column.key)?.status ?? BLANK),
   );
@@ -79,13 +88,14 @@ function readinessOf(cells: readonly CellView[], columns: readonly DeliverableCo
 /** Recomputes everything derived from a module's cells: readiness, stage, missing, blanks. */
 export function withDerived(
   module: ModuleView,
-  columns: readonly DeliverableColumn[],
+  columns: readonly ColumnView[],
   stageCount: number,
 ): ModuleView {
   const statusFor = (key: string): string =>
     module.cells.find((cell) => cell.column_key === key)?.status ?? BLANK;
 
-  const counted = columns.filter((column) => column.counts);
+  const active = activeColumns(columns);
+  const counted = active.filter((column) => column.counts);
   const percent = readiness(counted.map((column) => statusFor(column.key)));
 
   return {
@@ -94,7 +104,7 @@ export function withDerived(
     stage_index: stageIndex(percent, stageCount),
     missing: counted
       .filter((column) => toneOf(statusFor(column.key)) !== 'done')
-      .map((column) => column.label),
-    blank_count: columns.filter((column) => statusFor(column.key) === BLANK).length,
+      .map(columnDisplayLabel),
+    blank_count: active.filter((column) => statusFor(column.key) === BLANK).length,
   };
 }

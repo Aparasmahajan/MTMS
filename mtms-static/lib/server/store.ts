@@ -80,8 +80,11 @@ export interface StoreData {
  * 3: drift stopped being pre-computed rows — hashes are reported observations.
  * 4: added `revision` (optimistic concurrency), `refresh_tokens` and the `events` outbox.
  * 5: added `users.is_super_admin` and the `platform_audit` feed.
+ * 6: `preprod` joined the status vocabulary, so the seeded load columns cycle
+ *    notloaded -> lab -> preprod -> prod. Columns store their own allowed set, so an
+ *    existing store keeps the old three-step cycle until it reseeds.
  */
-export const STORE_VERSION = 5;
+export const STORE_VERSION = 7;
 
 /** How many times a mutation is re-applied before a conflict is given up on. */
 const MAX_CONFLICT_RETRIES = 5;

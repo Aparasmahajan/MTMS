@@ -207,19 +207,62 @@ public class InMemoryProjectRepository implements ProjectRepository {
     db.configs.put(projectId, withValueRemoved(current, list, value));
   }
 
+  // --- Environments ----------------------------------------------------------
+
+  @Override
+  public void insertEnvironment(
+      UUID projectId, Projects.Environment environment, int orderIndex) {
+    Projects.ProjectConfig current = config(projectId);
+    List<Projects.Environment> environments = new ArrayList<>(current.environments());
+    environments.removeIf(existing -> existing.key().equals(environment.key()));
+    environments.add(Math.min(orderIndex, environments.size()), environment);
+    db.configs.put(projectId, withEnvironments(current, List.copyOf(environments)));
+  }
+
+  @Override
+  public void setEnvironmentEnabled(UUID projectId, String key, boolean enabled) {
+    Projects.ProjectConfig current = config(projectId);
+    // A new record with the flag flipped. Nothing touches `cells` — switching an
+    // environment off hides its columns and never destroys what was recorded in them.
+    List<Projects.Environment> environments =
+        current.environments().stream()
+            .map(
+                environment ->
+                    environment.key().equals(key)
+                        ? new Projects.Environment(
+                            environment.key(),
+                            environment.label(),
+                            environment.shortLabel(),
+                            enabled)
+                        : environment)
+            .toList();
+    db.configs.put(projectId, withEnvironments(current, environments));
+  }
+
+  private static Projects.ProjectConfig withEnvironments(
+      Projects.ProjectConfig config, List<Projects.Environment> environments) {
+    return new Projects.ProjectConfig(
+        config.projectId(),
+        config.nodeTypes(),
+        config.stages(),
+        config.owners(),
+        config.linkTypes(),
+        environments);
+  }
+
   private static Projects.ProjectConfig withValueAdded(
       Projects.ProjectConfig config, Projects.ConfigList list, String value) {
 
     return switch (list) {
       case NODE_TYPES -> new Projects.ProjectConfig(
           config.projectId(), append(config.nodeTypes(), value), config.stages(),
-          config.owners(), config.linkTypes());
+          config.owners(), config.linkTypes(), config.environments());
       case OWNERS -> new Projects.ProjectConfig(
           config.projectId(), config.nodeTypes(), config.stages(),
-          append(config.owners(), value), config.linkTypes());
+          append(config.owners(), value), config.linkTypes(), config.environments());
       case LINK_TYPES -> new Projects.ProjectConfig(
           config.projectId(), config.nodeTypes(), config.stages(),
-          config.owners(), append(config.linkTypes(), value));
+          config.owners(), append(config.linkTypes(), value), config.environments());
       case STAGES -> {
         List<Projects.Stage> stages = new ArrayList<>(config.stages());
         // The stage id is derived from the label so reordering is a list operation rather
@@ -230,7 +273,7 @@ public class InMemoryProjectRepository implements ProjectRepository {
         }
         yield new Projects.ProjectConfig(
             config.projectId(), config.nodeTypes(), List.copyOf(stages),
-            config.owners(), config.linkTypes());
+            config.owners(), config.linkTypes(), config.environments());
       }
     };
   }
@@ -241,19 +284,19 @@ public class InMemoryProjectRepository implements ProjectRepository {
     return switch (list) {
       case NODE_TYPES -> new Projects.ProjectConfig(
           config.projectId(), remove(config.nodeTypes(), value), config.stages(),
-          config.owners(), config.linkTypes());
+          config.owners(), config.linkTypes(), config.environments());
       case OWNERS -> new Projects.ProjectConfig(
           config.projectId(), config.nodeTypes(), config.stages(),
-          remove(config.owners(), value), config.linkTypes());
+          remove(config.owners(), value), config.linkTypes(), config.environments());
       case LINK_TYPES -> new Projects.ProjectConfig(
           config.projectId(), config.nodeTypes(), config.stages(),
-          config.owners(), remove(config.linkTypes(), value));
+          config.owners(), remove(config.linkTypes(), value), config.environments());
       case STAGES -> new Projects.ProjectConfig(
           config.projectId(), config.nodeTypes(),
           config.stages().stream()
               .filter(stage -> !stage.label().equals(value) && !stage.id().equals(value))
               .toList(),
-          config.owners(), config.linkTypes());
+          config.owners(), config.linkTypes(), config.environments());
     };
   }
 

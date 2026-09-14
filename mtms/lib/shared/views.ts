@@ -5,6 +5,7 @@ import type {
   DefectSeverity,
   DefectStatus,
   DeliverableColumn,
+  Environment,
   DriftVerdict,
   DriftWarningKind,
   RunPhase,
@@ -217,6 +218,15 @@ export interface DriftPromotionView {
 export interface ColumnView extends DeliverableColumn {
   /** Stored cells holding a status this column no longer allows. Blanks never count. */
   off_vocabulary: number;
+  /**
+   * Whether the column is on the grid and in the maths. False only for a column whose
+   * environment is switched off. Derived, never stored — the flag lives on the
+   * environment, so turning preprod back on brings all six of its columns back at once.
+   *
+   * Every column is still projected onto every module, including the inactive ones, so
+   * the cells behind a hidden environment stay addressable and come back untouched.
+   */
+  active: boolean;
 }
 
 export interface ConfigView {
@@ -225,7 +235,37 @@ export interface ConfigView {
   stages: { id: string; label: string }[];
   owners: string[];
   link_types: string[];
+  environments: Environment[];
   phases: DefectPhase[];
+}
+
+/** Environment columns in matrix order, grouped under the deliverable they belong to. */
+export interface ColumnGroup {
+  /** The group key, or the column's own key when it stands alone. */
+  key: string;
+  /** The spanning header — `FILECR`, or the column's own label when it stands alone. */
+  label: string;
+  /** One member for a plain column; one per enabled environment for a grouped one. */
+  members: ColumnView[];
+}
+
+/**
+ * Folds the flat column list into what the header actually draws. Shared so the matrix,
+ * the module detail and the static demo cannot disagree about which columns are on
+ * screen or which deliverable a tick belongs to.
+ */
+export function groupColumns(columns: readonly ColumnView[]): ColumnGroup[] {
+  const groups: ColumnGroup[] = [];
+  for (const column of columns) {
+    if (!column.active) continue;
+    const key = column.group_key ?? column.key;
+    const last = groups[groups.length - 1];
+    // Only a *contiguous* run is one group: reordering a column out of its run splits it,
+    // which is honest — the header can only span columns that sit next to each other.
+    if (last && last.key === key && column.group_key) last.members.push(column);
+    else groups.push({ key, label: column.group_label ?? column.label, members: [column] });
+  }
+  return groups;
 }
 
 export interface Snapshot {
@@ -276,6 +316,16 @@ export interface CellPresentation extends ToneStyle {
   stamp: string;
   /** A roll-up cell opens the subactivities instead of advancing. */
   editable: boolean;
+}
+
+/**
+ * What a column is called away from the grid — in the change feed, in a blocker, in a
+ * notice. On the matrix an environment column can be headed `PROD`, because the group
+ * header above it says which deliverable it belongs to; anywhere else that header is not
+ * there, so the deliverable has to be part of the name.
+ */
+export function columnDisplayLabel(column: DeliverableColumn): string {
+  return column.group_label ? `${column.group_label}·${column.label}` : column.label;
 }
 
 export function cellPresentation(cell: CellView, column: DeliverableColumn): CellPresentation {
