@@ -4,7 +4,8 @@ import { useState } from 'react';
 import { useTracker } from '@/components/TrackerProvider';
 import { Blueprint, PageTitle } from '@/components/primitives';
 import { send } from '@/lib/client/api';
-import type { ConfigList } from '@/lib/shared/domain';
+import type { ConfigList, Environment } from '@/lib/shared/domain';
+import { PROD_ENVIRONMENT } from '@/lib/shared/domain';
 import {
   isStatusKey,
   statusEntry,
@@ -12,6 +13,7 @@ import {
   TONE_DESCRIPTION,
   TONE_STYLE,
 } from '@/lib/shared/vocabulary';
+import { columnDisplayLabel } from '@/lib/shared/views';
 import type { ColumnView, Snapshot } from '@/lib/shared/views';
 
 /**
@@ -158,7 +160,7 @@ function StatusSubset({ column }: { column: ColumnView }) {
       : [...column.allowed, key];
 
     if (next.length === 0) {
-      setNotice(`${column.label} needs at least one status it can take.`);
+      setNotice(`${columnDisplayLabel(column)} needs at least one status it can take.`);
       return;
     }
     void apply(null, () =>
@@ -179,7 +181,7 @@ function StatusSubset({ column }: { column: ColumnView }) {
             disabled={!canConfig}
             title={
               canConfig
-                ? `${on ? 'Remove' : 'Add'} ${entry.label} ${on ? 'from' : 'to'} ${column.label}`
+                ? `${on ? 'Remove' : 'Add'} ${entry.label} ${on ? 'from' : 'to'} ${columnDisplayLabel(column)}`
                 : reasonFor('project.config')
             }
             onClick={() => toggle(key)}
@@ -219,6 +221,149 @@ function StatusSubset({ column }: { column: ColumnView }) {
           list above.
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Environments, and the switch that takes one off the grid.
+ *
+ * Off is not a delete and the copy has to say so, because the operator reaching for it is
+ * usually mid-incident — preprod is down, the window is open, and they want the column to
+ * stop dragging every percentage below 100. Every cell survives; switching back on
+ * restores exactly what was recorded.
+ */
+function Environments({
+  environments,
+  columns,
+}: {
+  environments: Environment[];
+  columns: ColumnView[];
+}) {
+  const { apply, can, reasonFor, setNotice } = useTracker();
+  const canConfig = can('project.config');
+
+  if (environments.length === 0) return null;
+
+  return (
+    <div style={{ gridColumn: '1 / -1' }}>
+      <Blueprint>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'baseline',
+            justifyContent: 'space-between',
+            gap: 'var(--space-3)',
+            marginBottom: 'var(--space-4)',
+            flexWrap: 'wrap',
+          }}
+        >
+          <h4 className="section-heading" style={{ margin: 0 }}>
+            Environments
+          </h4>
+          <span style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>
+            switching one off hides its columns — it never deletes a cell
+          </span>
+        </div>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+            gap: 'var(--space-3)',
+          }}
+        >
+          {environments.map((environment) => {
+            const mine = columns.filter((column) => column.environment === environment.key);
+            const isProd = environment.key === PROD_ENVIRONMENT;
+            const locked = !canConfig || isProd;
+
+            return (
+              <div
+                key={environment.key}
+                style={{
+                  border: '1px solid var(--color-divider)',
+                  padding: 'var(--space-3)',
+                  background: environment.enabled ? 'transparent' : 'var(--color-neutral-100)',
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'baseline',
+                    justifyContent: 'space-between',
+                    gap: 'var(--space-2)',
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: 'var(--font-heading)',
+                      fontSize: 15,
+                      letterSpacing: '.06em',
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    {environment.short}
+                  </span>
+                  <button
+                    type="button"
+                    aria-pressed={environment.enabled}
+                    disabled={locked}
+                    title={
+                      isProd
+                        ? 'Prod cannot be switched off — readiness is measured against it.'
+                        : canConfig
+                          ? `Switch ${environment.label} ${environment.enabled ? 'off' : 'on'}`
+                          : reasonFor('project.config')
+                    }
+                    onClick={() => {
+                      if (isProd) {
+                        setNotice(
+                          'Prod cannot be switched off — readiness is measured against it, and the FNI gate reads that percentage.',
+                        );
+                        return;
+                      }
+                      void apply(null, () =>
+                        send<Snapshot>(`/api/v1/config/environments/${environment.key}`, 'PATCH', {
+                          enabled: !environment.enabled,
+                        }),
+                      );
+                    }}
+                    style={{
+                      fontSize: 13,
+                      borderRadius: 0,
+                      border: '1px solid var(--color-neutral-400)',
+                      background: environment.enabled ? 'var(--color-accent-100)' : 'transparent',
+                      color: 'var(--color-neutral-700)',
+                      padding: '1px 8px',
+                      cursor: locked ? 'not-allowed' : 'pointer',
+                      opacity: locked && !isProd ? 0.6 : 1,
+                    }}
+                  >
+                    {environment.enabled ? 'on' : 'off'}
+                  </button>
+                </div>
+                <div style={{ fontSize: 13, marginTop: 'var(--space-1)' }}>{environment.label}</div>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: 'var(--color-neutral-600)',
+                    marginTop: 'var(--space-1)',
+                    textWrap: 'pretty',
+                  }}
+                >
+                  {mine.length} {mine.length === 1 ? 'column' : 'columns'}
+                  {isProd
+                    ? ' · readiness is measured here, so this one stays on'
+                    : environment.enabled
+                      ? ' · on the matrix, not counted toward readiness'
+                      : ' · hidden, cells kept'}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Blueprint>
     </div>
   );
 }
@@ -283,10 +428,10 @@ export default function ConfigurePage() {
                             disabled={!canConfig || stuck}
                             title={
                               canConfig
-                                ? `Move ${column.label} ${direction === 'up' ? 'earlier' : 'later'} on the matrix`
+                                ? `Move ${columnDisplayLabel(column)} ${direction === 'up' ? 'earlier' : 'later'} on the matrix`
                                 : reasonFor('project.config')
                             }
-                            aria-label={`Move ${column.label} ${direction === 'up' ? 'earlier' : 'later'}`}
+                            aria-label={`Move ${columnDisplayLabel(column)} ${direction === 'up' ? 'earlier' : 'later'}`}
                             onClick={() =>
                               void apply(null, () =>
                                 send<Snapshot>(`/api/v1/config/columns/${column.key}`, 'PATCH', {
@@ -321,11 +466,22 @@ export default function ConfigurePage() {
                       letterSpacing: '.06em',
                       textTransform: 'uppercase',
                       whiteSpace: 'nowrap',
+                      // A hidden column is still listed — it is how you find it to bring
+                      // it back, and its cells are still there behind it.
+                      opacity: column.active ? 1 : 0.5,
                     }}
                   >
-                    {column.label}
+                    {columnDisplayLabel(column)}
                   </td>
-                  <td style={{ fontSize: 13 }}>{column.full}</td>
+                  <td style={{ fontSize: 13 }}>
+                    {column.full}
+                    {column.active ? null : (
+                      <span style={{ color: 'var(--color-neutral-600)' }}>
+                        {' '}
+                        — hidden, its environment is switched off
+                      </span>
+                    )}
+                  </td>
                   <td style={{ minWidth: 260 }}>
                     <StatusSubset column={column} />
                   </td>
@@ -469,6 +625,8 @@ export default function ConfigurePage() {
           placeholder="e.g. Test report"
           values={config.link_types.map((type) => ({ key: type, label: type }))}
         />
+
+        <Environments environments={config.environments} columns={config.columns} />
 
         <div style={{ gridColumn: '1 / -1' }}>
           <Blueprint>

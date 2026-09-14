@@ -134,8 +134,11 @@ describe('stageIndex', () => {
 
 describe('nextStatus', () => {
   it('advances through the column subset', () => {
+    // The load set travels the same path a deliverable does, and the same one the drift
+    // screen reports hashes for: lab, then preprod, then prod.
     expect(nextStatus('notloaded', LOAD)).toBe('lab');
-    expect(nextStatus('lab', LOAD)).toBe('prod');
+    expect(nextStatus('lab', LOAD)).toBe('preprod');
+    expect(nextStatus('preprod', LOAD)).toBe('prod');
   });
 
   it('wraps at the end', () => {

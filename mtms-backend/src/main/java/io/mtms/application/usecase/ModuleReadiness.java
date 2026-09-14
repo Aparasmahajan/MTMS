@@ -39,12 +39,15 @@ public class ModuleReadiness {
 
   public Result of(UUID projectId, UUID moduleId) {
     List<Projects.DeliverableColumn> columns = projects.columns(projectId);
+    Projects.ProjectConfig config = projects.config(projectId);
     List<Modules.Cell> cells = modules.cells(moduleId);
     List<Modules.Subactivity> subs = modules.subactivities(moduleId);
 
+    // Same filter as the projection, or the gate would demand a tick in an environment the
+    // grid does not even show.
     List<String> counted =
         columns.stream()
-            .filter(Projects.DeliverableColumn::counts)
+            .filter(column -> column.counts() && config.isActive(column))
             .map(column -> effectiveStatus(column.key(), cells, subs))
             .toList();
 

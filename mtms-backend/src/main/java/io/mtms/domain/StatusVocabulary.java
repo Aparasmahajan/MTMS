@@ -49,6 +49,9 @@ public final class StatusVocabulary {
       Map.entry("created", new StatusEntry("Created", Tone.DONE, "●")),
       Map.entry("notloaded", new StatusEntry("Not Loaded", Tone.NONE, "○")),
       Map.entry("lab", new StatusEntry("Loaded in lab", Tone.PART, "◐")),
+      // Tone PART, like lab: past not-started and short of done. Only DONE counts
+      // toward readiness, so adding this status moves no percentage.
+      Map.entry("preprod", new StatusEntry("Loaded in preprod", Tone.PART, "◑")),
       Map.entry("prod", new StatusEntry("Loaded in prod", Tone.DONE, "●")),
       Map.entry("loaded", new StatusEntry("Loaded", Tone.DONE, "●")),
       Map.entry("pending", new StatusEntry("Pending", Tone.PART, "◐")),

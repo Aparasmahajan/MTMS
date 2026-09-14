@@ -8,20 +8,40 @@ import { Chip, NotConfigured, StatusMarker } from '@/components/primitives';
 import { send } from '@/lib/client/api';
 import { optimisticAdvance } from '@/lib/client/optimistic';
 import { STATUS_VOCABULARY, TONE_STYLE } from '@/lib/shared/vocabulary';
-import type { CellView, ModuleView, Snapshot } from '@/lib/shared/views';
+import { groupColumns } from '@/lib/shared/views';
+import type { CellView, ColumnView, ModuleView, Snapshot } from '@/lib/shared/views';
 
 /**
  * The module matrix — the spreadsheet, made editable.
  *
  * Geometry is fixed so the sticky first column and sticky header row line up: a 326px
- * module cell, an 82px readiness cell, one 76px cell per configured column, and a 96px
- * target cell. The container's min-width is the sum, so both axes scroll.
+ * module cell, an 82px readiness cell, one cell per configured column, and a 96px target
+ * cell. The container's min-width is the sum, so both axes scroll.
+ *
+ * A deliverable loaded per environment is three columns under one spanning header, and
+ * those are narrow — three 48px ticks come to less than two ordinary columns, which is
+ * what keeps eighteen environment columns on a grid that used to hold six.
  */
 
 const NAME_WIDTH = 326;
 const READY_WIDTH = 82;
 const CELL_WIDTH = 76;
+const ENV_CELL_WIDTH = 48;
 const TARGET_WIDTH = 96;
+
+const widthOf = (column: ColumnView): number => (column.environment ? ENV_CELL_WIDTH : CELL_WIDTH);
+
+/**
+ * The rule the eye reads the grid by: environments inside one deliverable are divided
+ * faintly, deliverables from each other firmly. Without it eighteen equally-spaced ticks
+ * give no clue where FILECR ends and CLICR begins.
+ */
+function groupEdge(columns: readonly ColumnView[], index: number): string {
+  const here = columns[index];
+  const next = columns[index + 1];
+  const sameGroup = Boolean(here?.group_key) && here?.group_key === next?.group_key;
+  return sameGroup ? 'var(--color-neutral-200)' : 'var(--color-divider)';
+}
 
 const READINESS_FILTERS = ['All', 'Loaded in prod', 'Partial', 'Not started', 'Has blanks'] as const;
 type ReadinessFilter = (typeof READINESS_FILTERS)[number];
@@ -40,7 +60,16 @@ function MatrixScreen() {
   // Expansion is local UI state — it is not worth a round trip or a URL.
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  const { columns } = snapshot.config;
+  // Columns behind a switched-off environment are still in the snapshot, cells and all —
+  // they simply do not draw. See `ColumnView.active`.
+  const columns = useMemo(
+    () => snapshot.config.columns.filter((column) => column.active),
+    [snapshot.config.columns],
+  );
+  const columnGroups = useMemo(() => groupColumns(snapshot.config.columns), [snapshot.config.columns]);
+  const hiddenEnvironments = snapshot.config.environments.filter(
+    (environment) => !environment.enabled,
+  );
   const editable = can('deliverable.update');
 
   function setFilter(next: { node?: string; ready?: string }) {
@@ -106,17 +135,21 @@ function MatrixScreen() {
     );
   }
 
-  const minWidth = NAME_WIDTH + READY_WIDTH + TARGET_WIDTH + columns.length * CELL_WIDTH;
+  const minWidth =
+    NAME_WIDTH +
+    READY_WIDTH +
+    TARGET_WIDTH +
+    columns.reduce((total, column) => total + widthOf(column), 0);
 
   /**
-   * `aria-rowindex` is 1-based over the *whole* grid, so the header, each node-type group
-   * header, each module and every expanded subactivity all consume one. A running counter
-   * during render is the only way to get that right when the visible rows depend on which
-   * modules are open.
+   * `aria-rowindex` is 1-based over the *whole* grid, so both header rows, each node-type
+   * group header, each module and every expanded subactivity all consume one. A running
+   * counter during render is the only way to get that right when the visible rows depend
+   * on which modules are open.
    */
-  let rowIndex = 1;
+  let rowIndex = 2;
   const rowCount =
-    1 +
+    2 +
     groups.length +
     groups.reduce(
       (total, group) =>
@@ -194,7 +227,12 @@ function MatrixScreen() {
           color: 'var(--color-neutral-700)',
         }}
       >
-        {(['prod', 'lab', 'notloaded', 'blank'] as const).map((key) => {
+        {/*
+          The statuses actually on this grid. A per-environment deliverable takes a plain
+          Loaded / Not Loaded tick — which environment it is loaded on is the column, not
+          the status, and that is the whole point of the split.
+        */}
+        {(['loaded', 'notloaded', 'pending', 'blank'] as const).map((key) => {
           const entry = STATUS_VOCABULARY[key]!;
           const tone = TONE_STYLE[entry.tone];
           return (
@@ -236,12 +274,16 @@ function MatrixScreen() {
           aria-colcount={columns.length + 3}
           style={{ minWidth }}
         >
-          {/* Header row — sticky top, with the first cell sticky in both axes. */}
+          {/*
+            Two header rows, sticky as one block. The upper names the deliverable and
+            spans its environment columns; the lower names the environment. A grouped
+            column's own label is only ever LAB / PRE / PROD, so without the row above it
+            the grid would be eighteen columns saying which environment and never which
+            deliverable.
+          */}
           <div
-            role="row"
-            aria-rowindex={1}
+            role="rowgroup"
             style={{
-              display: 'flex',
               position: 'sticky',
               top: 0,
               zIndex: 12,
@@ -249,76 +291,141 @@ function MatrixScreen() {
               borderBottom: '1px solid var(--color-neutral-400)',
             }}
           >
-            <div
-              role="columnheader"
-              aria-colindex={1}
-              className="kicker"
-              style={{
-                width: NAME_WIDTH,
-                flex: 'none',
-                position: 'sticky',
-                left: 0,
-                zIndex: 13,
-                background: 'var(--color-bg)',
-                padding: 'var(--space-3) var(--space-4)',
-                borderRight: '1px solid var(--color-divider)',
-                letterSpacing: '.11em',
-              }}
-            >
-              Module — node + activity
-            </div>
-            <div
-              role="columnheader"
-              aria-colindex={2}
-              className="kicker"
-              style={{
-                width: READY_WIDTH,
-                flex: 'none',
-                padding: 'var(--space-3) var(--space-2)',
-                borderRight: '1px solid var(--color-divider)',
-                letterSpacing: '.08em',
-              }}
-            >
-              Ready
-            </div>
-            {columns.map((column, index) => (
+            <div role="row" aria-rowindex={1} style={{ display: 'flex' }}>
               <div
-                key={column.key}
                 role="columnheader"
-                aria-colindex={index + 3}
-                title={column.full}
+                aria-colindex={1}
+                className="kicker"
                 style={{
-                  width: CELL_WIDTH,
+                  width: NAME_WIDTH,
                   flex: 'none',
-                  padding: 'var(--space-3) var(--space-2)',
+                  position: 'sticky',
+                  left: 0,
+                  zIndex: 13,
+                  background: 'var(--color-bg)',
+                  padding: 'var(--space-3) var(--space-4) var(--space-1)',
                   borderRight: '1px solid var(--color-divider)',
+                  letterSpacing: '.11em',
+                }}
+              >
+                Module — node + activity
+              </div>
+              <div
+                role="columnheader"
+                aria-colindex={2}
+                className="kicker"
+                style={{
+                  width: READY_WIDTH,
+                  flex: 'none',
+                  padding: 'var(--space-3) var(--space-2) var(--space-1)',
+                  borderRight: '1px solid var(--color-divider)',
+                  letterSpacing: '.08em',
+                }}
+              >
+                Ready
+              </div>
+              {columnGroups.map((group, index) => {
+                const spanned = group.members.reduce((total, column) => total + widthOf(column), 0);
+                const split = group.members.length > 1;
+                return (
+                  <div
+                    key={group.key}
+                    role="columnheader"
+                    aria-colindex={index + 3}
+                    title={split ? `${group.members[0]!.full.split(' — ')[0]}` : group.members[0]!.full}
+                    style={{
+                      width: spanned,
+                      flex: 'none',
+                      padding: 'var(--space-3) var(--space-2) var(--space-1)',
+                      borderRight: '1px solid var(--color-divider)',
+                      fontFamily: 'var(--font-heading)',
+                      fontSize: 11,
+                      letterSpacing: '.07em',
+                      textTransform: 'uppercase',
+                      color: 'var(--color-neutral-700)',
+                      lineHeight: 1.15,
+                      wordBreak: 'break-word',
+                      textAlign: split ? 'center' : 'left',
+                    }}
+                  >
+                    {group.label}
+                  </div>
+                );
+              })}
+              <div
+                role="columnheader"
+                aria-colindex={columnGroups.length + 3}
+                style={{
+                  width: TARGET_WIDTH,
+                  flex: 'none',
+                  padding: 'var(--space-3) var(--space-2) var(--space-1)',
                   fontFamily: 'var(--font-heading)',
                   fontSize: 11,
                   letterSpacing: '.07em',
                   textTransform: 'uppercase',
                   color: 'var(--color-neutral-700)',
-                  lineHeight: 1.15,
-                  wordBreak: 'break-word',
                 }}
               >
-                {column.label}
+                Target
               </div>
-            ))}
-            <div
-              role="columnheader"
-              aria-colindex={columns.length + 3}
-              style={{
-                width: TARGET_WIDTH,
-                flex: 'none',
-                padding: 'var(--space-3) var(--space-2)',
-                fontFamily: 'var(--font-heading)',
-                fontSize: 11,
-                letterSpacing: '.07em',
-                textTransform: 'uppercase',
-                color: 'var(--color-neutral-700)',
-              }}
-            >
-              Target
+            </div>
+
+            {/*
+              The environment row. A column that is not split leaves its slot empty
+              rather than repeating the name it already carries above.
+            */}
+            <div role="row" aria-rowindex={2} style={{ display: 'flex' }}>
+              <div
+                role="columnheader"
+                aria-colindex={1}
+                style={{
+                  width: NAME_WIDTH,
+                  flex: 'none',
+                  position: 'sticky',
+                  left: 0,
+                  zIndex: 13,
+                  background: 'var(--color-bg)',
+                  borderRight: '1px solid var(--color-divider)',
+                  height: 18,
+                }}
+              />
+              <div
+                role="columnheader"
+                aria-colindex={2}
+                style={{
+                  width: READY_WIDTH,
+                  flex: 'none',
+                  borderRight: '1px solid var(--color-divider)',
+                }}
+              />
+              {columns.map((column, index) => (
+                <div
+                  key={column.key}
+                  role="columnheader"
+                  aria-colindex={index + 3}
+                  title={column.full}
+                  style={{
+                    width: widthOf(column),
+                    flex: 'none',
+                    padding: '0 var(--space-2) var(--space-2)',
+                    borderRight: '1px solid var(--color-divider)',
+                    fontFamily: 'var(--font-heading)',
+                    fontSize: 10,
+                    letterSpacing: '.08em',
+                    textTransform: 'uppercase',
+                    color: 'var(--color-neutral-600)',
+                    lineHeight: 1.1,
+                    textAlign: column.environment ? 'center' : 'left',
+                  }}
+                >
+                  {column.environment ? column.label : ''}
+                </div>
+              ))}
+              <div
+                role="columnheader"
+                aria-colindex={columns.length + 3}
+                style={{ width: TARGET_WIDTH, flex: 'none' }}
+              />
             </div>
           </div>
 
@@ -457,18 +564,20 @@ function MatrixScreen() {
                           </span>
                         </div>
 
-                        {module.cells.map((cell, cellIndex) => {
-                          const column = columns.find((candidate) => candidate.key === cell.column_key);
-                          if (!column) return null;
+                        {columns.map((column, columnIndex) => {
+                          const cell = module.cells.find(
+                            (candidate) => candidate.column_key === column.key,
+                          );
+                          if (!cell) return null;
                           return (
                             <div
-                              key={cell.column_key}
+                              key={column.key}
                               role="gridcell"
-                              aria-colindex={cellIndex + 3}
+                              aria-colindex={columnIndex + 3}
                               style={{
-                                width: CELL_WIDTH,
+                                width: widthOf(column),
                                 flex: 'none',
-                                borderRight: '1px solid var(--color-divider)',
+                                borderRight: `1px solid ${groupEdge(columns, columnIndex)}`,
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
@@ -557,20 +666,20 @@ function MatrixScreen() {
                                   {subactivity.readiness}
                                 </span>
                               </div>
-                              {subactivity.cells.map((cell, cellIndex) => {
-                                const column = columns.find(
-                                  (candidate) => candidate.key === cell.column_key,
+                              {columns.map((column, columnIndex) => {
+                                const cell = subactivity.cells.find(
+                                  (candidate) => candidate.column_key === column.key,
                                 );
-                                if (!column) return null;
+                                if (!cell) return null;
                                 return (
                                   <div
-                                    key={cell.column_key}
+                                    key={column.key}
                                     role="gridcell"
-                                    aria-colindex={cellIndex + 3}
+                                    aria-colindex={columnIndex + 3}
                                     style={{
-                                      width: CELL_WIDTH,
+                                      width: widthOf(column),
                                       flex: 'none',
-                                      borderRight: '1px solid var(--color-divider)',
+                                      borderRight: `1px solid ${groupEdge(columns, columnIndex)}`,
                                       display: 'flex',
                                       alignItems: 'center',
                                       justifyContent: 'center',
@@ -606,8 +715,18 @@ function MatrixScreen() {
         {editable
           ? 'Click a cell to advance it through that column’s statuses. A module cell with subactivities is a roll-up — clicking it opens them.'
           : reasonFor('deliverable.update') + ' — cells are read-only for you.'}{' '}
-        Target date and owner were not in the DevOps sheet; both are columns here waiting to be
-        filled.
+        A deliverable loaded per environment carries one tick per environment, each recorded
+        independently: prod can be ticked with lab blank, because lab was down when the window
+        opened. Only the prod tick counts toward readiness.{' '}
+        {hiddenEnvironments.length > 0
+          ? `${hiddenEnvironments.map((environment) => environment.label).join(' and ')} ${
+              hiddenEnvironments.length === 1 ? 'is' : 'are'
+            } switched off for this project, so ${
+              hiddenEnvironments.length === 1 ? 'its columns are' : 'their columns are'
+            } off the grid and out of the maths — nothing recorded against ${
+              hiddenEnvironments.length === 1 ? 'it' : 'them'
+            } has been deleted. Switch back on under Configure.`
+          : 'Environments are switched on and off under Configure.'}
       </div>
     </div>
   );
