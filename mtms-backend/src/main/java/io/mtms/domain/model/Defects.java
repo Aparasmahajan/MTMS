@@ -107,7 +107,7 @@ public final class Defects {
   public record Defect(
       UUID id,
       UUID projectId,
-      UUID moduleId,
+      UUID subModuleId,
       Phase phase,
       String ticketKey,
       String childReqId,

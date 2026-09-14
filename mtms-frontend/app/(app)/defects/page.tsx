@@ -28,10 +28,10 @@ const STATUS_STYLE: Record<string, { background: string; color: string }> = {
 
 export default function DefectsPage() {
   const { snapshot, apply, can, reasonFor, setNotice } = useTracker();
-  const { modules, config, defects } = snapshot;
+  const { sub_modules: subModules, config, defects } = snapshot;
 
   const [phaseFilter, setPhaseFilter] = useState<'All' | DefectPhase>('All');
-  const [moduleId, setModuleId] = useState(modules[0]?.id ?? '');
+  const [subModuleId, setSubModuleId] = useState(subModules[0]?.id ?? '');
   const [phase, setPhase] = useState<DefectPhase>('Prod deployment');
   const [childReqId, setChildReqId] = useState('');
   const [ticketKey, setTicketKey] = useState('');
@@ -50,13 +50,13 @@ export default function DefectsPage() {
 
   async function addDefect() {
     if (!description.trim()) return;
-    if (!moduleId) {
+    if (!subModuleId) {
       setNotice('There are no modules in this project to log a defect against.');
       return;
     }
     const result = await apply(null, () =>
       send<Snapshot>('/api/v1/defects', 'POST', {
-        module_id: moduleId,
+        sub_module_id: subModuleId,
         phase,
         ticket_key: ticketKey,
         child_req_id: childReqId,
@@ -169,13 +169,13 @@ export default function DefectsPage() {
           <select
             className="input"
             style={{ width: 300 }}
-            value={moduleId}
-            onChange={(event) => setModuleId(event.target.value)}
-            aria-label="Module"
+            value={subModuleId}
+            onChange={(event) => setSubModuleId(event.target.value)}
+            aria-label="Sub-module"
           >
-            {modules.map((module) => (
-              <option key={module.id} value={module.id}>
-                {module.node_type} · {module.name}
+            {subModules.map((subModule) => (
+              <option key={subModule.id} value={subModule.id}>
+                {subModule.module_name} · {subModule.name}
               </option>
             ))}
           </select>
@@ -251,7 +251,7 @@ export default function DefectsPage() {
             <tr>
               <th>Severity</th>
               <th>Phase</th>
-              <th>Module</th>
+              <th>Sub-module</th>
               <th>Ticket</th>
               <th>Run</th>
               <th>What happened</th>
@@ -281,7 +281,7 @@ export default function DefectsPage() {
                 </td>
                 <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{defect.phase}</td>
                 <td style={{ fontSize: 12, wordBreak: 'break-word', maxWidth: 240 }}>
-                  {defect.module_label}
+                  {defect.sub_module_label}
                 </td>
                 <td style={{ whiteSpace: 'nowrap' }}>
                   {defect.ticket_url ? (

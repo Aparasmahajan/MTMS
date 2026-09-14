@@ -14,12 +14,12 @@ import java.util.UUID;
  * Everything the projection needs about one project, loaded in one go.
  *
  * <p>The snapshot is assembled from this in a single pass with no further queries — no lazy
- * loading, no N+1, no repository call buried in a loop over modules. That is why this is one
+ * loading, no N+1, no repository call buried in a loop over sub-modules. That is why this is one
  * record with fourteen lists rather than a graph of entities that each know how to fetch their
  * children: the shape of the read is decided here, once, where it can be seen.
  *
  * <p>Reading a whole project at once is affordable because a project is bounded — tens of
- * modules, hundreds of cells. If that stops being true, the fix is a narrower query for the
+ * sub-modules, hundreds of cells. If that stops being true, the fix is a narrower query for the
  * matrix and a second one for the detail panes, and this record is where that split would be
  * made visible rather than emerging accidentally.
  *
@@ -32,12 +32,12 @@ public record ProjectData(
     long revision,
     List<Projects.DeliverableColumn> columns,
     Projects.ProjectConfig config,
-    List<Modules.Module> modules,
-    List<Modules.Subactivity> subactivities,
+    List<Modules.SubModule> subModules,
+    List<Modules.SubActivity> subActivities,
     List<Modules.Cell> cells,
     List<Modules.Link> links,
     List<Modules.Run> runs,
-    List<Modules.ModuleLibraryEntry> library,
+    List<Modules.LibraryEntry> library,
     List<Defects.Defect> defects,
     List<Audit.AuditEntry> audit,
     List<Drift.Deliverable> driftDeliverables,
@@ -45,20 +45,20 @@ public record ProjectData(
     List<Drift.Report> driftReports,
     List<Drift.Promotion> driftPromotions) {
 
-  /** Cells belonging to one module, keyed by (subactivityId, columnKey). */
-  public List<Modules.Cell> cellsOf(UUID moduleId) {
-    return cells.stream().filter(cell -> cell.moduleId().equals(moduleId)).toList();
+  /** Cells belonging to one module, keyed by (subActivityId, columnKey). */
+  public List<Modules.Cell> cellsOf(UUID subModuleId) {
+    return cells.stream().filter(cell -> cell.subModuleId().equals(subModuleId)).toList();
   }
 
-  public List<Modules.Subactivity> subactivitiesOf(UUID moduleId) {
-    return subactivities.stream()
-        .filter(subactivity -> subactivity.moduleId().equals(moduleId))
-        .sorted(java.util.Comparator.comparingInt(Modules.Subactivity::orderIndex))
+  public List<Modules.SubActivity> subActivitiesOf(UUID subModuleId) {
+    return subActivities.stream()
+        .filter(subActivity -> subActivity.subModuleId().equals(subModuleId))
+        .sorted(java.util.Comparator.comparingInt(Modules.SubActivity::orderIndex))
         .toList();
   }
 
-  public List<Modules.Link> linksOf(UUID moduleId) {
-    return links.stream().filter(link -> link.moduleId().equals(moduleId)).toList();
+  public List<Modules.Link> linksOf(UUID subModuleId) {
+    return links.stream().filter(link -> link.subModuleId().equals(subModuleId)).toList();
   }
 
   /** Columns in display order — the order the matrix draws them in. */

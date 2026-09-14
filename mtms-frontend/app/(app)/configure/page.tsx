@@ -582,7 +582,7 @@ export default function ConfigurePage() {
               textWrap: 'pretty',
             }}
           >
-            A new column starts blank on every module, taking Not Loaded / Loaded and counting toward
+            A new column starts blank on every subModule, taking Not Loaded / Loaded and counting toward
             prod. Change any of that here — cells already filled in keep what they hold.
           </span>
         </form>
@@ -598,11 +598,11 @@ export default function ConfigurePage() {
         }}
       >
         <ConfigSet
-          title="Node types"
+          title="Modules"
           hint="more will come"
-          list="node_types"
+          list="modules"
           placeholder="e.g. HSS"
-          values={config.node_types.map((name) => ({ key: name, label: name }))}
+          values={config.module_names.map((name) => ({ key: name, label: name }))}
         />
         <ConfigSet
           title="Pipeline stages"

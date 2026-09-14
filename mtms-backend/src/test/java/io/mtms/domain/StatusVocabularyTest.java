@@ -23,7 +23,7 @@ class StatusVocabularyTest {
   class RollUp {
 
     @Test
-    @DisplayName("a blank beats everything — one unrecorded subactivity makes the module unrecorded")
+    @DisplayName("a blank beats everything — one unrecorded subActivity makes the module unrecorded")
     void blankWins() {
       assertEquals("", StatusVocabulary.rollUp(List.of("prod", "", "notloaded")));
     }
@@ -41,13 +41,13 @@ class StatusVocabularyTest {
     }
 
     @Test
-    @DisplayName("done only when every subactivity is done")
+    @DisplayName("done only when every subActivity is done")
     void allDone() {
       assertEquals("prod", StatusVocabulary.rollUp(List.of("prod", "prod", "prod")));
     }
 
     @Test
-    @DisplayName("returns a status a subactivity really holds, not a synthetic one")
+    @DisplayName("returns a status a subActivity really holds, not a synthetic one")
     void returnsARealStatus() {
       // 'created' and 'loaded' are both done-toned; the answer must be one of the inputs.
       assertEquals("created", StatusVocabulary.rollUp(List.of("created", "loaded")));
@@ -56,7 +56,7 @@ class StatusVocabularyTest {
     @Test
     @DisplayName("an empty list is blank, not done")
     void emptyIsBlank() {
-      // The dangerous bug: vacuous truth making a module with no subactivities read 100%.
+      // The dangerous bug: vacuous truth making a sub-module with no sub-activities read 100%.
       assertEquals("", StatusVocabulary.rollUp(List.of()));
     }
   }
@@ -76,7 +76,7 @@ class StatusVocabularyTest {
     @Test
     @DisplayName("rounds the way JavaScript does — 7 of 12 is 58, not 59")
     void roundsHalfUp() {
-      // The seeded CFX module. If this drifts, every dashboard figure drifts with it.
+      // The seeded CFX sub-module. If this drifts, every dashboard figure drifts with it.
       assertEquals(58, StatusVocabulary.readiness(List.of(
           "prod", "prod", "prod", "prod", "prod", "prod", "prod",
           "notloaded", "notloaded", "notloaded", "notloaded", "notloaded")));

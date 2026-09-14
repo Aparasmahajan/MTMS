@@ -62,7 +62,7 @@ final class Rows {
         // Unrecognised keys are dropped, never rejected: a role edited by an older release
         // must not take down a request. See PermissionKey.fromWire.
         Set<PermissionKey> permissions = new LinkedHashSet<>();
-        Sql.textArray(rs, "permissions")
+        Sql.stringList(rs, "permissions")
             .forEach(wire -> PermissionKey.fromWire(wire).ifPresent(permissions::add));
 
         return new Tenancy.Role(
@@ -132,7 +132,7 @@ final class Rows {
               rs.getString("key"),
               rs.getString("label"),
               rs.getString("full_name"),
-              Sql.textArray(rs, "allowed"),
+              Sql.stringList(rs, "allowed"),
               rs.getBoolean("counts"),
               rs.getInt("order_index"),
               rs.getString("environment"),
@@ -147,12 +147,12 @@ final class Rows {
               rs.getString("short_label"),
               rs.getBoolean("enabled"));
 
-  static final RowMapper<Modules.Module> MODULE =
+  static final RowMapper<Modules.SubModule> SUB_MODULE =
       (rs, n) ->
-          new Modules.Module(
+          new Modules.SubModule(
               Sql.uuid(rs, "id"),
               Sql.uuid(rs, "project_id"),
-              rs.getString("node_type"),
+              rs.getString("module_name"),
               rs.getString("name"),
               Sql.uuid(rs, "library_entry_id"),
               rs.getString("owner"),
@@ -161,19 +161,19 @@ final class Rows {
               rs.getString("fni_closed_by"),
               Sql.instant(rs, "created_at"));
 
-  static final RowMapper<Modules.Subactivity> SUBACTIVITY =
+  static final RowMapper<Modules.SubActivity> SUB_ACTIVITY =
       (rs, n) ->
-          new Modules.Subactivity(
+          new Modules.SubActivity(
               Sql.uuid(rs, "id"),
-              Sql.uuid(rs, "module_id"),
+              Sql.uuid(rs, "sub_module_id"),
               rs.getString("name"),
               rs.getInt("order_index"));
 
   static final RowMapper<Modules.Cell> CELL =
       (rs, n) ->
           new Modules.Cell(
-              Sql.uuid(rs, "module_id"),
-              Sql.uuid(rs, "subactivity_id"), // null is the module's own row
+              Sql.uuid(rs, "sub_module_id"),
+              Sql.uuid(rs, "sub_activity_id"), // null is the sub-module's own row
               rs.getString("column_key"),
               Sql.status(rs, "status"),
               rs.getString("changed_by"),
@@ -183,27 +183,27 @@ final class Rows {
       (rs, n) ->
           new Modules.Link(
               Sql.uuid(rs, "id"),
-              Sql.uuid(rs, "module_id"),
+              Sql.uuid(rs, "sub_module_id"),
               rs.getString("type"),
               rs.getString("label"),
               rs.getString("url"));
 
-  static final RowMapper<Modules.ModuleLibraryEntry> LIBRARY_ENTRY =
+  static final RowMapper<Modules.LibraryEntry> LIBRARY_ENTRY =
       (rs, n) ->
-          new Modules.ModuleLibraryEntry(
+          new Modules.LibraryEntry(
               Sql.uuid(rs, "id"),
               Sql.uuid(rs, "tenant_id"),
-              rs.getString("node_type"),
+              rs.getString("module_name"),
               rs.getString("name"),
               rs.getString("version"),
-              Sql.textArray(rs, "subactivity_names"),
+              Sql.stringList(rs, "sub_activity_names"),
               rs.getInt("used_in_projects"));
 
   static RowMapper<Modules.Run> run(ObjectMapper mapper) {
     return (rs, n) ->
         new Modules.Run(
             Sql.uuid(rs, "id"),
-            Sql.uuid(rs, "module_id"),
+            Sql.uuid(rs, "sub_module_id"),
             rs.getString("child_req_id"),
             orEmpty(Sql.fromJson(mapper, rs, "phases", new TypeReference<List<Modules.RunPhase>>() {})),
             orEmpty(Sql.fromJson(mapper, rs, "artifacts", new TypeReference<List<Modules.Artifact>>() {})),
@@ -215,8 +215,8 @@ final class Rows {
           new Audit.AuditEntry(
               Sql.uuid(rs, "id"),
               Sql.uuid(rs, "project_id"),
-              Sql.uuid(rs, "module_id"),
-              Sql.uuid(rs, "subactivity_id"),
+              Sql.uuid(rs, "sub_module_id"),
+              Sql.uuid(rs, "sub_activity_id"),
               Audit.Scope.fromWire(rs.getString("scope")),
               rs.getString("label"),
               rs.getString("what"),
@@ -257,7 +257,7 @@ final class Rows {
           new Defects.Defect(
               Sql.uuid(rs, "id"),
               Sql.uuid(rs, "project_id"),
-              Sql.uuid(rs, "module_id"),
+              Sql.uuid(rs, "sub_module_id"),
               Defects.Phase.fromWire(rs.getString("phase")),
               rs.getString("ticket_key"),
               rs.getString("child_req_id"),

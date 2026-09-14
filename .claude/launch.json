@@ -4,8 +4,23 @@
     {
       "name": "mtms-demo",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["serve", "-l", "4200", "mtms-static/demo"],
+      "runtimeArgs": [
+        "serve",
+        "-l",
+        "4200",
+        "mtms-static/demo"
+      ],
       "port": 4200
+    },
+    {
+      "name": "mtms-frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
+      "cwd": "mtms-frontend",
+      "port": 3000
     }
   ]
 }

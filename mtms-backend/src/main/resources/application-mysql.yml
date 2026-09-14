@@ -1,0 +1,72 @@
+# The profile that uses real infrastructure.
+#
+#   ./mvn.sh spring-boot:run -Dspring-boot.run.profiles=mysql
+#
+# Re-enables the autoconfiguration the default profile switches off. The empty `exclude`
+# list is doing real work: profile properties replace the default list rather than adding
+# to it, which is what turns the datasource, Flyway, Redis and Kafka back on.
+
+spring:
+  autoconfigure:
+    exclude:
+
+  datasource:
+    # `sessionVariables=time_zone='+00:00'` is not optional. MySQL has no time-zone-aware
+    # column type, so every DATETIME(6) in this schema holds UTC and the connection has to
+    # agree — otherwise the driver converts using whatever the server's zone happens to be
+    # and timestamps shift by hours depending on where the database is hosted.
+    url: ${DATABASE_URL:jdbc:mysql://localhost:3306/mtms?sessionVariables=time_zone='%2B00:00'&characterEncoding=utf8&rewriteBatchedStatements=true}
+    username: ${DATABASE_USER:mtms}
+    password: ${DATABASE_PASSWORD:mtms}
+    hikari:
+      # Sized for 100-200 people, which is the stated target.
+      #
+      # Not one connection per user: they are held for the length of a statement, not a
+      # session. A page load is one projection read — cached in Redis under the project's
+      # revision, so most loads take no connection at all — and a click is one short
+      # transaction. 16 gives roughly that many genuinely concurrent statements, which at
+      # this size is far more headroom than the traffic needs.
+      #
+      # Raising it is usually the wrong fix. A pool larger than the database can serve in
+      # parallel just moves the queue from the application into MySQL, where it is harder to
+      # see; MySQL's own default `max_connections` is 151, so several instances at 16 still
+      # sit comfortably inside it.
+      maximum-pool-size: ${DATABASE_POOL_SIZE:16}
+      minimum-idle: 4
+      connection-timeout: 3000
+      # Shorter than any sensible proxy or firewall idle timeout, so the pool retires
+      # connections before something upstream silently drops them.
+      max-lifetime: 600000
+      pool-name: mtms-pool
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    # Fail rather than guess if the database already has tables from something else.
+    baseline-on-migrate: false
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2s
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    producer:
+      # The outbox already guarantees the event was recorded; acks=all is what makes
+      # "published" mean the broker will not lose it either.
+      acks: all
+      retries: 3
+      properties:
+        enable.idempotence: true
+
+mtms:
+  storage: mysql
+  cache:
+    type: redis
+  events:
+    publisher: kafka
+  seed-on-empty-database: false
+  security:
+    secure-cookies: true

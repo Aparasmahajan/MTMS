@@ -13,15 +13,15 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-/** Organisations, people, roles and memberships, on Postgres. */
+/** Organisations, people, roles and memberships, on MySQL. */
 @Repository
-@ConditionalOnProperty(name = "mtms.storage", havingValue = "postgres")
+@ConditionalOnProperty(name = "mtms.storage", havingValue = "mysql")
 public class JdbcAccessRepository implements AccessRepository {
 
-  private final JdbcTemplate jdbc;
+  private final Db jdbc;
 
   public JdbcAccessRepository(JdbcTemplate jdbc) {
-    this.jdbc = jdbc;
+    this.jdbc = new Db(jdbc);
   }
 
   @Override
@@ -149,7 +149,7 @@ public class JdbcAccessRepository implements AccessRepository {
 
   @Override
   public List<Tenancy.Role> roles(UUID tenantId) {
-    return jdbc.query("SELECT * FROM roles WHERE tenant_id = ? ORDER BY key", Rows.ROLE, tenantId);
+    return jdbc.query("SELECT * FROM roles WHERE tenant_id = ? ORDER BY `key`", Rows.ROLE, tenantId);
   }
 
   @Override
@@ -163,7 +163,7 @@ public class JdbcAccessRepository implements AccessRepository {
   @Override
   public Optional<Tenancy.Role> roleByKey(UUID tenantId, String key) {
     return jdbc
-        .query("SELECT * FROM roles WHERE tenant_id = ? AND key = ?", Rows.ROLE, tenantId, key)
+        .query("SELECT * FROM roles WHERE tenant_id = ? AND `key` = ?", Rows.ROLE, tenantId, key)
         .stream()
         .findFirst();
   }
@@ -175,17 +175,17 @@ public class JdbcAccessRepository implements AccessRepository {
           var statement =
               connection.prepareStatement(
                   """
-                  INSERT INTO roles (id, tenant_id, key, name, note, description, is_system, permissions)
+                  INSERT INTO roles (id, tenant_id, `key`, name, note, description, is_system, permissions)
                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                   """);
-          statement.setObject(1, role.id());
-          statement.setObject(2, role.tenantId());
+          statement.setString(1, Sql.id(role.id()));
+          statement.setString(2, Sql.id(role.tenantId()));
           statement.setString(3, role.key());
           statement.setString(4, role.name());
           statement.setString(5, role.note());
           statement.setString(6, role.description());
           statement.setBoolean(7, role.isSystem());
-          statement.setArray(8, connection.createArrayOf("text", wire(role.permissions())));
+          statement.setString(8, Sql.jsonArray(wire(role.permissions())));
           return statement;
         });
   }
@@ -196,14 +196,14 @@ public class JdbcAccessRepository implements AccessRepository {
         connection -> {
           var statement =
               connection.prepareStatement("UPDATE roles SET permissions = ? WHERE id = ?");
-          statement.setArray(1, connection.createArrayOf("text", wire(permissions)));
-          statement.setObject(2, roleId);
+          statement.setString(1, Sql.jsonArray(wire(permissions)));
+          statement.setString(2, Sql.id(roleId));
           return statement;
         });
   }
 
-  private static String[] wire(Set<PermissionKey> permissions) {
-    return permissions.stream().map(PermissionKey::wire).toArray(String[]::new);
+  private static List<String> wire(Set<PermissionKey> permissions) {
+    return permissions.stream().map(PermissionKey::wire).toList();
   }
 
   // --- Memberships -----------------------------------------------------------

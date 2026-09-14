@@ -238,7 +238,7 @@ public final class DriftAnalysis {
   public static List<DriftViews.DriftWarningView> warnings(
       List<Resolved> resolved,
       List<Drift.Report> reports,
-      List<Views.ModuleView> modules,
+      List<Views.SubModuleView> subModules,
       Instant now) {
 
     List<DriftViews.DriftWarningView> warnings = new ArrayList<>();
@@ -344,8 +344,8 @@ public final class DriftAnalysis {
       // hashes say prod is not what was verified.
       Drift.Verdict verdict = verdictFor(entry.byEnvironment());
       if (verdict != Drift.Verdict.IN_STEP) {
-        List<Views.ModuleView> claiming =
-            modules.stream()
+        List<Views.SubModuleView> claiming =
+            subModules.stream()
                 .filter(
                     module ->
                         module.cells().stream()
@@ -360,14 +360,14 @@ public final class DriftAnalysis {
 
         if (!claiming.isEmpty()) {
           String names =
-              claiming.stream().limit(3).map(Views.ModuleView::name).reduce((a, b) -> a + ", " + b).orElse("");
+              claiming.stream().limit(3).map(Views.SubModuleView::name).reduce((a, b) -> a + ", " + b).orElse("");
           warnings.add(
               new DriftViews.DriftWarningView(
                   "claimed_but_drifted:" + entry.columnKey(),
                   Drift.WarningKind.CLAIMED_BUT_DRIFTED.wire(),
                   "High",
                   claiming.size()
-                      + (claiming.size() == 1 ? " module records " : " modules record ")
+                      + (claiming.size() == 1 ? " module records " : " subModules record ")
                       + entry.label()
                       + " as done in prod, but its prod hash is \""
                       + verdict.wire()

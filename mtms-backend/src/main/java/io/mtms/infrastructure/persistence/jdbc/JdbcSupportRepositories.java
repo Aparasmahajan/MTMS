@@ -20,27 +20,28 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-/** The smaller Postgres adapters, grouped the same way as their in-memory counterparts. */
+/** The smaller MySQL adapters, grouped the same way as their in-memory counterparts. */
 public final class JdbcSupportRepositories {
+
 
   private JdbcSupportRepositories() {}
 
   // ---------------------------------------------------------------------------
 
   @Repository
-  @ConditionalOnProperty(name = "mtms.storage", havingValue = "postgres")
+  @ConditionalOnProperty(name = "mtms.storage", havingValue = "mysql")
   public static class Defects implements DefectRepository {
 
-    private final JdbcTemplate jdbc;
+    private final Db jdbc;
 
     public Defects(JdbcTemplate jdbc) {
-      this.jdbc = jdbc;
+      this.jdbc = new Db(jdbc);
     }
 
     @Override
     public List<io.mtms.domain.model.Defects.Defect> findAll(UUID projectId) {
       return jdbc.query(
-          "SELECT * FROM defects WHERE project_id = ? ORDER BY created_at DESC",
+          "SELECT * FROM defects" + " WHERE project_id = ? ORDER BY created_at DESC",
           Rows.DEFECT,
           projectId);
     }
@@ -49,7 +50,7 @@ public final class JdbcSupportRepositories {
     public Optional<io.mtms.domain.model.Defects.Defect> find(UUID projectId, UUID defectId) {
       return jdbc
           .query(
-              "SELECT * FROM defects WHERE id = ? AND project_id = ?",
+              "SELECT * FROM defects" + " WHERE id = ? AND project_id = ?",
               Rows.DEFECT,
               defectId,
               projectId)
@@ -61,11 +62,11 @@ public final class JdbcSupportRepositories {
     public void insert(io.mtms.domain.model.Defects.Defect defect) {
       jdbc.update(
           """
-          INSERT INTO defects (id, project_id, module_id, phase, ticket_key, child_req_id,
+          INSERT INTO defects (id, project_id, sub_module_id, phase, ticket_key, child_req_id,
                                severity, description, raised_by, assignee, status, created_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           """,
-          defect.id(), defect.projectId(), defect.moduleId(), defect.phase().wire(),
+          defect.id(), defect.projectId(), defect.subModuleId(), defect.phase().wire(),
           defect.ticketKey(), defect.childReqId(), defect.severity().wire(), defect.description(),
           defect.raisedBy(), defect.assignee(), defect.status().wire(),
           Sql.timestamp(defect.createdAt()));
@@ -93,32 +94,32 @@ public final class JdbcSupportRepositories {
   // ---------------------------------------------------------------------------
 
   @Repository
-  @ConditionalOnProperty(name = "mtms.storage", havingValue = "postgres")
+  @ConditionalOnProperty(name = "mtms.storage", havingValue = "mysql")
   public static class AuditEntries implements AuditRepository {
 
-    private final JdbcTemplate jdbc;
+    private final Db jdbc;
 
     public AuditEntries(JdbcTemplate jdbc) {
-      this.jdbc = jdbc;
+      this.jdbc = new Db(jdbc);
     }
 
     @Override
     public void append(Audit.AuditEntry entry) {
       jdbc.update(
           """
-          INSERT INTO audit_entries (id, project_id, scope, module_id, subactivity_id,
+          INSERT INTO audit_entries (id, project_id, scope, sub_module_id, sub_activity_id,
                                      label, what, who, at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
           """,
-          entry.id(), entry.projectId(), entry.scope().wire(), entry.moduleId(),
-          entry.subactivityId(), entry.label(), entry.what(), entry.who(),
+          entry.id(), entry.projectId(), entry.scope().wire(), entry.subModuleId(),
+          entry.subActivityId(), entry.label(), entry.what(), entry.who(),
           Sql.timestamp(entry.at()));
     }
 
     @Override
     public List<Audit.AuditEntry> recent(UUID projectId, int limit) {
       return jdbc.query(
-          "SELECT * FROM audit_entries WHERE project_id = ? ORDER BY at DESC LIMIT ?",
+          "SELECT * FROM audit_entries" + " WHERE project_id = ? ORDER BY at DESC LIMIT ?",
           Rows.AUDIT,
           projectId,
           limit);
@@ -144,14 +145,14 @@ public final class JdbcSupportRepositories {
   // ---------------------------------------------------------------------------
 
   @Repository
-  @ConditionalOnProperty(name = "mtms.storage", havingValue = "postgres")
+  @ConditionalOnProperty(name = "mtms.storage", havingValue = "mysql")
   public static class DriftStore implements DriftRepository {
 
-    private final JdbcTemplate jdbc;
+    private final Db jdbc;
     private final ObjectMapper mapper;
 
     public DriftStore(JdbcTemplate jdbc, ObjectMapper mapper) {
-      this.jdbc = jdbc;
+      this.jdbc = new Db(jdbc);
       this.mapper = mapper;
     }
 
@@ -169,10 +170,9 @@ public final class JdbcSupportRepositories {
           """
           INSERT INTO drift_deliverables (project_id, column_key, layer, scope, cadence)
           VALUES (?, ?, ?, ?, ?)
-          ON CONFLICT (project_id, column_key)
-          DO UPDATE SET layer = EXCLUDED.layer,
-                        scope = EXCLUDED.scope,
-                        cadence = EXCLUDED.cadence
+          ON DUPLICATE KEY UPDATE layer = VALUES(layer),
+                                  scope = VALUES(scope),
+                                  cadence = VALUES(cadence)
           """,
           deliverable.projectId(), deliverable.columnKey(), deliverable.layer().wire(),
           deliverable.scope(), deliverable.cadence());
@@ -213,14 +213,13 @@ public final class JdbcSupportRepositories {
                                           content_hash, size_bytes, built_at, source_modified_at,
                                           in_packinglist, observed_at, reported_by)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT (project_id, environment, path)
-          DO UPDATE SET content_hash = EXCLUDED.content_hash,
-                        size_bytes = EXCLUDED.size_bytes,
-                        built_at = EXCLUDED.built_at,
-                        source_modified_at = EXCLUDED.source_modified_at,
-                        in_packinglist = EXCLUDED.in_packinglist,
-                        observed_at = EXCLUDED.observed_at,
-                        reported_by = EXCLUDED.reported_by
+          ON DUPLICATE KEY UPDATE content_hash = VALUES(content_hash),
+                                  size_bytes = VALUES(size_bytes),
+                                  built_at = VALUES(built_at),
+                                  source_modified_at = VALUES(source_modified_at),
+                                  in_packinglist = VALUES(in_packinglist),
+                                  observed_at = VALUES(observed_at),
+                                  reported_by = VALUES(reported_by)
           """,
           observation.id(), observation.projectId(), observation.environment().wire(),
           observation.columnKey(), observation.layer().wire(), observation.path(),
@@ -270,13 +269,14 @@ public final class JdbcSupportRepositories {
 
     @Override
     public void insertPromotion(Drift.Promotion promotion) {
-      // `?::jsonb` — the driver sends a String as `text`, and Postgres will not implicitly
-      // cast text to jsonb on insert.
+      // No cast. PostgreSQL needed `?::jsonb` because it will not implicitly widen text to
+      // jsonb; MySQL parses a string into a JSON column on its own, and rejects it if the
+      // string is not valid JSON — which is the check that matters.
       jdbc.update(
           """
           INSERT INTO drift_promotions (id, project_id, from_environment, to_environment,
                                         hashes, promoted_by, at, confirmed_at)
-          VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
           """,
           promotion.id(), promotion.projectId(), promotion.fromEnvironment().wire(),
           promotion.toEnvironment().wire(), Sql.json(mapper, promotion.hashes()),
@@ -296,14 +296,14 @@ public final class JdbcSupportRepositories {
   // ---------------------------------------------------------------------------
 
   @Repository
-  @ConditionalOnProperty(name = "mtms.storage", havingValue = "postgres")
+  @ConditionalOnProperty(name = "mtms.storage", havingValue = "mysql")
   public static class Outbox implements OutboxRepository {
 
-    private final JdbcTemplate jdbc;
+    private final Db jdbc;
     private final ObjectMapper mapper;
 
     public Outbox(JdbcTemplate jdbc, ObjectMapper mapper) {
-      this.jdbc = jdbc;
+      this.jdbc = new Db(jdbc);
       this.mapper = mapper;
     }
 
@@ -313,7 +313,7 @@ public final class JdbcSupportRepositories {
           """
           INSERT INTO domain_events (id, name, tenant_id, project_id, partition_key, payload,
                                      occurred_at, actor, published_at, attempts, last_error)
-          VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           """,
           event.id(), event.name().wire(), event.tenantId(), event.projectId(),
           event.partitionKey(), Sql.json(mapper, event.payload()),
@@ -352,16 +352,17 @@ public final class JdbcSupportRepositories {
       if (eventIds.isEmpty()) {
         return;
       }
+      // `id = ANY (?)` was a Postgres array parameter. MySQL has no array type, so the
+      // placeholders are generated to match the batch — which is safe because the count
+      // comes from the list's own size and never from anything a caller typed.
+      String placeholders = String.join(", ", java.util.Collections.nCopies(eventIds.size(), "?"));
+      Object[] args = new Object[eventIds.size() + 1];
+      args[0] = Sql.timestamp(at);
+      for (int i = 0; i < eventIds.size(); i++) {
+        args[i + 1] = Sql.id(eventIds.get(i));
+      }
       jdbc.update(
-          connection -> {
-            var statement =
-                connection.prepareStatement(
-                    "UPDATE domain_events SET published_at = ? WHERE id = ANY (?)");
-            statement.setTimestamp(1, Sql.timestamp(at));
-            statement.setArray(
-                2, connection.createArrayOf("uuid", eventIds.toArray(new UUID[0])));
-            return statement;
-          });
+          "UPDATE domain_events SET published_at = ? WHERE id IN (" + placeholders + ")", args);
     }
 
     @Override
@@ -384,13 +385,13 @@ public final class JdbcSupportRepositories {
   // ---------------------------------------------------------------------------
 
   @Repository
-  @ConditionalOnProperty(name = "mtms.storage", havingValue = "postgres")
+  @ConditionalOnProperty(name = "mtms.storage", havingValue = "mysql")
   public static class Sessions implements SessionRepository {
 
-    private final JdbcTemplate jdbc;
+    private final Db jdbc;
 
     public Sessions(JdbcTemplate jdbc) {
-      this.jdbc = jdbc;
+      this.jdbc = new Db(jdbc);
     }
 
     @Override

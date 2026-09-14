@@ -5,7 +5,7 @@
 # and it is the same choice lib/server/store.ts makes with its file driver — a developer
 # should be able to clone this and see the matrix without installing three daemons first.
 #
-# Everything real is one profile away. See application-postgres.yml.
+# Everything real is one profile away. See application-mysql.yml.
 
 server:
   port: 8080

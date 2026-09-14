@@ -15,28 +15,28 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 /**
- * Projects and configuration, on Postgres.
+ * Projects and configuration, on MySQL.
  *
  * <p>Every method takes a tenant and every query filters on it. That is not belt and braces —
  * it is the only thing enforcing tenancy until the row-level security described at the end of
  * the migration is turned on.
  */
 @Repository
-@ConditionalOnProperty(name = "mtms.storage", havingValue = "postgres")
+@ConditionalOnProperty(name = "mtms.storage", havingValue = "mysql")
 public class JdbcProjectRepository implements ProjectRepository {
 
-  private final JdbcTemplate jdbc;
+  private final Db jdbc;
   private final ObjectMapper mapper;
 
   public JdbcProjectRepository(JdbcTemplate jdbc, ObjectMapper mapper) {
-    this.jdbc = jdbc;
+    this.jdbc = new Db(jdbc);
     this.mapper = mapper;
   }
 
   /**
    * The whole project, in one round of queries.
    *
-   * <p>Fourteen statements rather than one join. A join across modules, subactivities, cells,
+   * <p>Fourteen statements rather than one join. A join across sub-modules, sub-activities, cells,
    * links and defects would multiply out into hundreds of thousands of rows that then have to
    * be de-duplicated in memory — the classic cartesian blow-up. Each of these is a single
    * indexed read, and the assembly is a few loops.
@@ -62,37 +62,45 @@ public class JdbcProjectRepository implements ProjectRepository {
             columns(projectId),
             config(projectId),
             jdbc.query(
-                "SELECT * FROM modules WHERE project_id = ? ORDER BY created_at", Rows.MODULE, projectId),
+                """
+                SELECT sm.*, m.name AS module_name
+                  FROM sub_modules sm
+                  JOIN modules m ON m.id = sm.module_id
+                 WHERE sm.project_id = ?
+                 ORDER BY sm.created_at
+                """,
+                Rows.SUB_MODULE,
+                projectId),
             jdbc.query(
                 """
-                SELECT s.* FROM subactivities s
-                  JOIN modules m ON m.id = s.module_id
-                 WHERE m.project_id = ?
-                 ORDER BY s.order_index
+                SELECT sa.* FROM sub_activities sa
+                  JOIN sub_modules sm ON sm.id = sa.sub_module_id
+                 WHERE sm.project_id = ?
+                 ORDER BY sa.order_index
                 """,
-                Rows.SUBACTIVITY,
+                Rows.SUB_ACTIVITY,
                 projectId),
             jdbc.query(
                 """
                 SELECT c.* FROM cells c
-                  JOIN modules m ON m.id = c.module_id
-                 WHERE m.project_id = ?
+                  JOIN sub_modules sm ON sm.id = c.sub_module_id
+                 WHERE sm.project_id = ?
                 """,
                 Rows.CELL,
                 projectId),
             jdbc.query(
                 """
                 SELECT l.* FROM links l
-                  JOIN modules m ON m.id = l.module_id
-                 WHERE m.project_id = ?
+                  JOIN sub_modules sm ON sm.id = l.sub_module_id
+                 WHERE sm.project_id = ?
                 """,
                 Rows.LINK,
                 projectId),
             jdbc.query(
                 """
                 SELECT r.* FROM runs r
-                  JOIN modules m ON m.id = r.module_id
-                 WHERE m.project_id = ?
+                  JOIN sub_modules sm ON sm.id = r.sub_module_id
+                 WHERE sm.project_id = ?
                  ORDER BY r.at DESC
                 """,
                 Rows.run(mapper),
@@ -143,26 +151,30 @@ public class JdbcProjectRepository implements ProjectRepository {
   @Override
   public Optional<Projects.Project> findByKey(UUID tenantId, String key) {
     return jdbc
-        .query("SELECT * FROM projects WHERE tenant_id = ? AND key = ?", Rows.PROJECT, tenantId, key)
+        .query(
+            "SELECT * FROM projects WHERE tenant_id = ? AND `key` = ?",
+            Rows.PROJECT,
+            tenantId,
+            key)
         .stream()
         .findFirst();
   }
 
   @Override
-  public Map<UUID, Integer> moduleCounts(UUID tenantId) {
+  public Map<UUID, Integer> subModuleCounts(UUID tenantId) {
     Map<UUID, Integer> counts = new HashMap<>();
-    // Every project appears, including the ones with no modules — a LEFT JOIN rather than a
-    // GROUP BY over modules, or a brand-new project would simply be missing from the switcher.
+    // Every project appears, including the ones with no sub-modules — a LEFT JOIN rather than
+    // a GROUP BY over sub_modules, or a brand-new project would be missing from the switcher.
     jdbc.query(
         """
-        SELECT p.id AS project_id, count(m.id) AS module_count
+        SELECT p.id AS project_id, count(sm.id) AS sub_module_count
           FROM projects p
-          LEFT JOIN modules m ON m.project_id = p.id
+          LEFT JOIN sub_modules sm ON sm.project_id = p.id
          WHERE p.tenant_id = ?
          GROUP BY p.id
         """,
         rs -> {
-          counts.put(UUID.fromString(rs.getString("project_id")), rs.getInt("module_count"));
+          counts.put(UUID.fromString(rs.getString("project_id")), rs.getInt("sub_module_count"));
         },
         tenantId);
     return counts;
@@ -172,7 +184,7 @@ public class JdbcProjectRepository implements ProjectRepository {
   public void insert(Projects.Project project) {
     jdbc.update(
         """
-        INSERT INTO projects (id, tenant_id, key, name, description, configured, archived, created_at)
+        INSERT INTO projects (id, tenant_id, `key`, name, description, configured, archived, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         project.id(), project.tenantId(), project.key(), project.name(), project.description(),
@@ -194,18 +206,41 @@ public class JdbcProjectRepository implements ProjectRepository {
   /**
    * Atomic, and returns the value it set.
    *
-   * <p>{@code RETURNING} rather than update-then-select: two writers doing the latter can both
-   * read the same number and both believe they own it, which would let one of them cache a
-   * projection under a revision the other had already superseded.
+   * <p>Not update-then-select: two writers doing that can both read the same number and both
+   * believe they own it, which would let one of them cache a projection under a revision the
+   * other had already superseded.
+   *
+   * <p>PostgreSQL said this with {@code RETURNING}. MySQL has no such clause, so it uses
+   * {@code LAST_INSERT_ID(expr)}, which stores {@code expr} in the <em>session's</em>
+   * last-insert-id and returns it. Being per-session is the whole point: the value read back
+   * is the one this connection wrote, whatever any other writer did in between.
    */
   @Override
   public long bumpRevision(UUID projectId) {
-    Long revision =
-        jdbc.queryForObject(
-            "UPDATE projects SET revision = revision + 1 WHERE id = ? RETURNING revision",
-            Long.class,
-            projectId);
-    return revision == null ? 0L : revision;
+    // Both statements on ONE connection, explicitly.
+    //
+    // `LAST_INSERT_ID()` reads a value stored per *session*. Issue the UPDATE and the SELECT
+    // as two ordinary calls and the pool is free to hand out two different connections — the
+    // read then lands on a session that has set nothing and answers 0. Inside a transaction
+    // that happens not to occur, so this would work everywhere the use cases call it and fail
+    // silently anywhere else, returning revision 0 for every project: one cache key for all of
+    // them, and an optimistic-concurrency token that never moves.
+    return jdbc
+        .raw()
+        .execute(
+            (org.springframework.jdbc.core.ConnectionCallback<Long>)
+                connection -> {
+                  try (var update =
+                      connection.prepareStatement(
+                          "UPDATE projects SET revision = LAST_INSERT_ID(revision + 1) WHERE id = ?")) {
+                    update.setString(1, projectId.toString());
+                    update.executeUpdate();
+                  }
+                  try (var read = connection.createStatement();
+                      var rs = read.executeQuery("SELECT LAST_INSERT_ID()")) {
+                    return rs.next() ? rs.getLong(1) : 0L;
+                  }
+                });
   }
 
   @Override
@@ -229,7 +264,7 @@ public class JdbcProjectRepository implements ProjectRepository {
   public Optional<Projects.DeliverableColumn> column(UUID projectId, String key) {
     return jdbc
         .query(
-            "SELECT * FROM deliverable_columns WHERE project_id = ? AND key = ?",
+            "SELECT * FROM deliverable_columns WHERE project_id = ? AND `key` = ?",
             Rows.COLUMN,
             projectId,
             key)
@@ -240,9 +275,10 @@ public class JdbcProjectRepository implements ProjectRepository {
   /**
    * A {@code PreparedStatementCreator} rather than varargs, because of {@code allowed}.
    *
-   * <p>{@code text[]} has no JDBC type the varargs form can infer — it needs
-   * {@code createArrayOf}, which needs the live connection. Passing a Java {@code String[]}
-   * positionally binds it as an unknown type and Postgres rejects the statement.
+   * <p>Kept from the PostgreSQL version, where {@code text[]} needed the live connection to
+   * build an array. On MySQL {@code allowed} is JSON and could be passed as a plain string,
+   * but the explicit numbering here also documents which parameter is which across eleven of
+   * them, which is worth more than the two lines it costs.
    */
   @Override
   public void insertColumn(Projects.DeliverableColumn column) {
@@ -252,16 +288,16 @@ public class JdbcProjectRepository implements ProjectRepository {
               connection.prepareStatement(
                   """
                   INSERT INTO deliverable_columns
-                        (id, project_id, key, label, full_name, allowed, counts, order_index,
+                        (id, project_id, `key`, label, full_name, allowed, counts, order_index,
                          environment, group_key, group_label)
                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                   """);
-          statement.setObject(1, column.id());
-          statement.setObject(2, column.projectId());
+          statement.setString(1, Sql.id(column.id()));
+          statement.setString(2, Sql.id(column.projectId()));
           statement.setString(3, column.key());
           statement.setString(4, column.label());
           statement.setString(5, column.full());
-          statement.setArray(6, connection.createArrayOf("text", Sql.toArray(column.allowed())));
+          statement.setString(6, Sql.jsonArray(column.allowed()));
           statement.setBoolean(7, column.counts());
           statement.setInt(8, column.orderIndex());
           statement.setString(9, column.environment());
@@ -284,10 +320,10 @@ public class JdbcProjectRepository implements ProjectRepository {
                   """);
           statement.setString(1, column.label());
           statement.setString(2, column.full());
-          statement.setArray(3, connection.createArrayOf("text", Sql.toArray(column.allowed())));
+          statement.setString(3, Sql.jsonArray(column.allowed()));
           statement.setBoolean(4, column.counts());
           statement.setInt(5, column.orderIndex());
-          statement.setObject(6, column.id());
+          statement.setString(6, Sql.id(column.id()));
           return statement;
         });
   }
@@ -300,11 +336,12 @@ public class JdbcProjectRepository implements ProjectRepository {
         """
         DELETE FROM cells
          WHERE column_key = ?
-           AND module_id IN (SELECT id FROM modules WHERE project_id = ?)
+           AND sub_module_id IN (SELECT id FROM sub_modules WHERE project_id = ?)
         """,
         key,
         projectId);
-    jdbc.update("DELETE FROM deliverable_columns WHERE project_id = ? AND key = ?", projectId, key);
+    jdbc.update(
+        "DELETE FROM deliverable_columns WHERE project_id = ? AND `key` = ?", projectId, key);
   }
 
   @Override
@@ -313,16 +350,19 @@ public class JdbcProjectRepository implements ProjectRepository {
         jdbc.queryForObject(
             """
             SELECT count(*) FROM cells c
-              JOIN modules m ON m.id = c.module_id
-             WHERE m.project_id = ?
+              JOIN sub_modules sm ON sm.id = c.sub_module_id
+             WHERE sm.project_id = ?
                AND c.column_key = ?
                AND c.status <> ''
-               AND NOT (c.status = ANY (?))
+               AND NOT JSON_CONTAINS(?, JSON_QUOTE(c.status))
             """,
             Integer.class,
             projectId,
             columnKey,
-            allowed.toArray(new String[0]));
+            // `= ANY (array)` on PostgreSQL. MySQL has no array type, so the allowed set
+            // travels as the JSON the column already stores it in. An empty list contains
+            // nothing, so every filled-in cell counts as off-vocabulary — which is right.
+            Sql.jsonArray(allowed));
     return count == null ? 0 : count;
   }
 
@@ -347,13 +387,21 @@ public class JdbcProjectRepository implements ProjectRepository {
 
     return new Projects.ProjectConfig(
         projectId,
-        List.copyOf(lists.getOrDefault("node_types", List.of())),
+        // Modules are rows in their own table now, not a list of strings, because a checklist,
+        // owners and a discussion all have to hang off one. Read back as the names the config
+        // screen edits. Archived ones are left out — hidden, but their sub-modules keep their
+        // work, and switching the name back on finds it again.
+        jdbc.query(
+            "SELECT name FROM modules WHERE project_id = ? AND archived_at IS NULL"
+                + " ORDER BY order_index, name",
+            (rs, n) -> rs.getString("name"),
+            projectId),
         stageLabels.stream().map(label -> new Projects.Stage(stageId(label), label)).toList(),
         List.copyOf(lists.getOrDefault("owners", List.of())),
         List.copyOf(lists.getOrDefault("link_types", List.of())),
         jdbc.query(
             """
-            SELECT key, label, short_label, enabled
+            SELECT `key`, label, short_label, enabled
               FROM project_environments
              WHERE project_id = ?
              ORDER BY order_index
@@ -368,13 +416,13 @@ public class JdbcProjectRepository implements ProjectRepository {
   public void insertEnvironment(UUID projectId, Projects.Environment environment, int orderIndex) {
     jdbc.update(
         """
-        INSERT INTO project_environments (project_id, key, label, short_label, enabled, order_index)
+        INSERT INTO project_environments
+               (project_id, `key`, label, short_label, enabled, order_index)
         VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT (project_id, key) DO UPDATE
-           SET label = EXCLUDED.label,
-               short_label = EXCLUDED.short_label,
-               enabled = EXCLUDED.enabled,
-               order_index = EXCLUDED.order_index
+        ON DUPLICATE KEY UPDATE label = VALUES(label),
+                                short_label = VALUES(short_label),
+                                enabled = VALUES(enabled),
+                                order_index = VALUES(order_index)
         """,
         projectId,
         environment.key(),
@@ -389,7 +437,7 @@ public class JdbcProjectRepository implements ProjectRepository {
     // One flag. Nothing here touches `cells`: switching an environment off hides its columns
     // and keeps every value recorded against them, so switching it on restores the lot.
     jdbc.update(
-        "UPDATE project_environments SET enabled = ? WHERE project_id = ? AND key = ?",
+        "UPDATE project_environments SET enabled = ? WHERE project_id = ? AND `key` = ?",
         enabled,
         projectId,
         key);
@@ -399,7 +447,7 @@ public class JdbcProjectRepository implements ProjectRepository {
    * A stage's id is derived from its label, not stored.
    *
    * <p>The config table holds ordered strings and nothing else, and a stage carries no data of
-   * its own — reordering the list re-buckets every module without touching one. Deriving the
+   * its own — reordering the list re-buckets every sub-module without touching one. Deriving the
    * id keeps that true; storing one would make reordering an identity change.
    */
   static String stageId(String label) {
@@ -409,21 +457,46 @@ public class JdbcProjectRepository implements ProjectRepository {
   @Override
   public void addConfigValue(
       UUID projectId, Projects.ConfigList list, String value, int orderIndex) {
+    if (list == Projects.ConfigList.MODULES) {
+      jdbc.update(
+          """
+          INSERT INTO modules (id, project_id, name, order_index)
+          SELECT ?, ?, ?, COALESCE(MAX(order_index) + 1, 0) FROM modules WHERE project_id = ?
+          ON DUPLICATE KEY UPDATE archived_at = NULL
+          """,
+          UUID.randomUUID(), projectId, value, projectId);
+      return;
+    }
+
     // Ordered by insertion. The caller passes 0 rather than tracking a position, so the next
     // index is computed here where the current maximum is known.
+    //
+    // INSERT ... SELECT rather than a scalar subquery in VALUES: MySQL refuses to read the
+    // table it is inserting into from a VALUES subquery ("You can't specify target table"),
+    // and allows exactly this form instead.
     jdbc.update(
         """
         INSERT INTO project_config_entries (id, project_id, list, value, order_index)
-        VALUES (?, ?, ?, ?,
-                COALESCE((SELECT max(order_index) + 1 FROM project_config_entries
-                           WHERE project_id = ? AND list = ?), 0))
-        ON CONFLICT (project_id, list, value) DO NOTHING
+        SELECT ?, ?, ?, ?, COALESCE(MAX(order_index) + 1, 0)
+          FROM project_config_entries WHERE project_id = ? AND list = ?
+        ON DUPLICATE KEY UPDATE order_index = order_index
         """,
         UUID.randomUUID(), projectId, list.wire(), value, projectId, list.wire());
   }
 
   @Override
   public void removeConfigValue(UUID projectId, Projects.ConfigList list, String value) {
+    if (list == Projects.ConfigList.MODULES) {
+      // Archived, not deleted: a module with sub-modules recorded against it must not take
+      // them with it, and the same name switched back on has to find its work again.
+      jdbc.update(
+          "UPDATE modules SET archived_at = CURRENT_TIMESTAMP(6)"
+              + " WHERE project_id = ? AND name = ?",
+          projectId,
+          value);
+      return;
+    }
+
     jdbc.update(
         "DELETE FROM project_config_entries WHERE project_id = ? AND list = ? AND value = ?",
         projectId,

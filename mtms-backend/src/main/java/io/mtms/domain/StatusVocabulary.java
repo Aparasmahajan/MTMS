@@ -89,25 +89,25 @@ public final class StatusVocabulary {
       "ritm", List.of("notraised", "raised"));
 
   /**
-   * The roll-up rule: a module cell is derived from its subactivities, never stored.
+   * The roll-up rule: a sub-module cell is derived from its sub-activities, never stored.
    *
    * <p>Precedence is blank ▸ not-done ▸ in-progress ▸ done. It returns the <em>actual</em>
-   * status of the first subactivity at the governing tone, so the label a user sees is one a
-   * subactivity really holds rather than a synthetic one.
+   * status of the first sub-activity at the governing tone, so the label a user sees is one a
+   * sub-activity really holds rather than a synthetic one.
    */
-  public static String rollUp(List<String> subactivityStatuses) {
-    if (subactivityStatuses == null || subactivityStatuses.isEmpty()) {
+  public static String rollUp(List<String> subActivityStatuses) {
+    if (subActivityStatuses == null || subActivityStatuses.isEmpty()) {
       return BLANK;
     }
 
     for (Tone governing : List.of(Tone.BLANK, Tone.NONE, Tone.PART)) {
-      for (String status : subactivityStatuses) {
+      for (String status : subActivityStatuses) {
         if (toneOf(status) == governing) {
           return governing == Tone.BLANK ? BLANK : status;
         }
       }
     }
-    return subactivityStatuses.get(0);
+    return subActivityStatuses.get(0);
   }
 
   /**
@@ -126,8 +126,8 @@ public final class StatusVocabulary {
   }
 
   /**
-   * The stage a module sits in, bucketed from readiness. Never stored: a stage added on the
-   * Configure screen re-buckets every module without a migration.
+   * The stage a sub-module sits in, bucketed from readiness. Never stored: a stage added on the
+   * Configure screen re-buckets every sub-module without a migration.
    *
    * <p>100% is the only percentage that reaches the last stage.
    */
