@@ -15,9 +15,9 @@ import org.springframework.stereotype.Component;
 /**
  * Publishes drained outbox events to Kafka.
  *
- * <p>The partition key is the point. Everything about one module carries the same key, so a
- * consumer sees "cell changed" before "module closed" for that module — which matters, because
- * the second is only meaningful in light of the first. Ordering across different modules is not
+ * <p>The partition key is the point. Everything about one sub-module carries the same key, so a
+ * consumer sees "cell changed" before "sub-module closed" for that sub-module — which matters, because
+ * the second is only meaningful in light of the first. Ordering across different sub-modules is not
  * promised and is not needed.
  *
  * <p>Sends are awaited rather than fired and forgotten. The drain's entire job is to find out

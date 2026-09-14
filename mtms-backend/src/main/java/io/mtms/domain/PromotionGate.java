@@ -27,13 +27,13 @@ public final class PromotionGate {
 
   public static DriftViews.PromotionGateView evaluate(
       List<Projects.DeliverableColumn> columns,
-      List<Views.ModuleView> modules,
+      List<Views.SubModuleView> subModules,
       List<DriftViews.DriftRowView> rows) {
 
     int lowest =
-        modules.isEmpty()
+        subModules.isEmpty()
             ? 0
-            : modules.stream().mapToInt(Views.ModuleView::readiness).min().orElse(0);
+            : subModules.stream().mapToInt(Views.SubModuleView::readiness).min().orElse(0);
 
     long mismatches =
         rows.stream()
@@ -51,16 +51,16 @@ public final class PromotionGate {
                         || Drift.Verdict.NOT_DEPLOYED.wire().equals(row.verdict()))
             .count();
 
-    SignOff fni = signOff(columns, modules, "fni");
-    SignOff access = signOff(columns, modules, "access");
+    SignOff fni = signOff(columns, subModules, "fni");
+    SignOff access = signOff(columns, subModules, "access");
 
     List<DriftViews.GateCheck> checks = new ArrayList<>(5);
 
     checks.add(
         new DriftViews.GateCheck(
             "Every counted deliverable is Loaded in prod",
-            modules.isEmpty() ? "no modules" : "lowest module " + lowest + "%",
-            !modules.isEmpty() && lowest == 100));
+            subModules.isEmpty() ? "no subModules" : "lowest module " + lowest + "%",
+            !subModules.isEmpty() && lowest == 100));
 
     checks.add(
         new DriftViews.GateCheck(
@@ -115,7 +115,7 @@ public final class PromotionGate {
    * because there was nothing left to check.
    */
   private static SignOff signOff(
-      List<Projects.DeliverableColumn> columns, List<Views.ModuleView> modules, String columnKey) {
+      List<Projects.DeliverableColumn> columns, List<Views.SubModuleView> subModules, String columnKey) {
 
     boolean present = columns.stream().anyMatch(column -> column.key().equals(columnKey));
     if (!present) {
@@ -124,7 +124,7 @@ public final class PromotionGate {
 
     int outstanding =
         (int)
-            modules.stream()
+            subModules.stream()
                 .filter(
                     module ->
                         module.cells().stream()

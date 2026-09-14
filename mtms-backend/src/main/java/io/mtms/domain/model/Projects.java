@@ -8,7 +8,7 @@ import java.util.UUID;
  * Projects and their configuration.
  *
  * <p>This file is where the application stops being a spreadsheet about one release. Columns,
- * stages, node types, owners and link types are <em>data</em>, edited on the Configure screen.
+ * stages, modules, owners and link types are <em>data</em>, edited on the Configure screen.
  * Hard-coding the fourteen seeded columns anywhere would undo the entire point.
  */
 public final class Projects {
@@ -30,16 +30,16 @@ public final class Projects {
       Instant createdAt) {}
 
   /**
-   * A deliverable column — one tracked thing, for every module in the project.
+   * A deliverable column — one tracked thing, for every sub-module in the project.
    *
    * @param label the short header on the matrix. Twelve characters, because the matrix has to
    *     fit fourteen of these across a laptop screen.
-   * @param full the full meaning, shown in the header tooltip and on the module detail.
+   * @param full the full meaning, shown in the header tooltip and on the sub-module detail.
    * @param allowed the subset of the shared status vocabulary this column may take. Editing it
    *     never rewrites cells already filled in — that would destroy the record of what was
    *     actually loaded — so a cell can outlive its column's vocabulary.
    * @param counts whether the column enters the readiness percentage. EMAIL and RITM in the
-   *     seeded set do not: they are administrative, and counting them would make a module that
+   *     seeded set do not: they are administrative, and counting them would make a sub-module that
    *     is genuinely finished read as 92%.
    */
   public record DeliverableColumn(
@@ -107,11 +107,11 @@ public final class Projects {
    * The editable lists on the Configure screen.
    *
    * <p>Ordered lists rather than entities: they carry no data of their own, and reordering the
-   * stages re-buckets the whole pipeline without touching a single module.
+   * stages re-buckets the whole pipeline without touching a single sub-module.
    */
   public record ProjectConfig(
       UUID projectId,
-      List<String> nodeTypes,
+      List<String> moduleNames,
       List<Stage> stages,
       List<String> owners,
       List<String> linkTypes,
@@ -120,11 +120,11 @@ public final class Projects {
     /** A configuration with nothing tracked per environment. */
     public ProjectConfig(
         UUID projectId,
-        List<String> nodeTypes,
+        List<String> moduleNames,
         List<Stage> stages,
         List<String> owners,
         List<String> linkTypes) {
-      this(projectId, nodeTypes, stages, owners, linkTypes, List.of());
+      this(projectId, moduleNames, stages, owners, linkTypes, List.of());
     }
 
     public static ProjectConfig empty(UUID projectId) {
@@ -153,7 +153,7 @@ public final class Projects {
 
   /** Which of the four lists a Configure-screen edit is aimed at. */
   public enum ConfigList {
-    NODE_TYPES("node_types"),
+    MODULES("modules"),
     STAGES("stages"),
     OWNERS("owners"),
     LINK_TYPES("link_types");

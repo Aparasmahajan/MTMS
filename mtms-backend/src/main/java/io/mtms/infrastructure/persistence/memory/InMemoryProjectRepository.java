@@ -38,9 +38,9 @@ public class InMemoryProjectRepository implements ProjectRepository {
       return Optional.empty();
     }
 
-    List<io.mtms.domain.model.Modules.Module> modules =
-        db.modules.stream().filter(m -> m.projectId().equals(projectId)).toList();
-    Set<UUID> moduleIds = new HashSet<>(modules.stream().map(m -> m.id()).toList());
+    List<io.mtms.domain.model.Modules.SubModule> subModules =
+        db.subModules.stream().filter(m -> m.projectId().equals(projectId)).toList();
+    Set<UUID> subModuleIds = new HashSet<>(subModules.stream().map(m -> m.id()).toList());
 
     return Optional.of(
         new ProjectData(
@@ -49,11 +49,11 @@ public class InMemoryProjectRepository implements ProjectRepository {
             db.revision(projectId),
             columns(projectId),
             config(projectId),
-            modules,
-            db.subactivities.stream().filter(s -> moduleIds.contains(s.moduleId())).toList(),
-            db.cells.stream().filter(c -> moduleIds.contains(c.moduleId())).toList(),
-            db.links.stream().filter(l -> moduleIds.contains(l.moduleId())).toList(),
-            db.runs.stream().filter(r -> moduleIds.contains(r.moduleId())).toList(),
+            subModules,
+            db.subActivities.stream().filter(s -> subModuleIds.contains(s.subModuleId())).toList(),
+            db.cells.stream().filter(c -> subModuleIds.contains(c.subModuleId())).toList(),
+            db.links.stream().filter(l -> subModuleIds.contains(l.subModuleId())).toList(),
+            db.runs.stream().filter(r -> subModuleIds.contains(r.subModuleId())).toList(),
             db.library.stream().filter(e -> e.tenantId().equals(tenantId)).toList(),
             db.defects.stream().filter(d -> d.projectId().equals(projectId)).toList(),
             db.audit.stream().filter(a -> a.projectId().equals(projectId)).toList(),
@@ -83,12 +83,12 @@ public class InMemoryProjectRepository implements ProjectRepository {
   }
 
   @Override
-  public Map<UUID, Integer> moduleCounts(UUID tenantId) {
+  public Map<UUID, Integer> subModuleCounts(UUID tenantId) {
     Set<UUID> projectIds =
         new HashSet<>(findAllByTenant(tenantId).stream().map(Projects.Project::id).toList());
     Map<UUID, Integer> counts = new HashMap<>();
     projectIds.forEach(id -> counts.put(id, 0));
-    db.modules.stream()
+    db.subModules.stream()
         .filter(m -> projectIds.contains(m.projectId()))
         .forEach(m -> counts.merge(m.projectId(), 1, Integer::sum));
     return counts;
@@ -160,27 +160,27 @@ public class InMemoryProjectRepository implements ProjectRepository {
     db.columns.removeIf(c -> c.projectId().equals(projectId) && c.key().equals(key));
     // The cells go too. A column that no longer exists has no values, and leaving orphans
     // behind would make them reappear if somebody recreated a column with the same key.
-    Set<UUID> moduleIds =
+    Set<UUID> subModuleIds =
         new HashSet<>(
-            db.modules.stream()
+            db.subModules.stream()
                 .filter(m -> m.projectId().equals(projectId))
                 .map(m -> m.id())
                 .toList());
-    db.cells.removeIf(c -> moduleIds.contains(c.moduleId()) && c.columnKey().equals(key));
+    db.cells.removeIf(c -> subModuleIds.contains(c.subModuleId()) && c.columnKey().equals(key));
   }
 
   @Override
   public int offVocabularyCount(UUID projectId, String columnKey, List<String> allowed) {
-    Set<UUID> moduleIds =
+    Set<UUID> subModuleIds =
         new HashSet<>(
-            db.modules.stream()
+            db.subModules.stream()
                 .filter(m -> m.projectId().equals(projectId))
                 .map(m -> m.id())
                 .toList());
 
     return (int)
         db.cells.stream()
-            .filter(c -> moduleIds.contains(c.moduleId()))
+            .filter(c -> subModuleIds.contains(c.subModuleId()))
             .filter(c -> c.columnKey().equals(columnKey))
             .filter(c -> !StatusVocabulary.BLANK.equals(c.status()))
             .filter(c -> !allowed.contains(c.status()))
@@ -243,7 +243,7 @@ public class InMemoryProjectRepository implements ProjectRepository {
       Projects.ProjectConfig config, List<Projects.Environment> environments) {
     return new Projects.ProjectConfig(
         config.projectId(),
-        config.nodeTypes(),
+        config.moduleNames(),
         config.stages(),
         config.owners(),
         config.linkTypes(),
@@ -254,14 +254,14 @@ public class InMemoryProjectRepository implements ProjectRepository {
       Projects.ProjectConfig config, Projects.ConfigList list, String value) {
 
     return switch (list) {
-      case NODE_TYPES -> new Projects.ProjectConfig(
-          config.projectId(), append(config.nodeTypes(), value), config.stages(),
+      case MODULES -> new Projects.ProjectConfig(
+          config.projectId(), append(config.moduleNames(), value), config.stages(),
           config.owners(), config.linkTypes(), config.environments());
       case OWNERS -> new Projects.ProjectConfig(
-          config.projectId(), config.nodeTypes(), config.stages(),
+          config.projectId(), config.moduleNames(), config.stages(),
           append(config.owners(), value), config.linkTypes(), config.environments());
       case LINK_TYPES -> new Projects.ProjectConfig(
-          config.projectId(), config.nodeTypes(), config.stages(),
+          config.projectId(), config.moduleNames(), config.stages(),
           config.owners(), append(config.linkTypes(), value), config.environments());
       case STAGES -> {
         List<Projects.Stage> stages = new ArrayList<>(config.stages());
@@ -272,7 +272,7 @@ public class InMemoryProjectRepository implements ProjectRepository {
           stages.add(new Projects.Stage(id, value));
         }
         yield new Projects.ProjectConfig(
-            config.projectId(), config.nodeTypes(), List.copyOf(stages),
+            config.projectId(), config.moduleNames(), List.copyOf(stages),
             config.owners(), config.linkTypes(), config.environments());
       }
     };
@@ -282,17 +282,17 @@ public class InMemoryProjectRepository implements ProjectRepository {
       Projects.ProjectConfig config, Projects.ConfigList list, String value) {
 
     return switch (list) {
-      case NODE_TYPES -> new Projects.ProjectConfig(
-          config.projectId(), remove(config.nodeTypes(), value), config.stages(),
+      case MODULES -> new Projects.ProjectConfig(
+          config.projectId(), remove(config.moduleNames(), value), config.stages(),
           config.owners(), config.linkTypes(), config.environments());
       case OWNERS -> new Projects.ProjectConfig(
-          config.projectId(), config.nodeTypes(), config.stages(),
+          config.projectId(), config.moduleNames(), config.stages(),
           remove(config.owners(), value), config.linkTypes(), config.environments());
       case LINK_TYPES -> new Projects.ProjectConfig(
-          config.projectId(), config.nodeTypes(), config.stages(),
+          config.projectId(), config.moduleNames(), config.stages(),
           config.owners(), remove(config.linkTypes(), value), config.environments());
       case STAGES -> new Projects.ProjectConfig(
-          config.projectId(), config.nodeTypes(),
+          config.projectId(), config.moduleNames(),
           config.stages().stream()
               .filter(stage -> !stage.label().equals(value) && !stage.id().equals(value))
               .toList(),

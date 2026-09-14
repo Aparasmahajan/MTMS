@@ -18,15 +18,15 @@ import { ErrorBanner, Notice } from './primitives';
  */
 
 function tabsFor(snapshot: Snapshot): { label: string; href: string; match: string }[] {
-  const firstModule = snapshot.modules[0];
+  const firstSubModule = snapshot.sub_modules[0];
   return [
     { label: 'Dashboard', href: '/', match: '/' },
     { label: 'Defects', href: '/defects', match: '/defects' },
     { label: 'Matrix', href: '/matrix', match: '/matrix' },
     { label: 'Pipeline', href: '/pipeline', match: '/pipeline' },
     {
-      label: 'Module',
-      href: firstModule ? `/modules/${firstModule.id}` : '/matrix',
+      label: 'Sub-module',
+      href: firstSubModule ? `/sub-modules/${firstSubModule.id}` : '/matrix',
       match: '/modules',
     },
     { label: 'Library', href: '/library', match: '/library' },
@@ -185,7 +185,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </span>
                 <span style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>
                   {project.configured
-                    ? `${project.module_count} modules`
+                    ? `${project.sub_module_count} modules`
                     : 'not configured'}
                 </span>
               </button>

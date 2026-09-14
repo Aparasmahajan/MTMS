@@ -32,13 +32,13 @@ public enum PermissionKey {
   PROJECT_CREATE("project.create", "Create projects"),
   PROJECT_MEMBERS_MANAGE("project.members.manage", "Manage members"),
   PROJECT_CONFIG("project.config", "Configure columns & stages"),
-  MODULE_CREATE("module.create", "Create modules"),
-  MODULE_EDIT("module.edit", "Edit module & subactivities"),
+  MODULE_CREATE("module.create", "Create sub-modules"),
+  MODULE_EDIT("module.edit", "Edit sub-module & sub-activities"),
   MODULE_CLONE("module.clone", "Clone from library"),
   DELIVERABLE_UPDATE("deliverable.update", "Update deliverable status"),
   PROD_CONFIRM("prod.confirm", "Confirm loaded in prod"),
   FNI_DATE("fni.date", "Set FNI target date"),
-  FNI_SIGNOFF("fni.signoff", "Mark FNI done — close module"),
+  FNI_SIGNOFF("fni.signoff", "Mark FNI done — close sub-module"),
   DEFECT_CREATE("defect.create", "Log a defect"),
   DEFECT_TRANSITION("defect.transition", "Change defect status"),
   DEFECT_ASSIGN("defect.assign", "Assign defects"),
@@ -96,7 +96,7 @@ public enum PermissionKey {
 
   public static final List<Group> GROUPS = List.of(
       new Group("Project", List.of(PROJECT_VIEW, PROJECT_CREATE, PROJECT_MEMBERS_MANAGE, PROJECT_CONFIG)),
-      new Group("Module", List.of(MODULE_CREATE, MODULE_EDIT, MODULE_CLONE, DELIVERABLE_UPDATE)),
+      new Group("Sub-module", List.of(MODULE_CREATE, MODULE_EDIT, MODULE_CLONE, DELIVERABLE_UPDATE)),
       new Group("Sign-off", List.of(PROD_CONFIRM, FNI_DATE, FNI_SIGNOFF)),
       new Group("Defects", List.of(DEFECT_CREATE, DEFECT_TRANSITION, DEFECT_ASSIGN)),
       new Group("Administration", List.of(ADMIN_USERS_MANAGE, ADMIN_ROLES_MANAGE, ADMIN_AUDIT_VIEW)));

@@ -58,7 +58,7 @@ public class SnapshotService {
                       data,
                       access.load(actor.tenantId()),
                       projects.findAllByTenant(actor.tenantId()),
-                      projects.moduleCounts(actor.tenantId()),
+                      projects.subModuleCounts(actor.tenantId()),
                       Instant.now());
               cache.put(key, snapshot);
               return snapshot;

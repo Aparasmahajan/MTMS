@@ -92,7 +92,7 @@ export default function PlatformPage() {
     if (meta?.key) {
       setProjectDrafts((current) => ({ ...current, [tenantId]: '' }));
       setNotice(
-        `${meta.key} created, empty. Its administrator defines the deliverable columns, node types and stages on the Configure screen — a project arrives with no process of its own.`,
+        `${meta.key} created, empty. Its administrator defines the deliverable columns, modules and stages on the Configure screen — a project arrives with no process of its own.`,
       );
     }
   }
@@ -283,7 +283,7 @@ export default function PlatformPage() {
             <span style={{ fontSize: 12, color: 'var(--color-neutral-700)' }}>
               {organisation.project_count}{' '}
               {organisation.project_count === 1 ? 'project' : 'projects'} ·{' '}
-              {organisation.module_count} modules · {organisation.user_count} people
+              {organisation.sub_module_count} modules · {organisation.user_count} people
             </span>
             <button
               type="button"
@@ -325,7 +325,7 @@ export default function PlatformPage() {
                     {project.key}
                   </span>
                   <span style={{ flex: 1, fontSize: 13, color: 'var(--color-neutral-700)' }}>
-                    {project.module_count} {project.module_count === 1 ? 'module' : 'modules'}
+                    {project.sub_module_count} {project.sub_module_count === 1 ? 'module' : 'modules'}
                   </span>
                   <span
                     style={{
