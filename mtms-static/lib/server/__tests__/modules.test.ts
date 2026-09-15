@@ -391,14 +391,14 @@ describe('assigning a defect', () => {
 
   it('assigns to one of the project’s configured owners', async () => {
     const defect = await firstDefectId();
-    await assignDefect(qa, project, defect, 'R. Kaur');
+    await assignDefect(qa, project, defect, 'Bhavnish');
 
-    expect((await snapshot()).defects.find((entry) => entry.id === defect)?.assignee).toBe('R. Kaur');
+    expect((await snapshot()).defects.find((entry) => entry.id === defect)?.assignee).toBe('Bhavnish');
   });
 
   it('unassigns with null', async () => {
     const defect = await firstDefectId();
-    await assignDefect(qa, project, defect, 'R. Kaur');
+    await assignDefect(qa, project, defect, 'Bhavnish');
     await assignDefect(qa, project, defect, null);
 
     expect((await snapshot()).defects.find((entry) => entry.id === defect)?.assignee).toBeNull();
@@ -413,13 +413,13 @@ describe('assigning a defect', () => {
   });
 
   it('refuses a defect that does not exist', async () => {
-    await refused(assignDefect(qa, project, 'not-a-defect', 'R. Kaur'), 'not_found');
+    await refused(assignDefect(qa, project, 'not-a-defect', 'Bhavnish'), 'not_found');
   });
 
   it('is granted to QA but not to DevOps or a viewer', async () => {
     const defect = await firstDefectId();
-    await assignDefect(qa, project, defect, 'A. Iyer');
-    await refused(assignDefect(devops, project, defect, 'A. Iyer'), 'forbidden');
-    await refused(assignDefect(viewer, project, defect, 'A. Iyer'), 'forbidden');
+    await assignDefect(qa, project, defect, 'Sanjay');
+    await refused(assignDefect(devops, project, defect, 'Sanjay'), 'forbidden');
+    await refused(assignDefect(viewer, project, defect, 'Sanjay'), 'forbidden');
   });
 });
