@@ -27,7 +27,7 @@ const SCOPES: { key: AuditScope | 'all'; label: string }[] = [
 ];
 
 export default function AuditPage() {
-  const { snapshot, can, reasonFor, moduleHref } = useTracker();
+  const { snapshot, can, reasonFor, subModuleHref } = useTracker();
   const [scope, setScope] = useState<AuditScope | 'all'>('all');
   const [query, setQuery] = useState('');
   const [who, setWho] = useState('all');
@@ -46,7 +46,7 @@ export default function AuditPage() {
       return (
         entry.what.toLowerCase().includes(needle) ||
         entry.label.toLowerCase().includes(needle) ||
-        entry.module_label.toLowerCase().includes(needle) ||
+        entry.sub_module_label.toLowerCase().includes(needle) ||
         entry.who.toLowerCase().includes(needle)
       );
     });
@@ -92,7 +92,7 @@ export default function AuditPage() {
           style={{ flex: 1, minWidth: 220 }}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search what changed, a module, a column…"
+          placeholder="Search what changed, a subModule, a column…"
           aria-label="Search the change history"
         />
         <select
@@ -122,7 +122,7 @@ export default function AuditPage() {
           <thead>
             <tr>
               <th style={{ width: 90 }}>What</th>
-              <th style={{ width: 220 }}>Module</th>
+              <th style={{ width: 220 }}>Sub-module</th>
               <th>Change</th>
               <th style={{ width: 170 }}>Who, when</th>
             </tr>
@@ -142,12 +142,12 @@ export default function AuditPage() {
                   {entry.label}
                 </td>
                 <td style={{ fontSize: 12, wordBreak: 'break-word' }}>
-                  {entry.module_id ? (
-                    <Link href={moduleHref(entry.module_id)} style={{ color: 'inherit' }}>
-                      {entry.module_label}
+                  {entry.sub_module_id ? (
+                    <Link href={subModuleHref(entry.sub_module_id)} style={{ color: 'inherit' }}>
+                      {entry.sub_module_label}
                     </Link>
                   ) : (
-                    <span style={{ color: 'var(--color-neutral-600)' }}>{entry.module_label}</span>
+                    <span style={{ color: 'var(--color-neutral-600)' }}>{entry.sub_module_label}</span>
                   )}
                 </td>
                 <td style={{ fontSize: 13, textWrap: 'pretty' }}>{entry.what}</td>

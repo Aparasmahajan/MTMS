@@ -87,9 +87,9 @@ test.describe('the matrix', () => {
     expect(after).toBe(before - 1);
   });
 
-  test('a roll-up cell opens its subactivities rather than editing', async ({ page }) => {
+  test('a roll-up cell opens its sub-activities rather than editing', async ({ page }) => {
     await page.goto('/matrix');
-    const rolled = page.getByRole('button', { name: /rolled up from \d+ subactivities/ }).first();
+    const rolled = page.getByRole('button', { name: /rolled up from \d+ sub-activities/ }).first();
     await rolled.click();
 
     await expect(page.getByText('↳', { exact: false }).first()).toBeVisible();
@@ -123,12 +123,12 @@ test.describe('permissions are real, not decoration', () => {
     // Straight at the endpoint, bypassing every disabled control.
     const snapshot = await request.get('/api/v1/snapshot');
     const body = await snapshot.json();
-    const target = body.data.modules.find(
-      (module: { subactivities: unknown[] }) => module.subactivities.length === 0,
+    const target = body.data.sub_modules.find(
+      (subModule: { sub_activities: unknown[] }) => subModule.sub_activities.length === 0,
     );
 
     const refused = await request.patch('/api/v1/cells', {
-      data: { module_id: target.id, subactivity_id: null, column_key: 'oh' },
+      data: { sub_module_id: target.id, sub_activity_id: null, column_key: 'oh' },
     });
     expect(refused.status()).toBe(403);
   });

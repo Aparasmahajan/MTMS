@@ -18,8 +18,8 @@ public final class Audit {
   /**
    * What kind of thing changed.
    *
-   * <p>A deliverable status is only part of the record. Who created a module, who broke it into
-   * subactivities, and who changed the columns are all things a release manager has to be able
+   * <p>A deliverable status is only part of the record. Who created a sub-module, who broke it into
+   * sub-activities, and who changed the columns are all things a release manager has to be able
    * to answer months later, when the person who did it has moved teams.
    */
   public enum Scope {
@@ -48,7 +48,7 @@ public final class Audit {
   }
 
   /**
-   * @param moduleId {@code null} for a project-level change, such as a column being added.
+   * @param subModuleId {@code null} for a project-level change, such as a column being added.
    * @param label the column label for a cell change; otherwise a short tag — MODULE, CONFIG,
    *     ACCESS.
    * @param what "Not Loaded → Loaded in prod", rendered verbatim in the change feeds. Composed
@@ -58,8 +58,8 @@ public final class Audit {
   public record AuditEntry(
       UUID id,
       UUID projectId,
-      UUID moduleId,
-      UUID subactivityId,
+      UUID subModuleId,
+      UUID subActivityId,
       Scope scope,
       String label,
       String what,
@@ -111,7 +111,7 @@ public final class Audit {
    * change that produced them, and drained afterwards. That is what makes "the cell changed"
    * and "the event was recorded" one fact rather than two hopeful ones.
    *
-   * @param partitionKey the Kafka partition key. Everything about one module shares a key, so
+   * @param partitionKey the Kafka partition key. Everything about one sub-module shares a key, so
    *     its events stay in order relative to each other.
    * @param publishedAt {@code null} until the drain succeeds. The drain is at-least-once;
    *     consumers must be idempotent.

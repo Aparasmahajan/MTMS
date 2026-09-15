@@ -72,18 +72,35 @@
       <artifactId>spring-boot-starter-jdbc</artifactId>
     </dependency>
     <dependency>
-      <groupId>org.postgresql</groupId>
-      <artifactId>postgresql</artifactId>
-      <version>42.7.4</version>
+      <groupId>com.mysql</groupId>
+      <artifactId>mysql-connector-j</artifactId>
+      <version>8.4.0</version>
       <scope>runtime</scope>
+      <exclusions>
+        <!--
+          protobuf-java is a hard dependency of the connector, but only the X DevAPI uses
+          it and this service speaks plain JDBC. Excluding it keeps a 1.7 MB jar nothing
+          calls out of the build. If anyone ever reaches for the X Protocol, this is why
+          it fails at class-load rather than at compile.
+        -->
+        <exclusion>
+          <groupId>com.google.protobuf</groupId>
+          <artifactId>protobuf-java</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
     <dependency>
       <groupId>org.flywaydb</groupId>
       <artifactId>flyway-core</artifactId>
     </dependency>
+    <!--
+      Flyway 10 split each database into its own module. Without this one, Flyway starts
+      and then fails at the first migration with "no database plugin found" rather than at
+      configuration time, which is a confusing way to learn the dependency is missing.
+    -->
     <dependency>
       <groupId>org.flywaydb</groupId>
-      <artifactId>flyway-database-postgresql</artifactId>
+      <artifactId>flyway-mysql</artifactId>
     </dependency>
 
     <!-- The projection cache seam. Optional at runtime; see CacheConfiguration. -->

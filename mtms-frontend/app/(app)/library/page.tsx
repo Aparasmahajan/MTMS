@@ -8,7 +8,7 @@ import { send } from '@/lib/client/api';
 import type { Snapshot } from '@/lib/shared/views';
 
 /**
- * The module library — a module is a node type plus an activity, built once. Cloning
+ * The sub-module library — a sub-module is a module plus an activity, built once. Cloning
  * copies the definition and starts fresh tracking; the library entry is unaffected, so
  * the same module can exist in several projects at once with its own status data.
  *
@@ -21,42 +21,42 @@ export default function LibraryPage() {
   const canClone = can('module.clone');
   const canCreate = can('module.create');
 
-  const nodeTypes = snapshot.config.node_types;
-  const [nodeType, setNodeType] = useState(nodeTypes[0] ?? '');
+  const moduleNames = snapshot.config.module_names;
+  const [moduleName, setModuleName] = useState(moduleNames[0] ?? '');
   const [name, setName] = useState('');
   const [addToLibrary, setAddToLibrary] = useState(false);
 
   async function clone(entryId: string) {
     const meta = await apply(null, () => send<Snapshot>(`/api/v1/library/${entryId}/clone`, 'POST'));
-    if (meta?.node_type) {
-      router.push(`/matrix?node=${encodeURIComponent(String(meta.node_type))}`);
+    if (meta?.module_name) {
+      router.push(`/matrix?node=${encodeURIComponent(String(meta.module_name))}`);
     }
   }
 
   async function create() {
     if (!name.trim()) return;
-    if (!nodeType) {
-      setNotice('This project has no node types yet. Add one on the Configure screen first.');
+    if (!moduleName) {
+      setNotice('This project has no modules yet. Add one on the Configure screen first.');
       return;
     }
     const meta = await apply(null, () =>
-      send<Snapshot>('/api/v1/modules', 'POST', {
-        node_type: nodeType,
+      send<Snapshot>('/api/v1/sub-modules', 'POST', {
+        module_name: moduleName,
         name: name.trim(),
         add_to_library: addToLibrary,
       }),
     );
     if (meta) {
       setName('');
-      router.push(`/matrix?node=${encodeURIComponent(nodeType)}`);
+      router.push(`/matrix?node=${encodeURIComponent(moduleName)}`);
     }
   }
 
   return (
     <div className="page page-narrow">
       <PageTitle
-        title="Module library"
-        lede="A module is a node type plus an activity, built once. Clone it into a project and its own tracking starts from scratch — the library entry is not affected."
+        title="Sub-module library"
+        lede="A sub-module is a module plus an activity, built once. Clone it into a project and its own tracking starts from scratch — the library entry is not affected."
       />
 
       <Blueprint style={{ marginBottom: 'var(--space-6)' }}>
@@ -73,16 +73,16 @@ export default function LibraryPage() {
           <select
             className="input"
             style={{ width: 130 }}
-            value={nodeType}
-            onChange={(event) => setNodeType(event.target.value)}
-            aria-label="Node type"
+            value={moduleName}
+            onChange={(event) => setModuleName(event.target.value)}
+            aria-label="Module"
           >
-            {nodeTypes.map((type) => (
+            {moduleNames.map((type) => (
               <option key={type} value={type}>
                 {type}
               </option>
             ))}
-            {nodeTypes.length === 0 ? <option value="">No node types</option> : null}
+            {moduleNames.length === 0 ? <option value="">No modules</option> : null}
           </select>
           <input
             className="input"
@@ -119,7 +119,7 @@ export default function LibraryPage() {
         </form>
         <div style={{ marginTop: 'var(--space-3)', fontSize: 12, color: 'var(--color-neutral-700)', textWrap: 'pretty' }}>
           {canCreate
-            ? 'Every cell starts blank. The node type and the activity name together are the module’s identity, so the same pair cannot be tracked twice in one project. Tick the box only if other projects should be able to clone it.'
+            ? 'Every cell starts blank. The module and the activity name together are the sub-module’s identity, so the same pair cannot be tracked twice in one project. Tick the box only if other projects should be able to clone it.'
             : reasonFor('module.create')}
         </div>
       </Blueprint>
@@ -128,10 +128,10 @@ export default function LibraryPage() {
         <table className="table">
           <thead>
             <tr>
-              <th>Node type</th>
+              <th>Module</th>
               <th>Activity</th>
               <th>Version</th>
-              <th>Subactivities</th>
+              <th>SubActivities</th>
               <th>Used in</th>
               <th>Here</th>
               <th />
@@ -141,16 +141,16 @@ export default function LibraryPage() {
             {snapshot.library.map((entry) => (
               <tr key={entry.id}>
                 <td>
-                  <span className="tag tag-accent">{entry.node_type}</span>
+                  <span className="tag tag-accent">{entry.module_name}</span>
                 </td>
                 <td style={{ fontSize: 12, wordBreak: 'break-word', maxWidth: 380 }}>{entry.name}</td>
                 <td className="mono" style={{ fontSize: 12 }}>
                   {entry.version}
                 </td>
                 <td style={{ fontSize: 12, color: 'var(--color-neutral-700)', whiteSpace: 'nowrap' }}>
-                  {entry.subactivity_count
-                    ? `${entry.subactivity_count} subactivities`
-                    : 'no subactivities'}
+                  {entry.sub_activity_count
+                    ? `${entry.sub_activity_count} sub-activities`
+                    : 'no sub-activities'}
                 </td>
                 <td style={{ fontSize: 12, color: 'var(--color-neutral-700)', whiteSpace: 'nowrap' }}>
                   {entry.used_in_projects} {entry.used_in_projects === 1 ? 'project' : 'projects'}
@@ -192,8 +192,8 @@ export default function LibraryPage() {
 
       <div style={{ marginTop: 'var(--space-3)', fontSize: 12, color: 'var(--color-neutral-600)' }}>
         A clone starts with an empty deliverable row, so every gap shows as a blank rather than as a
-        status nobody set. If the node type is new to this project it is added to the project&apos;s
-        node types.
+        status nobody set. If the module is new to this project it is added to the project&apos;s
+        modules.
       </div>
     </div>
   );

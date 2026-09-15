@@ -2,7 +2,7 @@ package io.mtms.application.usecase;
 
 import io.mtms.application.Actor;
 import io.mtms.application.ServiceException;
-import io.mtms.application.port.ModuleRepository;
+import io.mtms.application.port.SubModuleRepository;
 import io.mtms.application.port.ProjectRepository;
 import io.mtms.domain.PermissionKey;
 import io.mtms.domain.StatusVocabulary;
@@ -28,14 +28,14 @@ import org.springframework.transaction.annotation.Transactional;
 public class CellUseCases {
 
   private final ProjectRepository projects;
-  private final ModuleRepository modules;
-  private final ModuleReadiness readiness;
+  private final SubModuleRepository modules;
+  private final SubModuleReadiness readiness;
   private final MutationSupport support;
 
   public CellUseCases(
       ProjectRepository projects,
-      ModuleRepository modules,
-      ModuleReadiness readiness,
+      SubModuleRepository modules,
+      SubModuleReadiness readiness,
       MutationSupport support) {
     this.projects = projects;
     this.modules = modules;
@@ -44,7 +44,7 @@ public class CellUseCases {
   }
 
   public record AdvanceCommand(
-      UUID moduleId, UUID subactivityId, String columnKey, String explicitStatus) {}
+      UUID subModuleId, UUID subActivityId, String columnKey, String explicitStatus) {}
 
   /**
    * Advances one cell.
@@ -58,7 +58,7 @@ public class CellUseCases {
     actor.require(PermissionKey.DELIVERABLE_UPDATE);
 
     UUID projectId = actor.projectId();
-    Modules.Module module = requireModule(projectId, command.moduleId());
+    Modules.SubModule module = requireSubModule(projectId, command.subModuleId());
     Projects.DeliverableColumn column = requireColumn(projectId, command.columnKey());
 
     if (module.isClosed()) {
@@ -66,22 +66,22 @@ public class CellUseCases {
           "This module is closed. Reopen it before changing a deliverable.");
     }
 
-    List<Modules.Subactivity> subs = modules.subactivities(module.id());
+    List<Modules.SubActivity> subs = modules.subActivities(module.id());
 
-    // A module with subactivities has no row of its own — its cells are a roll-up. Refused
+    // A sub-module with sub-activities has no row of its own — its cells are a roll-up. Refused
     // here as well as disabled in the UI, because the UI is not the enforcement point.
-    if (command.subactivityId() == null && !subs.isEmpty()) {
+    if (command.subActivityId() == null && !subs.isEmpty()) {
       throw ServiceException.badRequest(
-          "This module has subactivities, so its row is a roll-up. Change the subactivity instead.");
+          "This module has subActivities, so its row is a roll-up. Change the subActivity instead.");
     }
-    if (command.subactivityId() != null
-        && subs.stream().noneMatch(sub -> sub.id().equals(command.subactivityId()))) {
-      throw ServiceException.notFound("That subactivity is not on this module.");
+    if (command.subActivityId() != null
+        && subs.stream().noneMatch(sub -> sub.id().equals(command.subActivityId()))) {
+      throw ServiceException.notFound("That subActivity is not on this module.");
     }
 
     String current =
         modules
-            .cell(module.id(), command.subactivityId(), column.key())
+            .cell(module.id(), command.subActivityId(), column.key())
             .map(Modules.Cell::status)
             .orElse(StatusVocabulary.BLANK);
 
@@ -105,7 +105,7 @@ public class CellUseCases {
     modules.upsertCell(
         new Modules.Cell(
             module.id(),
-            command.subactivityId(),
+            command.subActivityId(),
             column.key(),
             next,
             actor.who(),
@@ -120,10 +120,10 @@ public class CellUseCases {
             + " → "
             + StatusVocabulary.statusEntry(next).label(),
         module.id(),
-        command.subactivityId());
+        command.subActivityId());
 
-    // Partitioned by module, so a consumer sees one module's cell changes in the order they
-    // happened even when several people are editing different modules at once.
+    // Partitioned by sub-module, so a consumer sees one sub-module's cell changes in the order they
+    // happened even when several people are editing different sub-modules at once.
     support.emit(
         actor,
         projectId,
@@ -147,18 +147,18 @@ public class CellUseCases {
    * happened.
    */
   @Transactional
-  public int confirmLoadedInProd(Actor actor, UUID moduleId) {
+  public int confirmLoadedInProd(Actor actor, UUID subModuleId) {
     actor.require(PermissionKey.PROD_CONFIRM);
 
     UUID projectId = actor.projectId();
-    Modules.Module module = requireModule(projectId, moduleId);
+    Modules.SubModule module = requireSubModule(projectId, subModuleId);
     if (module.isClosed()) {
       throw ServiceException.badRequest("This module is closed.");
     }
 
-    List<Modules.Subactivity> subs = modules.subactivities(module.id());
+    List<Modules.SubActivity> subs = modules.subActivities(module.id());
     List<UUID> targets = subs.isEmpty() ? java.util.Collections.singletonList(null)
-        : subs.stream().map(Modules.Subactivity::id).toList();
+        : subs.stream().map(Modules.SubActivity::id).toList();
 
     Instant at = Instant.now();
     int changed = 0;
@@ -215,28 +215,28 @@ public class CellUseCases {
   }
 
   /**
-   * FNI sign-off: closes a module, or reopens one.
+   * FNI sign-off: closes a sub-module, or reopens one.
    *
    * <p>Closing is gated on readiness <strong>recomputed from storage</strong>, never on a number
    * the client sent. That is the point of the gate — the client already knows the percentage and
    * could simply lie about it.
    */
   @Transactional
-  public void signOffFni(Actor actor, UUID moduleId, boolean close) {
+  public void signOffFni(Actor actor, UUID subModuleId, boolean close) {
     actor.require(PermissionKey.FNI_SIGNOFF);
 
     UUID projectId = actor.projectId();
-    Modules.Module module = requireModule(projectId, moduleId);
+    Modules.SubModule module = requireSubModule(projectId, subModuleId);
 
     if (close) {
-      List<String> blockers = readiness.fniBlockers(projectId, moduleId);
+      List<String> blockers = readiness.fniBlockers(projectId, subModuleId);
       if (!blockers.isEmpty()) {
         throw ServiceException.badRequest("Blocked — " + String.join("; ", blockers));
       }
 
       modules.update(
-          new Modules.Module(
-              module.id(), module.projectId(), module.nodeType(), module.name(),
+          new Modules.SubModule(
+              module.id(), module.projectId(), module.moduleName(), module.name(),
               module.libraryEntryId(), module.owner(), module.fniTargetDate(),
               Instant.now(), actor.who(), module.createdAt()));
 
@@ -247,12 +247,12 @@ public class CellUseCases {
           module.id().toString(),
           Map.of(
               "module_id", module.id().toString(),
-              "node_type", module.nodeType(),
+              "module_name", module.moduleName(),
               "name", module.name()));
     } else {
       modules.update(
-          new Modules.Module(
-              module.id(), module.projectId(), module.nodeType(), module.name(),
+          new Modules.SubModule(
+              module.id(), module.projectId(), module.moduleName(), module.name(),
               module.libraryEntryId(), module.owner(), module.fniTargetDate(),
               null, null, module.createdAt()));
     }
@@ -269,9 +269,9 @@ public class CellUseCases {
     support.bump(projectId);
   }
 
-  private Modules.Module requireModule(UUID projectId, UUID moduleId) {
+  private Modules.SubModule requireSubModule(UUID projectId, UUID subModuleId) {
     return modules
-        .find(projectId, moduleId)
+        .find(projectId, subModuleId)
         .orElseThrow(() -> ServiceException.notFound("That module is not in this project."));
   }
 
