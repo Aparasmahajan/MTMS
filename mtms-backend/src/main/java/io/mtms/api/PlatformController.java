@@ -74,7 +74,7 @@ public class PlatformController {
   /**
    * Adds an empty project to an organisation.
    *
-   * <p>Empty on purpose — no columns, node types or stages. Its administrator defines the
+   * <p>Empty on purpose — no columns, modules or stages. Its administrator defines the
    * process on the Configure screen; a platform operator pre-filling it would be deciding
    * another team's process for them.
    */

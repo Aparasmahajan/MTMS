@@ -27,7 +27,7 @@ export interface PlatformProjectView {
   key: string;
   name: string;
   configured: boolean;
-  module_count: number;
+  sub_module_count: number;
   /**
    * Everyone who can administer this project. A project with none is a project nobody can
    * configure, so the console shows the count rather than leaving it to be discovered.
@@ -45,7 +45,7 @@ export interface OrganisationView {
   /** Projects that have at least one deliverable column — the rest are shells. */
   configured_project_count: number;
   user_count: number;
-  module_count: number;
+  sub_module_count: number;
   /** Who can administer it, so an organisation is never left without an owner. */
   admins: { display_name: string; email: string; status: string }[];
   projects: PlatformProjectView[];

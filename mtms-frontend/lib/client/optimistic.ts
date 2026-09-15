@@ -1,6 +1,6 @@
 import { BLANK, nextStatus, readiness, rollUp, stageIndex, toneOf } from '@/lib/shared/vocabulary';
 import { columnDisplayLabel } from '@/lib/shared/views';
-import type { CellView, ColumnView, ModuleView, Snapshot } from '@/lib/shared/views';
+import type { CellView, ColumnView, SubModuleView, Snapshot } from '@/lib/shared/views';
 
 /**
  * The optimistic mirror of `advanceCell`.
@@ -12,22 +12,22 @@ import type { CellView, ColumnView, ModuleView, Snapshot } from '@/lib/shared/vi
  */
 export function optimisticAdvance(
   snapshot: Snapshot,
-  moduleId: string,
-  subactivityId: string | null,
+  subModuleId: string,
+  subActivityId: string | null,
   columnKey: string,
   actor: string,
 ): Snapshot {
   const column = snapshot.config.columns.find((candidate) => candidate.key === columnKey);
   if (!column) return snapshot;
 
-  const modules = snapshot.modules.map((module) => {
-    if (module.id !== moduleId) return module;
+  const subModules = snapshot.sub_modules.map((subModule) => {
+    if (subModule.id !== subModuleId) return subModule;
 
     const at = new Date().toISOString();
 
-    const subactivities = module.subactivities.map((subactivity) => {
-      if (subactivity.id !== subactivityId) return subactivity;
-      const cells = subactivity.cells.map((cell) =>
+    const subActivities = subModule.sub_activities.map((subActivity) => {
+      if (subActivity.id !== subActivityId) return subActivity;
+      const cells = subActivity.cells.map((cell) =>
         cell.column_key === columnKey
           ? {
               ...cell,
@@ -37,12 +37,12 @@ export function optimisticAdvance(
             }
           : cell,
       );
-      return { ...subactivity, cells, readiness: readinessOf(cells, snapshot.config.columns) };
+      return { ...subActivity, cells, readiness: readinessOf(cells, snapshot.config.columns) };
     });
 
     const cells: CellView[] =
-      subactivityId === null
-        ? module.cells.map((cell) =>
+      subActivityId === null
+        ? subModule.cells.map((cell) =>
             cell.column_key === columnKey
               ? {
                   ...cell,
@@ -52,21 +52,25 @@ export function optimisticAdvance(
                 }
               : cell,
           )
-        : module.cells.map((cell) => ({
+        : subModule.cells.map((cell) => ({
             ...cell,
             status: rollUp(
-              subactivities.map(
-                (subactivity) =>
-                  subactivity.cells.find((entry) => entry.column_key === cell.column_key)?.status ??
+              subActivities.map(
+                (subActivity) =>
+                  subActivity.cells.find((entry) => entry.column_key === cell.column_key)?.status ??
                   BLANK,
               ),
             ),
           }));
 
-    return withDerived({ ...module, cells, subactivities }, snapshot.config.columns, snapshot.config.stages.length);
+    return withDerived(
+      { ...subModule, cells, sub_activities: subActivities },
+      snapshot.config.columns,
+      snapshot.config.stages.length,
+    );
   });
 
-  return { ...snapshot, modules };
+  return { ...snapshot, sub_modules: subModules };
 }
 
 /**
@@ -87,19 +91,19 @@ function readinessOf(cells: readonly CellView[], columns: readonly ColumnView[])
 
 /** Recomputes everything derived from a module's cells: readiness, stage, missing, blanks. */
 export function withDerived(
-  module: ModuleView,
+  subModule: SubModuleView,
   columns: readonly ColumnView[],
   stageCount: number,
-): ModuleView {
+): SubModuleView {
   const statusFor = (key: string): string =>
-    module.cells.find((cell) => cell.column_key === key)?.status ?? BLANK;
+    subModule.cells.find((cell) => cell.column_key === key)?.status ?? BLANK;
 
   const active = activeColumns(columns);
   const counted = active.filter((column) => column.counts);
   const percent = readiness(counted.map((column) => statusFor(column.key)));
 
   return {
-    ...module,
+    ...subModule,
     readiness: percent,
     stage_index: stageIndex(percent, stageCount),
     missing: counted

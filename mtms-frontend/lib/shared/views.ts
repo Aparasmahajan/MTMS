@@ -24,14 +24,14 @@ import { z } from 'zod';
 export interface CellView {
   column_key: string;
   status: string;
-  /** True when the value is derived from subactivities and must not be edited directly. */
+  /** True when the value is derived from sub-activities and must not be edited directly. */
   rolled_up: boolean;
-  subactivity_count: number;
+  sub_activity_count: number;
   changed_by: string | null;
   changed_at: string | null;
 }
 
-export interface SubactivityView {
+export interface SubActivityView {
   id: string;
   name: string;
   readiness: number;
@@ -51,9 +51,9 @@ export interface RunView {
   artifacts: z.infer<typeof Artifact>[];
 }
 
-export interface ModuleView {
+export interface SubModuleView {
   id: string;
-  node_type: string;
+  module_name: string;
   name: string;
   owner: string | null;
   fni_target_date: string | null;
@@ -65,7 +65,7 @@ export interface ModuleView {
   missing: string[];
   blank_count: number;
   cells: CellView[];
-  subactivities: SubactivityView[];
+  sub_activities: SubActivityView[];
   links: LinkView[];
   last_run: RunView | null;
 }
@@ -74,9 +74,9 @@ export interface AuditView {
   id: string;
   scope: AuditScope;
   /** null for a project-level change, such as a column being added. */
-  module_id: string | null;
+  sub_module_id: string | null;
   /** "CFX · 128_TGRP…", or "—" when the change was not about one module. */
-  module_label: string;
+  sub_module_label: string;
   /** Column label for a cell change; otherwise MODULE, CONFIG or ACCESS. */
   label: string;
   what: string;
@@ -86,8 +86,8 @@ export interface AuditView {
 
 export interface DefectView {
   id: string;
-  module_id: string;
-  module_label: string;
+  sub_module_id: string;
+  sub_module_label: string;
   phase: DefectPhase;
   ticket_key: string;
   ticket_url: string;
@@ -102,10 +102,10 @@ export interface DefectView {
 
 export interface LibraryView {
   id: string;
-  node_type: string;
+  module_name: string;
   name: string;
   version: string;
-  subactivity_count: number;
+  sub_activity_count: number;
   used_in_projects: number;
   in_this_project: boolean;
 }
@@ -231,7 +231,7 @@ export interface ColumnView extends DeliverableColumn {
 
 export interface ConfigView {
   columns: ColumnView[];
-  node_types: string[];
+  module_names: string[];
   stages: { id: string; label: string }[];
   owners: string[];
   link_types: string[];
@@ -283,9 +283,9 @@ export interface Snapshot {
   };
   org: { id: string; name: string };
   project: { id: string; key: string; name: string };
-  projects: { id: string; key: string; name: string; configured: boolean; module_count: number }[];
+  projects: { id: string; key: string; name: string; configured: boolean; sub_module_count: number }[];
   config: ConfigView;
-  modules: ModuleView[];
+  sub_modules: SubModuleView[];
   audit: AuditView[];
   defects: DefectView[];
   library: LibraryView[];
@@ -314,7 +314,7 @@ export interface CellPresentation extends ToneStyle {
   title: string;
   /** "who · when", or "no change recorded". */
   stamp: string;
-  /** A roll-up cell opens the subactivities instead of advancing. */
+  /** A roll-up cell opens the sub-activities instead of advancing. */
   editable: boolean;
 }
 
@@ -333,7 +333,7 @@ export function cellPresentation(cell: CellView, column: DeliverableColumn): Cel
   const tone = TONE_STYLE[entry.tone];
 
   const rollNote = cell.rolled_up
-    ? ` · rolled up from ${cell.subactivity_count} subactivities, click to open them`
+    ? ` · rolled up from ${cell.sub_activity_count} sub-activities, click to open them`
     : '';
   const stampNote =
     cell.changed_by && cell.changed_at ? ` · ${cell.changed_by}, ${formatStamp(cell.changed_at)}` : '';

@@ -21,7 +21,7 @@ import org.springframework.stereotype.Component;
  * <p>This is the default storage, and it is what lets the service start with no Postgres — the
  * same trade {@code lib/server/store.ts} makes with its file driver. Everything works: the
  * matrix, the audit trail, the drift screen, sign-off gates. What is missing is durability and
- * more than one instance, which is exactly what the postgres profile is for.
+ * more than one instance, which is exactly what the mysql profile is for.
  *
  * <p>Collections are concurrent because a web server is concurrent. That makes individual
  * operations safe but does <em>not</em> make a read-modify-write across two lists atomic —
@@ -44,12 +44,12 @@ public class InMemoryDatabase {
   public final List<Projects.DeliverableColumn> columns = new CopyOnWriteArrayList<>();
   public final Map<UUID, Projects.ProjectConfig> configs = new ConcurrentHashMap<>();
 
-  public final List<Modules.Module> modules = new CopyOnWriteArrayList<>();
-  public final List<Modules.Subactivity> subactivities = new CopyOnWriteArrayList<>();
+  public final List<Modules.SubModule> subModules = new CopyOnWriteArrayList<>();
+  public final List<Modules.SubActivity> subActivities = new CopyOnWriteArrayList<>();
   public final List<Modules.Cell> cells = new CopyOnWriteArrayList<>();
   public final List<Modules.Link> links = new CopyOnWriteArrayList<>();
   public final List<Modules.Run> runs = new CopyOnWriteArrayList<>();
-  public final List<Modules.ModuleLibraryEntry> library = new CopyOnWriteArrayList<>();
+  public final List<Modules.LibraryEntry> library = new CopyOnWriteArrayList<>();
 
   public final List<Defects.Defect> defects = new CopyOnWriteArrayList<>();
   public final List<Audit.AuditEntry> audit = new CopyOnWriteArrayList<>();
@@ -76,7 +76,7 @@ public class InMemoryDatabase {
   public void clear() {
     List.of(
             tenants, users, roles, memberships, invitations, refreshTokens,
-            projects, columns, modules, subactivities, cells, links, runs, library,
+            projects, columns, subModules, subActivities, cells, links, runs, library,
             defects, audit, platformAudit, events,
             driftDeliverables, driftObservations, driftReports, driftPromotions)
         .forEach(List::clear);

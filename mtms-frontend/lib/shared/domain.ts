@@ -181,7 +181,7 @@ export type Environment = z.infer<typeof Environment>;
  */
 export const ProjectConfig = z.object({
   project_id: uuid,
-  node_types: z.array(z.string().min(1).max(40)).default([]),
+  module_names: z.array(z.string().min(1).max(40)).default([]),
   stages: z.array(Stage).default([]),
   owners: z.array(z.string().min(1).max(120)).default([]),
   link_types: z.array(z.string().min(1).max(40)).default([]),
@@ -189,7 +189,7 @@ export const ProjectConfig = z.object({
 });
 export type ProjectConfig = z.infer<typeof ProjectConfig>;
 
-export const ConfigList = z.enum(['node_types', 'stages', 'owners', 'link_types']);
+export const ConfigList = z.enum(['modules', 'stages', 'owners', 'link_types']);
 export type ConfigList = z.infer<typeof ConfigList>;
 
 // ---------------------------------------------------------------------------
@@ -197,14 +197,14 @@ export type ConfigList = z.infer<typeof ConfigList>;
 // ---------------------------------------------------------------------------
 
 /**
- * A module is a node type plus an activity, global within a project.
+ * A sub-module is a module plus an activity, global within a project.
  * `CFX + 128_TGRP_CONFIGURATION_IN_CFX` and `SBC + 128_TGRP_CONFIGURATION_IN_SBC`
  * are two different modules, tracked separately.
  */
-export const Module = z.object({
+export const SubModule = z.object({
   id: uuid,
   project_id: uuid,
-  node_type: z.string().min(1).max(40),
+  module_name: z.string().min(1).max(40),
   name: z.string().min(1).max(240),
   /** The library entry this was cloned from, if any. */
   library_entry_id: uuid.nullable().default(null),
@@ -216,27 +216,27 @@ export const Module = z.object({
   fni_closed_by: z.string().nullable().default(null),
   created_at: isoDateTime,
 });
-export type Module = z.infer<typeof Module>;
+export type SubModule = z.infer<typeof SubModule>;
 
 /**
- * A subactivity carries its own full deliverable row. A module with subactivities has
+ * A subActivity carries its own full deliverable row. A module with sub-activities has
  * no editable row of its own — its cells are a roll-up.
  */
-export const Subactivity = z.object({
+export const SubActivity = z.object({
   id: uuid,
-  module_id: uuid,
+  sub_module_id: uuid,
   name: z.string().min(1).max(240),
   order_index: z.number().int().nonnegative().default(0),
 });
-export type Subactivity = z.infer<typeof Subactivity>;
+export type SubActivity = z.infer<typeof SubActivity>;
 
 /**
  * Cells live in a narrow table, never as a wide row per module, because columns are
- * user-configurable. `subactivity_id: null` is the module's own row.
+ * user-configurable. `sub_activity_id: null` is the module's own row.
  */
 export const Cell = z.object({
-  module_id: uuid,
-  subactivity_id: uuid.nullable().default(null),
+  sub_module_id: uuid,
+  sub_activity_id: uuid.nullable().default(null),
   column_key: z.string(),
   status: z.string(),
   changed_by: z.string().nullable().default(null),
@@ -246,7 +246,7 @@ export type Cell = z.infer<typeof Cell>;
 
 /**
  * What kind of thing changed. A deliverable status is only part of the record: who
- * created a module, who broke it into subactivities and who changed the columns are all
+ * created a module, who broke it into sub-activities and who changed the columns are all
  * things a release manager has to be able to answer months later.
  */
 export const AuditScope = z.enum(['cell', 'module', 'project']);
@@ -256,8 +256,8 @@ export const AuditEntry = z.object({
   id: uuid,
   project_id: uuid,
   /** null for a project-level change, such as a column being added. */
-  module_id: uuid.nullable().default(null),
-  subactivity_id: uuid.nullable().default(null),
+  sub_module_id: uuid.nullable().default(null),
+  sub_activity_id: uuid.nullable().default(null),
   scope: AuditScope,
   /** The column label for a cell change; otherwise a short tag: MODULE, CONFIG, ACCESS. */
   label: z.string(),
@@ -269,17 +269,17 @@ export const AuditEntry = z.object({
 export type AuditEntry = z.infer<typeof AuditEntry>;
 
 /** A module built once, then cloned into a project. Cloning never touches the entry. */
-export const ModuleLibraryEntry = z.object({
+export const LibraryEntry = z.object({
   id: uuid,
   tenant_id: uuid,
-  node_type: z.string().min(1).max(40),
+  module_name: z.string().min(1).max(40),
   name: z.string().min(1).max(240),
   version: z.string().max(20).default('v1'),
-  subactivity_names: z.array(z.string()).default([]),
+  sub_activity_names: z.array(z.string()).default([]),
   /** How many projects currently hold a clone. Maintained by the service. */
   used_in_projects: z.number().int().nonnegative().default(0),
 });
-export type ModuleLibraryEntry = z.infer<typeof ModuleLibraryEntry>;
+export type LibraryEntry = z.infer<typeof LibraryEntry>;
 
 // ---------------------------------------------------------------------------
 // Defects
@@ -301,7 +301,7 @@ export const DEFECT_STATUS_ORDER: DefectStatus[] = ['Open', 'Investigating', 'Fi
 export const Defect = z.object({
   id: uuid,
   project_id: uuid,
-  module_id: uuid,
+  sub_module_id: uuid,
   phase: DefectPhase,
   ticket_key: z.string().max(40).default(''),
   /** CHILD_REQ_ID — a bare integer identifying the run. Optional. */
@@ -321,7 +321,7 @@ export type Defect = z.infer<typeof Defect>;
 
 export const Link = z.object({
   id: uuid,
-  module_id: uuid,
+  sub_module_id: uuid,
   type: z.string().min(1).max(40),
   label: z.string().min(1).max(160),
   url: z.string().min(1).max(600),
@@ -344,7 +344,7 @@ export const Artifact = z.object({
 /** A run is identified by CHILD_REQ_ID — a bare integer. */
 export const Run = z.object({
   id: uuid,
-  module_id: uuid,
+  sub_module_id: uuid,
   child_req_id: z.string(),
   phases: z.array(RunPhase).default([]),
   artifacts: z.array(Artifact).default([]),
@@ -505,7 +505,7 @@ export type RefreshToken = z.infer<typeof RefreshToken>;
  */
 export const DomainEventName = z.enum([
   'cell.changed',
-  'module.closed',
+  'subModule.closed',
   'defect.raised',
   'defect.transitioned',
   'deployment.confirmed',

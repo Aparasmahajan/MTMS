@@ -20,7 +20,7 @@ public record Snapshot(
     ProjectRef project,
     List<ProjectSummary> projects,
     Views.ConfigView config,
-    List<Views.ModuleView> modules,
+    List<Views.SubModuleView> subModules,
     List<Views.AuditView> audit,
     List<Views.DefectView> defects,
     List<Views.LibraryView> library,
@@ -49,5 +49,5 @@ public record Snapshot(
   public record ProjectRef(String id, String key, String name) {}
 
   public record ProjectSummary(
-      String id, String key, String name, boolean configured, int moduleCount) {}
+      String id, String key, String name, boolean configured, int subModuleCount) {}
 }

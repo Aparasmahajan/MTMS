@@ -19,7 +19,7 @@ import {
 const LOAD = STATUS_SETS.load; // notloaded · lab · prod
 
 describe('rollUp', () => {
-  it('is blank for a module with no subactivities', () => {
+  it('is blank for a module with no sub-activities', () => {
     expect(rollUp([])).toBe(BLANK);
   });
 
@@ -36,7 +36,7 @@ describe('rollUp', () => {
     expect(rollUp(['prod', 'prod', 'lab'])).toBe('lab');
   });
 
-  it('is done only when every subactivity is done', () => {
+  it('is done only when every sub-activity is done', () => {
     expect(rollUp(['prod', 'loaded', 'completed'])).toBe('prod');
   });
 
@@ -49,7 +49,7 @@ describe('rollUp', () => {
     expect(rollUp(['prod', 'lab'])).toBe('lab');
   });
 
-  it('returns a status a subactivity really holds, not a synthetic one', () => {
+  it('returns a status a sub-activity really holds, not a synthetic one', () => {
     // Two different not-done statuses; the first one at that tone is what comes back,
     // so the label the user reads is one that exists on a row below.
     const result = rollUp(['prod', 'notcreated', 'notloaded']);

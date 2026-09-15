@@ -9,7 +9,7 @@ import { send } from '@/lib/client/api';
 import { optimisticAdvance } from '@/lib/client/optimistic';
 import { STATUS_VOCABULARY, TONE_STYLE } from '@/lib/shared/vocabulary';
 import { groupColumns } from '@/lib/shared/views';
-import type { CellView, ColumnView, ModuleView, Snapshot } from '@/lib/shared/views';
+import type { CellView, ColumnView, SubModuleView, Snapshot } from '@/lib/shared/views';
 
 /**
  * The module matrix — the spreadsheet, made editable.
@@ -47,11 +47,11 @@ const READINESS_FILTERS = ['All', 'Loaded in prod', 'Partial', 'Not started', 'H
 type ReadinessFilter = (typeof READINESS_FILTERS)[number];
 
 function MatrixScreen() {
-  const { snapshot, apply, can, reasonFor, setNotice, moduleHref } = useTracker();
+  const { snapshot, apply, can, reasonFor, setNotice, subModuleHref } = useTracker();
   const router = useRouter();
   const params = useSearchParams();
 
-  const nodeFilter = params.get('node') ?? 'All';
+  const moduleFilter = params.get('node') ?? 'All';
   const readyParam = params.get('ready') ?? 'All';
   const readyFilter: ReadinessFilter = (READINESS_FILTERS as readonly string[]).includes(readyParam)
     ? (readyParam as ReadinessFilter)
@@ -82,38 +82,38 @@ function MatrixScreen() {
   }
 
   const shown = useMemo(() => {
-    let modules = snapshot.modules;
-    if (nodeFilter !== 'All') modules = modules.filter((module) => module.node_type === nodeFilter);
-    if (readyFilter === 'Loaded in prod') modules = modules.filter((module) => module.readiness === 100);
+    let subModules = snapshot.sub_modules;
+    if (moduleFilter !== 'All') subModules = subModules.filter((subModule) => subModule.module_name === moduleFilter);
+    if (readyFilter === 'Loaded in prod') subModules = subModules.filter((subModule) => subModule.readiness === 100);
     else if (readyFilter === 'Partial')
-      modules = modules.filter((module) => module.readiness > 0 && module.readiness < 100);
-    else if (readyFilter === 'Not started') modules = modules.filter((module) => module.readiness === 0);
-    else if (readyFilter === 'Has blanks') modules = modules.filter((module) => module.blank_count > 0);
-    return modules;
-  }, [snapshot.modules, nodeFilter, readyFilter]);
+      subModules = subModules.filter((subModule) => subModule.readiness > 0 && subModule.readiness < 100);
+    else if (readyFilter === 'Not started') subModules = subModules.filter((subModule) => subModule.readiness === 0);
+    else if (readyFilter === 'Has blanks') subModules = subModules.filter((subModule) => subModule.blank_count > 0);
+    return subModules;
+  }, [snapshot.sub_modules, moduleFilter, readyFilter]);
 
-  const groups = snapshot.config.node_types
-    .map((nodeType) => ({
-      nodeType,
-      rows: shown.filter((module) => module.node_type === nodeType),
+  const groups = snapshot.config.module_names
+    .map((moduleName) => ({
+      moduleName,
+      rows: shown.filter((subModule) => subModule.module_name === moduleName),
     }))
     .filter((group) => group.rows.length > 0);
 
-  function toggle(moduleId: string) {
+  function toggle(subModuleId: string) {
     setExpanded((current) => {
       const next = new Set(current);
-      if (next.has(moduleId)) next.delete(moduleId);
-      else next.add(moduleId);
+      if (next.has(subModuleId)) next.delete(subModuleId);
+      else next.add(subModuleId);
       return next;
     });
   }
 
-  function advance(module: ModuleView, cell: CellView, subactivityId: string | null) {
+  function advance(subModule: SubModuleView, cell: CellView, subActivityId: string | null) {
     if (!editable) {
       setNotice(reasonFor('deliverable.update'));
       return;
     }
-    if (module.closed) {
+    if (subModule.closed) {
       setNotice('This module is closed. Reopen it from the module screen before changing a cell.');
       return;
     }
@@ -121,15 +121,15 @@ function MatrixScreen() {
       (current) =>
         optimisticAdvance(
           current,
-          module.id,
-          subactivityId,
+          subModule.id,
+          subActivityId,
           cell.column_key,
           current.me.display_name,
         ),
       () =>
         send<Snapshot>('/api/v1/cells', 'PATCH', {
-          module_id: module.id,
-          subactivity_id: subactivityId,
+          sub_module_id: subModule.id,
+          sub_activity_id: subActivityId,
           column_key: cell.column_key,
         }),
     );
@@ -143,7 +143,7 @@ function MatrixScreen() {
 
   /**
    * `aria-rowindex` is 1-based over the *whole* grid, so both header rows, each node-type
-   * group header, each module and every expanded subactivity all consume one. A running
+   * group header, each module and every expanded sub-activity all consume one. A running
    * counter during render is the only way to get that right when the visible rows depend
    * on which modules are open.
    */
@@ -156,7 +156,7 @@ function MatrixScreen() {
         total +
         group.rows.length +
         group.rows.reduce(
-          (subs, module) => subs + (expanded.has(module.id) ? module.subactivities.length : 0),
+          (subs, subModule) => subs + (expanded.has(subModule.id) ? subModule.sub_activities.length : 0),
           0,
         ),
       0,
@@ -175,10 +175,10 @@ function MatrixScreen() {
         }}
       >
         <div>
-          <h1>Module matrix</h1>
+          <h1>Sub-module matrix</h1>
           <div className="lede">
-            One row per module — a node type plus an activity. Open a module to reach its
-            subactivities; a module cell is a roll-up of them. Every change is stamped with who and
+            One row per sub-module — a module plus an activity. Open one to reach its
+            sub-activities; a sub-module cell is a roll-up of them. Every change is stamped with who and
             when.
           </div>
         </div>
@@ -186,15 +186,15 @@ function MatrixScreen() {
         <div style={{ display: 'flex', gap: 'var(--space-6)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div>
             <div className="kicker" style={{ fontSize: 11, marginBottom: 'var(--space-1)' }}>
-              Node type
+              Module
             </div>
             <div style={{ display: 'flex', gap: 'var(--space-1)', flexWrap: 'wrap' }}>
-              {['All', ...snapshot.config.node_types].map((nodeType) => (
+              {['All', ...snapshot.config.module_names].map((moduleName) => (
                 <Chip
-                  key={nodeType}
-                  label={nodeType}
-                  active={nodeFilter === nodeType}
-                  onClick={() => setFilter({ node: nodeType })}
+                  key={moduleName}
+                  label={moduleName}
+                  active={moduleFilter === moduleName}
+                  onClick={() => setFilter({ node: moduleName })}
                 />
               ))}
             </div>
@@ -264,7 +264,7 @@ function MatrixScreen() {
         {/*
           A real grid, not a table of divs. Screen readers announce "row 4 of 23, column
           6 of 17" only if the roles and the counts are here — and the counts have to be
-          the *whole* grid, including the group headers and any expanded subactivities,
+          the *whole* grid, including the group headers and any expanded sub-activities,
           which is why they are computed rather than taken from `groups.length`.
         */}
         <div
@@ -308,7 +308,7 @@ function MatrixScreen() {
                   letterSpacing: '.11em',
                 }}
               >
-                Module — node + activity
+                Sub-module — module + activity
               </div>
               <div
                 role="columnheader"
@@ -436,9 +436,9 @@ function MatrixScreen() {
           ) : null}
 
           {groups.map((group) => {
-            const fullyInProd = group.rows.filter((module) => module.readiness === 100).length;
+            const fullyInProd = group.rows.filter((subModule) => subModule.readiness === 100).length;
             return (
-              <div key={group.nodeType} role="rowgroup">
+              <div key={group.moduleName} role="rowgroup">
                 <div
                   role="row"
                   aria-rowindex={++rowIndex}
@@ -462,20 +462,20 @@ function MatrixScreen() {
                       textTransform: 'uppercase',
                     }}
                   >
-                    {group.nodeType}
+                    {group.moduleName}
                   </span>
                   <span style={{ fontSize: 12, color: 'var(--color-neutral-700)' }}>
-                    {group.rows.length} {group.rows.length === 1 ? 'module' : 'modules'} ·{' '}
+                    {group.rows.length} {group.rows.length === 1 ? 'sub-module' : 'sub-modules'} ·{' '}
                     {fullyInProd} fully in prod
                   </span>
                 </div>
 
-                {group.rows.map((module) => {
-                  const isOpen = expanded.has(module.id);
-                  const hasSubs = module.subactivities.length > 0;
+                {group.rows.map((subModule) => {
+                  const isOpen = expanded.has(subModule.id);
+                  const hasSubs = subModule.sub_activities.length > 0;
 
                   return (
-                    <div key={module.id}>
+                    <div key={subModule.id}>
                       <div
                         className="hoverable"
                         role="row"
@@ -500,8 +500,8 @@ function MatrixScreen() {
                             wordBreak: 'break-word',
                           }}
                         >
-                          <Link href={moduleHref(module.id)} style={{ color: 'inherit' }}>
-                            {module.name}
+                          <Link href={subModuleHref(subModule.id)} style={{ color: 'inherit' }}>
+                            {subModule.name}
                           </Link>
                           <div
                             style={{
@@ -512,14 +512,14 @@ function MatrixScreen() {
                               color: 'var(--color-neutral-600)',
                             }}
                           >
-                            <span>{module.owner ?? 'unassigned'}</span>
+                            <span>{subModule.owner ?? 'unassigned'}</span>
                             {hasSubs ? (
                               <button
                                 type="button"
                                 onClick={(event) => {
                                   // The expander must not also open the module detail.
                                   event.stopPropagation();
-                                  toggle(module.id);
+                                  toggle(subModule.id);
                                 }}
                                 style={{
                                   border: 0,
@@ -530,10 +530,10 @@ function MatrixScreen() {
                                   font: 'inherit',
                                 }}
                               >
-                                {isOpen ? '−' : '+'} {module.subactivities.length} subactivities
+                                {isOpen ? '−' : '+'} {subModule.sub_activities.length} sub-activities
                               </button>
                             ) : null}
-                            {module.closed ? (
+                            {subModule.closed ? (
                               <span style={{ color: 'var(--color-accent-700)' }}>closed</span>
                             ) : null}
                           </div>
@@ -542,7 +542,7 @@ function MatrixScreen() {
                         <div
                           role="gridcell"
                           aria-colindex={2}
-                          aria-label={`${module.readiness}% ready`}
+                          aria-label={`${subModule.readiness}% ready`}
                           style={{
                             width: READY_WIDTH,
                             flex: 'none',
@@ -554,18 +554,18 @@ function MatrixScreen() {
                           }}
                         >
                           <span className="bar" style={{ flex: 1, height: 6 }} aria-hidden>
-                            <span style={{ width: `${module.readiness}%` }} />
+                            <span style={{ width: `${subModule.readiness}%` }} />
                           </span>
                           <span
                             className="tabular"
                             style={{ fontSize: 11, color: 'var(--color-neutral-700)' }}
                           >
-                            {module.readiness}
+                            {subModule.readiness}
                           </span>
                         </div>
 
                         {columns.map((column, columnIndex) => {
-                          const cell = module.cells.find(
+                          const cell = subModule.cells.find(
                             (candidate) => candidate.column_key === column.key,
                           );
                           if (!cell) return null;
@@ -588,7 +588,7 @@ function MatrixScreen() {
                                 column={column}
                                 size={24}
                                 onClick={() =>
-                                  cell.rolled_up ? toggle(module.id) : advance(module, cell, null)
+                                  cell.rolled_up ? toggle(subModule.id) : advance(subModule, cell, null)
                                 }
                               />
                             </div>
@@ -606,14 +606,14 @@ function MatrixScreen() {
                             color: 'var(--color-neutral-600)',
                           }}
                         >
-                          {module.fni_target_date ?? 'not set'}
+                          {subModule.fni_target_date ?? 'not set'}
                         </div>
                       </div>
 
                       {isOpen
-                        ? module.subactivities.map((subactivity) => (
+                        ? subModule.sub_activities.map((subActivity) => (
                             <div
-                              key={subactivity.id}
+                              key={subActivity.id}
                               role="row"
                               aria-rowindex={++rowIndex}
                               style={{
@@ -640,12 +640,12 @@ function MatrixScreen() {
                                   wordBreak: 'break-word',
                                 }}
                               >
-                                ↳ {subactivity.name}
+                                ↳ {subActivity.name}
                               </div>
                               <div
                                 role="gridcell"
                                 aria-colindex={2}
-                                aria-label={`${subactivity.readiness}% ready`}
+                                aria-label={`${subActivity.readiness}% ready`}
                                 style={{
                                   width: READY_WIDTH,
                                   flex: 'none',
@@ -657,17 +657,17 @@ function MatrixScreen() {
                                 }}
                               >
                                 <span className="bar" style={{ flex: 1, height: 4 }} aria-hidden>
-                                  <span style={{ width: `${subactivity.readiness}%` }} />
+                                  <span style={{ width: `${subActivity.readiness}%` }} />
                                 </span>
                                 <span
                                   className="tabular"
                                   style={{ fontSize: 11, color: 'var(--color-neutral-600)' }}
                                 >
-                                  {subactivity.readiness}
+                                  {subActivity.readiness}
                                 </span>
                               </div>
                               {columns.map((column, columnIndex) => {
-                                const cell = subactivity.cells.find(
+                                const cell = subActivity.cells.find(
                                   (candidate) => candidate.column_key === column.key,
                                 );
                                 if (!cell) return null;
@@ -689,7 +689,7 @@ function MatrixScreen() {
                                       cell={cell}
                                       column={column}
                                       size={22}
-                                      onClick={() => advance(module, cell, subactivity.id)}
+                                      onClick={() => advance(subModule, cell, subActivity.id)}
                                     />
                                   </div>
                                 );
@@ -713,7 +713,7 @@ function MatrixScreen() {
 
       <div style={{ marginTop: 'var(--space-3)', fontSize: 12, color: 'var(--color-neutral-600)' }}>
         {editable
-          ? 'Click a cell to advance it through that column’s statuses. A module cell with subactivities is a roll-up — clicking it opens them.'
+          ? 'Click a cell to advance it through that column’s statuses. A module cell with sub-activities is a roll-up — clicking it opens them.'
           : reasonFor('deliverable.update') + ' — cells are read-only for you.'}{' '}
         A deliverable loaded per environment carries one tick per environment, each recorded
         independently: prod can be ticked with lab blank, because lab was down when the window

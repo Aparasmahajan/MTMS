@@ -3,7 +3,7 @@ package io.mtms.infrastructure.persistence;
 import io.mtms.MtmsProperties;
 import io.mtms.application.port.AccessRepository;
 import io.mtms.application.port.DriftRepository;
-import io.mtms.application.port.ModuleRepository;
+import io.mtms.application.port.SubModuleRepository;
 import io.mtms.application.port.PasswordHasher;
 import io.mtms.application.port.ProjectRepository;
 import io.mtms.domain.PermissionKey;
@@ -30,12 +30,12 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * Seeds the demo organisation when the store is empty.
  *
- * <p>Statuses, activity names, node types and deliverable columns are the real DevOps sheet.
+ * <p>Statuses, sub-module names, modules and deliverable columns are the real DevOps sheet.
  * Owners, dates, hashes and defect text are illustrative — they were never in the sheet, and the
  * matrix says so on screen.
  *
  * <p>Ids are derived from stable strings, so seeding twice produces the same identifiers and a
- * bookmarked module URL still resolves after a restart.
+ * bookmarked sub-module URL still resolves after a restart.
  */
 @Component
 public class Seeder implements ApplicationRunner {
@@ -47,7 +47,7 @@ public class Seeder implements ApplicationRunner {
 
   private final AccessRepository access;
   private final ProjectRepository projects;
-  private final ModuleRepository modules;
+  private final SubModuleRepository subModules;
   private final DriftRepository drift;
   private final PasswordHasher passwords;
   private final MtmsProperties properties;
@@ -55,13 +55,13 @@ public class Seeder implements ApplicationRunner {
   public Seeder(
       AccessRepository access,
       ProjectRepository projects,
-      ModuleRepository modules,
+      SubModuleRepository subModules,
       DriftRepository drift,
       PasswordHasher passwords,
       MtmsProperties properties) {
     this.access = access;
     this.projects = projects;
-    this.modules = modules;
+    this.subModules = subModules;
     this.drift = drift;
     this.passwords = passwords;
     this.properties = properties;
@@ -95,13 +95,13 @@ public class Seeder implements ApplicationRunner {
     seedUsers();
     seedProjects();
     seedColumnsAndConfig();
-    seedModules();
+    seedSubModules();
     seedLibrary();
     seedDrift();
 
     log.info(
-        "Seeded {} modules across {} columns",
-        modules.findAll(PROJECT_ID).size(),
+        "Seeded {} subModules across {} columns",
+        subModules.findAll(PROJECT_ID).size(),
         projects.columns(PROJECT_ID).size());
   }
 
@@ -246,7 +246,7 @@ public class Seeder implements ApplicationRunner {
           new ColumnSeed("bst", "BST", "BST workflow logic", "simple", true),
           new ColumnSeed("lookup", "LOOKUP",
               "Business service logic / application properties for BST", "simple", true),
-          // EMAIL and RITM are administrative. Counting them would make a module that is
+          // EMAIL and RITM are administrative. Counting them would make a sub-module that is
           // genuinely finished read as 92%, which is how a dashboard stops being believed.
           new ColumnSeed("email", "EMAIL", "Email template", "simple", false),
           new ColumnSeed("fni", "FNI", "FNI — final submission", "sign", true),
@@ -299,7 +299,7 @@ public class Seeder implements ApplicationRunner {
     }
 
     List.of("MRF", "DLU", "SBC", "EIR", "CFX", "DSR")
-        .forEach(value -> projects.addConfigValue(PROJECT_ID, Projects.ConfigList.NODE_TYPES, value, 0));
+        .forEach(value -> projects.addConfigValue(PROJECT_ID, Projects.ConfigList.MODULES, value, 0));
 
     List.of("Not started", "Code created", "In UT", "Lab / Preprod", "Moving to prod",
             "Loaded in prod")
@@ -312,7 +312,7 @@ public class Seeder implements ApplicationRunner {
         .forEach(value -> projects.addConfigValue(PROJECT_ID, Projects.ConfigList.LINK_TYPES, value, 0));
   }
 
-  // --- Modules ---------------------------------------------------------------
+  // --- Sub-modules ---------------------------------------------------------------
 
   private static final String L = "prod";
   private static final String NL = "notloaded";
@@ -355,79 +355,79 @@ public class Seeder implements ApplicationRunner {
     return values;
   }
 
-  private record ModuleSeed(
-      String ref, String nodeType, String name, Map<String, String> values,
-      List<String> subactivities) {}
+  private record SubModuleSeed(
+      String ref, String moduleName, String name, Map<String, String> values,
+      List<String> subActivities) {}
 
-  private void seedModules() {
-    List<ModuleSeed> seeds =
+  private void seedSubModules() {
+    List<SubModuleSeed> seeds =
         List.of(
-            new ModuleSeed("a1", "MRF", "Announcement Loading", full(),
+            new SubModuleSeed("a1", "MRF", "Announcement Loading", full(),
                 List.of("Load announcement set", "Verify playback on node")),
-            new ModuleSeed("a2", "DLU", "DLU update", full(), List.of()),
-            new ModuleSeed("a3", "SBC",
+            new SubModuleSeed("a2", "DLU", "DLU update", full(), List.of()),
+            new SubModuleSeed("a3", "SBC",
                 "5_ADDITION_DELETION_MODIFICATION_OF_SIP_FILTER_MM_IN_SBC", full(),
                 List.of("Addition", "Deletion", "Modification")),
-            new ModuleSeed("a4", "SBC", "2_ADDITION/DELETION_IN_EMERGENCY_URI_IN_ASBC",
+            new SubModuleSeed("a4", "SBC", "2_ADDITION/DELETION_IN_EMERGENCY_URI_IN_ASBC",
                 fullNoNemo(), List.of("Addition", "Deletion")),
-            new ModuleSeed("a5", "SBC", "37_DRA_LINK_SHIFTING_GUI", fullNoNemo(), List.of()),
-            new ModuleSeed("a6", "SBC",
+            new SubModuleSeed("a5", "SBC", "37_DRA_LINK_SHIFTING_GUI", fullNoNemo(), List.of()),
+            new SubModuleSeed("a6", "SBC",
                 "19_FEPHFLOWPOLICY_AND_SG_PROFILE_PARAMETER_MODIFICATION", fullNoNemo(), List.of()),
-            new ModuleSeed("a7", "SBC",
+            new SubModuleSeed("a7", "SBC",
                 "146_SDP_PROFILE_MODIFICATION_&_TG_MODIFICATION_IN_ISBC", fullNoNemo(), List.of()),
-            new ModuleSeed("a8", "SBC", "127_NEW_SUBNET_CREATION_MEDIA_SBC", notStarted(), List.of()),
-            new ModuleSeed("a9", "SBC", "106_REMOVE_EVS_CODEC_FROM_MEDIA_CAPACITY_IN_SBC",
+            new SubModuleSeed("a8", "SBC", "127_NEW_SUBNET_CREATION_MEDIA_SBC", notStarted(), List.of()),
+            new SubModuleSeed("a9", "SBC", "106_REMOVE_EVS_CODEC_FROM_MEDIA_CAPACITY_IN_SBC",
                 notStarted(), List.of()),
-            new ModuleSeed("a10", "SBC", "156_ENUM_PROFILE_AND_TRUNKGROUP_CREATION_IN_PSBC",
+            new SubModuleSeed("a10", "SBC", "156_ENUM_PROFILE_AND_TRUNKGROUP_CREATION_IN_PSBC",
                 fullNoNemo(), List.of()),
-            new ModuleSeed("a11", "SBC", "107_NEW_SUBNET_CREATION_IN_SBC", notStarted(), List.of()),
-            new ModuleSeed("a12", "SBC", "33_LIC_LOADING_IN_SBC",
+            new SubModuleSeed("a11", "SBC", "107_NEW_SUBNET_CREATION_IN_SBC", notStarted(), List.of()),
+            new SubModuleSeed("a12", "SBC", "33_LIC_LOADING_IN_SBC",
                 with(with(fullNoNemo(), "fni", PD), "access", PD), List.of()),
-            new ModuleSeed("a13", "SBC", "96_FIXED_LINE_CONFIGURATION_IN_SBC", fullNoNemo(),
+            new SubModuleSeed("a13", "SBC", "96_FIXED_LINE_CONFIGURATION_IN_SBC", fullNoNemo(),
                 List.of()),
-            new ModuleSeed("a14", "SBC", "147_IP_POI_CONFIG_ISBC", with(notStarted(), "oh", NC),
+            new SubModuleSeed("a14", "SBC", "147_IP_POI_CONFIG_ISBC", with(notStarted(), "oh", NC),
                 List.of()),
-            new ModuleSeed("a15", "EIR", "1029_TAC_LOADING_EIR", with(notStarted(), "nemo", NC),
+            new SubModuleSeed("a15", "EIR", "1029_TAC_LOADING_EIR", with(notStarted(), "nemo", NC),
                 List.of()),
-            new ModuleSeed("a16", "CFX", "128_TGRP_CONFIGURATION_IN_CFX",
+            new SubModuleSeed("a16", "CFX", "128_TGRP_CONFIGURATION_IN_CFX",
                 row("oh", C, "filecr", B, "clicr", B, "nemo", NC, "html", L, "json", L,
                     "valid", L, "exec", L, "bst", LD, "lookup", LD, "email", B, "fni", PD,
                     "access", PD, "ritm", B),
                 List.of("Create TGRP", "Modify TGRP", "Delete TGRP")),
-            new ModuleSeed("a17", "DSR",
+            new SubModuleSeed("a17", "DSR",
                 "10006_HOST_NAME_REALM_ROUTING_CREATION_MODIFICATION_DELETION_DSR",
                 with(with(notStarted(), "oh", NC), "nemo", NC),
                 List.of("Creation", "Modification", "Deletion")),
-            new ModuleSeed("a18", "DSR", "10005_SAPC_CCPC_PREFERENCE_CHANGE_IN_DSR",
+            new SubModuleSeed("a18", "DSR", "10005_SAPC_CCPC_PREFERENCE_CHANGE_IN_DSR",
                 with(notStarted(), "oh", B), List.of()));
 
     List<String> owners = List.of("Paras", "Bhavnish", "Sanjay", "Ritu", "Vinayak", "Muskan", "Narayana");
     int index = 0;
 
-    for (ModuleSeed seed : seeds) {
-      UUID moduleId = id("module:" + seed.ref());
+    for (SubModuleSeed seed : seeds) {
+      UUID subModuleId = id("module:" + seed.ref());
       // The loop counter only staggers the illustrative timestamps, but a lambda cannot close
       // over something that changes, so each iteration takes its own copy.
       final int position = index++;
 
-      modules.insert(
-          new Modules.Module(
-              moduleId, PROJECT_ID, seed.nodeType(), seed.name(), null,
+      subModules.insert(
+          new Modules.SubModule(
+              subModuleId, PROJECT_ID, seed.moduleName(), seed.name(), null,
               owners.get(position % owners.size()), null, null, null, daysAgo(200 - position)));
 
-      if (seed.subactivities().isEmpty()) {
-        // No subactivities: the module owns its row directly.
+      if (seed.subActivities().isEmpty()) {
+        // No sub-activities: the sub-module owns its row directly.
         seed.values().forEach((columnKey, status) ->
-            writeSheetValue(moduleId, null, columnKey, status, position));
+            writeSheetValue(subModuleId, null, columnKey, status, position));
       } else {
-        // With subactivities the module's own row must not exist — its cells are a roll-up.
+        // With sub-activities the sub-module's own row must not exist — its cells are a roll-up.
         int order = 0;
-        for (String name : seed.subactivities()) {
+        for (String name : seed.subActivities()) {
           UUID subId = id("sub:" + seed.ref() + ":" + name);
-          modules.insertSubactivity(new Modules.Subactivity(subId, moduleId, name, order++));
+          subModules.insertSubActivity(new Modules.SubActivity(subId, subModuleId, name, order++));
           final int subIndex = order;
           seed.values().forEach((columnKey, status) ->
-              writeSheetValue(moduleId, subId, columnKey, status, position + subIndex));
+              writeSheetValue(subModuleId, subId, columnKey, status, position + subIndex));
         }
       }
     }
@@ -457,10 +457,10 @@ public class Seeder implements ApplicationRunner {
    * carries one column per environment, so this is where the sheet meets the new shape.
    */
   private void writeSheetValue(
-      UUID moduleId, UUID subactivityId, String sheetKey, String status, int index) {
+      UUID subModuleId, UUID subActivityId, String sheetKey, String status, int index) {
 
     if (!PER_ENVIRONMENT.contains(sheetKey)) {
-      writeCell(moduleId, subactivityId, sheetKey, status, index);
+      writeCell(subModuleId, subActivityId, sheetKey, status, index);
       return;
     }
     if (status == null || status.isEmpty()) {
@@ -472,24 +472,24 @@ public class Seeder implements ApplicationRunner {
     for (Projects.Environment environment : ENVIRONMENTS) {
       String perEnvironment = reach == null ? status : (position < reach ? "loaded" : "notloaded");
       writeCell(
-          moduleId, subactivityId, sheetKey + "_" + environment.key(), perEnvironment, index);
+          subModuleId, subActivityId, sheetKey + "_" + environment.key(), perEnvironment, index);
       position++;
     }
   }
 
   /** A blank is stored as an absence — no row at all — which is how it reads back as "". */
   private void writeCell(
-      UUID moduleId, UUID subactivityId, String columnKey, String status, int index) {
+      UUID subModuleId, UUID subActivityId, String columnKey, String status, int index) {
     if (status == null || status.isEmpty()) {
       return;
     }
-    modules.upsertCell(
+    subModules.upsertCell(
         new Modules.Cell(
-            moduleId, subactivityId, columnKey, status, "Narayana", daysAgo(3 + (index % 30))));
+            subModuleId, subActivityId, columnKey, status, "Narayana", daysAgo(3 + (index % 30))));
   }
 
   private void seedLibrary() {
-    record Entry(String nodeType, String name, String version, int used, List<String> subs) {}
+    record Entry(String moduleName, String name, String version, int used, List<String> subs) {}
 
     List.of(
             new Entry("MRF", "Announcement Loading", "v3", 2,
@@ -507,10 +507,10 @@ public class Seeder implements ApplicationRunner {
             new Entry("EIR", "1030_IMEI_BLACKLIST_LOADING_EIR", "v1", 1, List.of()))
         .forEach(
             entry ->
-                modules.insertLibraryEntry(
-                    new Modules.ModuleLibraryEntry(
-                        id("library:" + entry.nodeType() + ":" + entry.name()),
-                        TENANT_ID, entry.nodeType(), entry.name(), entry.version(),
+                subModules.insertLibraryEntry(
+                    new Modules.LibraryEntry(
+                        id("library:" + entry.moduleName() + ":" + entry.name()),
+                        TENANT_ID, entry.moduleName(), entry.name(), entry.version(),
                         entry.subs(), entry.used())));
   }
 

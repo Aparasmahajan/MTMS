@@ -3,7 +3,7 @@ package io.mtms.api;
 import io.mtms.application.Actor;
 import io.mtms.application.SnapshotService;
 import io.mtms.application.usecase.AccessUseCases;
-import io.mtms.application.usecase.ModuleUseCases;
+import io.mtms.application.usecase.SubModuleUseCases;
 import io.mtms.application.usecase.ProjectUseCases;
 import io.mtms.domain.view.Snapshot;
 import jakarta.validation.constraints.NotBlank;
@@ -24,13 +24,13 @@ public class ProjectController {
 
   private final ProjectUseCases projects;
   private final AccessUseCases access;
-  private final ModuleUseCases modules;
+  private final SubModuleUseCases modules;
   private final SnapshotService snapshots;
 
   public ProjectController(
       ProjectUseCases projects,
       AccessUseCases access,
-      ModuleUseCases modules,
+      SubModuleUseCases modules,
       SnapshotService snapshots) {
     this.projects = projects;
     this.access = access;
@@ -111,7 +111,7 @@ public class ProjectController {
     return ApiResponse.ok(snapshots.of(actor));
   }
 
-  // --- Links (addressed by their own id, so not under /modules) --------------
+  // --- Links (addressed by their own id, so not under /sub-modules) --------------
 
   public record LinkRequest(String type, String label, String url) {}
 

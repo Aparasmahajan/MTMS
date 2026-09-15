@@ -2,7 +2,7 @@ package io.mtms.application.usecase;
 
 import io.mtms.application.Actor;
 import io.mtms.application.ServiceException;
-import io.mtms.application.port.ModuleRepository;
+import io.mtms.application.port.SubModuleRepository;
 import io.mtms.application.port.ProjectRepository;
 import io.mtms.domain.PermissionKey;
 import io.mtms.domain.model.Audit;
@@ -17,32 +17,32 @@ import org.springframework.transaction.annotation.Transactional;
 
 /** Creating, editing and structuring modules. */
 @Service
-public class ModuleUseCases {
+public class SubModuleUseCases {
 
   private final ProjectRepository projects;
-  private final ModuleRepository modules;
+  private final SubModuleRepository modules;
   private final MutationSupport support;
 
-  public ModuleUseCases(
-      ProjectRepository projects, ModuleRepository modules, MutationSupport support) {
+  public SubModuleUseCases(
+      ProjectRepository projects, SubModuleRepository modules, MutationSupport support) {
     this.projects = projects;
     this.modules = modules;
     this.support = support;
   }
 
   @Transactional
-  public UUID create(Actor actor, String nodeType, String name, String owner) {
+  public UUID create(Actor actor, String moduleName, String name, String owner) {
     actor.require(PermissionKey.MODULE_CREATE);
     UUID projectId = actor.projectId();
 
-    if (modules.existsByIdentity(projectId, nodeType, name)) {
+    if (modules.existsByIdentity(projectId, moduleName, name)) {
       throw ServiceException.conflict(
-          "This project already tracks " + nodeType + " · " + name + ".");
+          "This project already tracks " + moduleName + " · " + name + ".");
     }
 
-    Modules.Module module =
-        new Modules.Module(
-            UUID.randomUUID(), projectId, nodeType, name, null,
+    Modules.SubModule module =
+        new Modules.SubModule(
+            UUID.randomUUID(), projectId, moduleName, name, null,
             owner == null || owner.isBlank() ? null : owner,
             null, null, null, Instant.now());
 
@@ -60,12 +60,12 @@ public class ModuleUseCases {
    * owners — so each field is checked on its own rather than the method requiring both.
    */
   @Transactional
-  public void setFields(Actor actor, UUID moduleId, String owner, boolean ownerPresent,
+  public void setFields(Actor actor, UUID subModuleId, String owner, boolean ownerPresent,
       String fniTargetDate, boolean datePresent) {
 
     UUID projectId = actor.projectId();
-    Modules.Module module = requireModule(projectId, moduleId);
-    Modules.Module updated = module;
+    Modules.SubModule module = requireSubModule(projectId, subModuleId);
+    Modules.SubModule updated = module;
 
     if (ownerPresent) {
       actor.require(PermissionKey.MODULE_EDIT);
@@ -95,105 +95,105 @@ public class ModuleUseCases {
   }
 
   @Transactional
-  public void delete(Actor actor, UUID moduleId) {
+  public void delete(Actor actor, UUID subModuleId) {
     actor.require(PermissionKey.MODULE_EDIT);
     UUID projectId = actor.projectId();
-    Modules.Module module = requireModule(projectId, moduleId);
+    Modules.SubModule module = requireSubModule(projectId, subModuleId);
 
     if (module.libraryEntryId() != null) {
       modules.adjustLibraryUsage(module.libraryEntryId(), -1);
     }
-    modules.delete(moduleId);
+    modules.delete(subModuleId);
 
-    // Module-scoped, but with a null module id: the module it refers to no longer exists, and
-    // a dangling reference in the feed would render as "unknown module" forever.
+    // Sub-module-scoped, but with a null sub-module id: the one it refers to no longer exists,
+    // a dangling reference in the feed would render as "unknown sub-module" forever.
     support.record(
         actor, projectId, Audit.Scope.PROJECT, "MODULE",
         "module deleted — " + module.label(), null, null);
     support.bump(projectId);
   }
 
-  // --- Subactivities ---------------------------------------------------------
+  // --- Sub-activities ---------------------------------------------------------
 
   /**
-   * Adds a subactivity.
+   * Adds a sub-activity.
    *
-   * <p>The first one is the interesting case: from that moment the module's cells become a
-   * roll-up, so its own stored row is deleted. Leaving it would give the module two answers —
+   * <p>The first one is the interesting case: from that moment the sub-module's cells become a
+   * roll-up, so its own stored row is deleted. Leaving it would give the sub-module two answers —
    * one derived and one stale — and the partial unique indexes permit both to exist.
    */
   @Transactional
-  public UUID addSubactivity(Actor actor, UUID moduleId, String name) {
+  public UUID addSubActivity(Actor actor, UUID subModuleId, String name) {
     actor.require(PermissionKey.MODULE_EDIT);
     UUID projectId = actor.projectId();
-    Modules.Module module = requireModule(projectId, moduleId);
+    Modules.SubModule module = requireSubModule(projectId, subModuleId);
 
-    List<Modules.Subactivity> existing = modules.subactivities(moduleId);
+    List<Modules.SubActivity> existing = modules.subActivities(subModuleId);
     if (existing.isEmpty()) {
-      modules.deleteModuleOwnCells(moduleId);
+      modules.deleteSubModuleOwnCells(subModuleId);
     }
 
-    Modules.Subactivity subactivity =
-        new Modules.Subactivity(UUID.randomUUID(), moduleId, name, existing.size());
-    modules.insertSubactivity(subactivity);
+    Modules.SubActivity subActivity =
+        new Modules.SubActivity(UUID.randomUUID(), subModuleId, name, existing.size());
+    modules.insertSubActivity(subActivity);
 
     support.record(
         actor, projectId, Audit.Scope.MODULE, "MODULE",
-        "subactivity added — " + name, module.id(), subactivity.id());
+        "subActivity added — " + name, module.id(), subActivity.id());
     support.bump(projectId);
-    return subactivity.id();
+    return subActivity.id();
   }
 
   @Transactional
-  public void renameSubactivity(Actor actor, UUID moduleId, UUID subactivityId, String name) {
+  public void renameSubActivity(Actor actor, UUID subModuleId, UUID subActivityId, String name) {
     actor.require(PermissionKey.MODULE_EDIT);
     UUID projectId = actor.projectId();
-    requireModule(projectId, moduleId);
+    requireSubModule(projectId, subModuleId);
 
-    Modules.Subactivity subactivity =
+    Modules.SubActivity subActivity =
         modules
-            .subactivity(moduleId, subactivityId)
-            .orElseThrow(() -> ServiceException.notFound("That subactivity is not on this module."));
+            .subActivity(subModuleId, subActivityId)
+            .orElseThrow(() -> ServiceException.notFound("That subActivity is not on this module."));
 
-    modules.renameSubactivity(subactivityId, name);
+    modules.renameSubActivity(subActivityId, name);
     support.record(
         actor, projectId, Audit.Scope.MODULE, "MODULE",
-        "subactivity renamed — " + subactivity.name() + " → " + name, moduleId, subactivityId);
+        "subActivity renamed — " + subActivity.name() + " → " + name, subModuleId, subActivityId);
     support.bump(projectId);
   }
 
   @Transactional
-  public void deleteSubactivity(Actor actor, UUID moduleId, UUID subactivityId) {
+  public void deleteSubActivity(Actor actor, UUID subModuleId, UUID subActivityId) {
     actor.require(PermissionKey.MODULE_EDIT);
     UUID projectId = actor.projectId();
-    requireModule(projectId, moduleId);
+    requireSubModule(projectId, subModuleId);
 
-    Modules.Subactivity subactivity =
+    Modules.SubActivity subActivity =
         modules
-            .subactivity(moduleId, subactivityId)
-            .orElseThrow(() -> ServiceException.notFound("That subactivity is not on this module."));
+            .subActivity(subModuleId, subActivityId)
+            .orElseThrow(() -> ServiceException.notFound("That subActivity is not on this module."));
 
-    modules.deleteSubactivity(subactivityId);
+    modules.deleteSubActivity(subActivityId);
 
     support.record(
         actor, projectId, Audit.Scope.MODULE, "MODULE",
-        "subactivity deleted — " + subactivity.name(), moduleId, null);
+        "subActivity deleted — " + subActivity.name(), subModuleId, null);
     support.bump(projectId);
   }
 
   // --- Links -----------------------------------------------------------------
 
   @Transactional
-  public UUID addLink(Actor actor, UUID moduleId, String type, String label, String url) {
+  public UUID addLink(Actor actor, UUID subModuleId, String type, String label, String url) {
     actor.require(PermissionKey.MODULE_EDIT);
     UUID projectId = actor.projectId();
-    requireModule(projectId, moduleId);
+    requireSubModule(projectId, subModuleId);
 
-    Modules.Link link = new Modules.Link(UUID.randomUUID(), moduleId, type, label, url);
+    Modules.Link link = new Modules.Link(UUID.randomUUID(), subModuleId, type, label, url);
     modules.insertLink(link);
 
     support.record(
-        actor, projectId, Audit.Scope.MODULE, "MODULE", "link added — " + label, moduleId, null);
+        actor, projectId, Audit.Scope.MODULE, "MODULE", "link added — " + label, subModuleId, null);
     support.bump(projectId);
     return link.id();
   }
@@ -205,14 +205,14 @@ public class ModuleUseCases {
 
     modules.updateLink(
         new Modules.Link(
-            link.id(), link.moduleId(),
+            link.id(), link.subModuleId(),
             type == null ? link.type() : type,
             label == null ? link.label() : label,
             url == null ? link.url() : url));
 
     support.record(
         actor, actor.projectId(), Audit.Scope.MODULE, "MODULE",
-        "link updated — " + (label == null ? link.label() : label), link.moduleId(), null);
+        "link updated — " + (label == null ? link.label() : label), link.subModuleId(), null);
     support.bump(actor.projectId());
   }
 
@@ -224,7 +224,7 @@ public class ModuleUseCases {
     modules.deleteLink(linkId);
     support.record(
         actor, actor.projectId(), Audit.Scope.MODULE, "MODULE",
-        "link removed — " + link.label(), link.moduleId(), null);
+        "link removed — " + link.label(), link.subModuleId(), null);
     support.bump(actor.projectId());
   }
 
@@ -233,7 +233,7 @@ public class ModuleUseCases {
   /**
    * Clones a library entry into this project.
    *
-   * <p>Copies, never links. Editing the module afterwards must not alter the library, and a
+   * <p>Copies, never links. Editing the sub-module afterwards must not alter the library, and a
    * library entry that changed under a project which had already shipped from it would be worse
    * than no library at all.
    */
@@ -242,26 +242,26 @@ public class ModuleUseCases {
     actor.require(PermissionKey.MODULE_CLONE);
     UUID projectId = actor.projectId();
 
-    Modules.ModuleLibraryEntry entry =
+    Modules.LibraryEntry entry =
         modules
             .libraryEntry(actor.tenantId(), entryId)
             .orElseThrow(() -> ServiceException.notFound("That library entry does not exist."));
 
-    if (modules.existsByIdentity(projectId, entry.nodeType(), entry.name())) {
+    if (modules.existsByIdentity(projectId, entry.moduleName(), entry.name())) {
       throw ServiceException.conflict(
-          "This project already tracks " + entry.nodeType() + " · " + entry.name() + ".");
+          "This project already tracks " + entry.moduleName() + " · " + entry.name() + ".");
     }
 
-    Modules.Module module =
-        new Modules.Module(
-            UUID.randomUUID(), projectId, entry.nodeType(), entry.name(), entry.id(),
+    Modules.SubModule module =
+        new Modules.SubModule(
+            UUID.randomUUID(), projectId, entry.moduleName(), entry.name(), entry.id(),
             null, null, null, null, Instant.now());
     modules.insert(module);
 
     int order = 0;
-    for (String name : entry.subactivityNames()) {
-      modules.insertSubactivity(
-          new Modules.Subactivity(UUID.randomUUID(), module.id(), name, order++));
+    for (String name : entry.subActivityNames()) {
+      modules.insertSubActivity(
+          new Modules.SubActivity(UUID.randomUUID(), module.id(), name, order++));
     }
 
     modules.adjustLibraryUsage(entry.id(), 1);
@@ -275,9 +275,9 @@ public class ModuleUseCases {
 
   // ---------------------------------------------------------------------------
 
-  private Modules.Module requireModule(UUID projectId, UUID moduleId) {
+  private Modules.SubModule requireSubModule(UUID projectId, UUID subModuleId) {
     return modules
-        .find(projectId, moduleId)
+        .find(projectId, subModuleId)
         .orElseThrow(() -> ServiceException.notFound("That module is not in this project."));
   }
 
@@ -285,7 +285,7 @@ public class ModuleUseCases {
   private Modules.Link requireLink(Actor actor, UUID linkId) {
     Modules.Link link =
         modules.link(linkId).orElseThrow(() -> ServiceException.notFound("That link does not exist."));
-    requireModule(actor.projectId(), link.moduleId());
+    requireSubModule(actor.projectId(), link.subModuleId());
     return link;
   }
 
@@ -300,16 +300,16 @@ public class ModuleUseCases {
     }
   }
 
-  private static Modules.Module withOwner(Modules.Module module, String owner) {
-    return new Modules.Module(
-        module.id(), module.projectId(), module.nodeType(), module.name(), module.libraryEntryId(),
+  private static Modules.SubModule withOwner(Modules.SubModule module, String owner) {
+    return new Modules.SubModule(
+        module.id(), module.projectId(), module.moduleName(), module.name(), module.libraryEntryId(),
         owner, module.fniTargetDate(), module.fniClosedAt(), module.fniClosedBy(),
         module.createdAt());
   }
 
-  private static Modules.Module withTargetDate(Modules.Module module, LocalDate date) {
-    return new Modules.Module(
-        module.id(), module.projectId(), module.nodeType(), module.name(), module.libraryEntryId(),
+  private static Modules.SubModule withTargetDate(Modules.SubModule module, LocalDate date) {
+    return new Modules.SubModule(
+        module.id(), module.projectId(), module.moduleName(), module.name(), module.libraryEntryId(),
         module.owner(), date, module.fniClosedAt(), module.fniClosedBy(), module.createdAt());
   }
 }

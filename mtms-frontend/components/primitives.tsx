@@ -254,7 +254,7 @@ export function NotConfigured({
           )}
           <span style={{ fontSize: 12, color: 'var(--color-neutral-700)', textWrap: 'pretty' }}>
             {canConfigure
-              ? 'Node types, pipeline stages and owners are set on the same screen.'
+              ? 'Modules, pipeline stages and owners are set on the same screen.'
               : reason}
           </span>
         </div>
