@@ -64,7 +64,8 @@ describe('the audit trail', () => {
     expect(entry?.scope).toBe('cell');
     expect(entry?.label).toBe('BST');
     expect(entry?.what).toBe('Loaded → Not Loaded');
-    expect(entry?.who).toBe('P. Mahajan');
+    // The ADMIN fixture is Nitin — see the harness. Paras is a developer.
+    expect(entry?.who).toBe('Nitin');
     expect(entry?.module_id).toBe(module);
     expect(entry?.module_label).toBe('DLU · DLU update');
   });
@@ -103,8 +104,8 @@ describe('the audit trail', () => {
 
   it('records an owner and a target date change', async () => {
     const module = await moduleId(MODULE_FULL);
-    await setModuleFields(admin, project, module, { owner: 'A. Iyer' });
-    expect((await since(1))[0]?.what).toBe('owner unassigned → A. Iyer');
+    await setModuleFields(admin, project, module, { owner: 'Sanjay' });
+    expect((await since(1))[0]?.what).toBe('owner unassigned → Sanjay');
 
     await setModuleFields(admin, project, module, { fniTargetDate: '2026-10-01' });
     expect((await since(1))[0]?.what).toBe('FNI target date not set → 2026-10-01');
@@ -113,11 +114,11 @@ describe('the audit trail', () => {
   it('records a defect assignment, which is otherwise invisible', async () => {
     const snapshot = buildSnapshot(await getStore(), admin, project);
     const defect = snapshot.defects[0]!;
-    await assignDefect(admin, project, defect.id, 'R. Kaur');
+    await assignDefect(admin, project, defect.id, 'Bhavnish');
 
     const [entry] = await since(1);
     expect(entry?.label).toBe('DEFECT');
-    expect(entry?.what).toBe(`${defect.ticket_key} assigned unassigned → R. Kaur`);
+    expect(entry?.what).toBe(`${defect.ticket_key} assigned unassigned → Bhavnish`);
     expect(entry?.module_id).toBe(defect.module_id);
   });
 
@@ -156,11 +157,11 @@ describe('the audit trail', () => {
 
   it('is newest first', async () => {
     const module = await moduleId(MODULE_FULL_WITH_SUBS);
-    await setModuleFields(admin, project, module, { owner: 'A. Iyer' });
-    await setModuleFields(admin, project, module, { owner: 'R. Kaur' });
+    await setModuleFields(admin, project, module, { owner: 'Sanjay' });
+    await setModuleFields(admin, project, module, { owner: 'Bhavnish' });
 
     const entries = await feed();
-    expect(entries[0]?.what).toBe('owner A. Iyer → R. Kaur');
+    expect(entries[0]?.what).toBe('owner Sanjay → Bhavnish');
     for (let index = 1; index < entries.length; index++) {
       expect(entries[index - 1]!.at >= entries[index]!.at).toBe(true);
     }
@@ -197,18 +198,18 @@ describe('invitation delivery', () => {
 
   const message = () =>
     invitationMessage({
-      email: 'n.desai@mahajan.com',
-      displayName: 'N. Desai',
-      invitedBy: 'P. Mahajan',
+      email: 'aditya@azalio.io',
+      displayName: 'Aditya',
+      invitedBy: 'Nitin',
       orgName: 'Flow One',
       acceptUrl: 'https://tracker.test/accept-invite?token=abc',
     });
 
   it('writes an invitation a person could read', () => {
     const mail = message();
-    expect(mail.to).toBe('n.desai@mahajan.com');
+    expect(mail.to).toBe('aditya@azalio.io');
     expect(mail.subject).toContain('Flow One');
-    expect(mail.body).toContain('P. Mahajan has invited you');
+    expect(mail.body).toContain('Nitin has invited you');
     expect(mail.body).toContain('https://tracker.test/accept-invite?token=abc');
     expect(mail.body).toContain('expires in seven days');
   });
@@ -243,7 +244,7 @@ describe('invitation delivery', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe('https://relay.test/send');
-    expect(JSON.parse(String(init?.body)).to).toBe('n.desai@mahajan.com');
+    expect(JSON.parse(String(init?.body)).to).toBe('aditya@azalio.io');
   });
 
   it('reports a transport that is down without losing the invitation', async () => {

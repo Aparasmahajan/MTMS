@@ -53,11 +53,15 @@ export async function actorFor(email: string): Promise<Actor> {
   };
 }
 
-export const ADMIN = 'parmahaj@mahajan.com';
-export const DEVOPS = 'v.rao@mahajan.com';
-export const QA = 's.nair@mahajan.com';
-export const DEV = 'r.kaur@mahajan.com';
-export const VIEWER = 'k.menon@mahajan.com';
+/**
+ * Nitin, not Paras: the admin fixture has to be the account the platform tests need, and
+ * super admin is a flag on Nitin's account. Paras is a developer — `DEV` below.
+ */
+export const ADMIN = 'nitin@azalio.io';
+export const DEVOPS = 'narayana@azalio.io';
+export const QA = 'vinayak@azalio.io';
+export const DEV = 'paras@azalio.io';
+export const VIEWER = 'dhruv@azalio.io';
 
 export async function projectId(key = 'CR_AUTOMATION'): Promise<string> {
   const store = await getStore();
