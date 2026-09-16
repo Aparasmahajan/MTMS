@@ -78,7 +78,11 @@ public class ProjectUseCases {
     }
 
     support.recordProjectChange(actor, project.id(), "CONFIG", "project created — " + name);
-    support.bump(project.id());
+
+    // Every project, not just this one: the new project appears in the switcher of people who
+    // are looking at a different project, and their cached snapshot would otherwise keep the
+    // old list until they next edited something.
+    support.bumpEveryProjectIn(actor.tenantId());
     return project.id();
   }
 }

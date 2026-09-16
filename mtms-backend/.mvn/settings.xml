@@ -1,0 +1,30 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!--
+  Maven settings for this project, kept deliberately separate from the machine's own.
+
+  Two problems this solves at once:
+
+  1. **The user-level ~/.m2/settings.xml is Nokia's, and it matters.** It activates
+     internal profiles and repositories that are needed for other work and must not be
+     edited or bypassed globally. One of them (`nei-sdk-repo`, a `file:` URL that does not
+     exist on every machine) makes Maven refuse artifacts that are sitting in the local
+     repository, so this project cannot simply inherit it. Passing this file with `-s`
+     replaces those profiles for this build only; nothing outside the project changes.
+
+  2. **The local repository is separate too.** `${user.home}/.m2p/repository` — "p" for
+     personal — so this project's dependencies never mix with the ones Nokia tooling
+     manages in `~/.m2/repository`. Deleting either has no effect on the other.
+
+  Dependencies come from Maven Central. The first build downloads roughly 90 MB; after
+  that it is served from `.m2p` and needs no network.
+-->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">
+  <localRepository>${user.home}/.m2p/repository</localRepository>
+
+  <!--
+    No <offline> and no mirrors. An earlier version of this file forced offline mode,
+    which worked only because one machine already had a fully populated repository; on a
+    fresh machine it fails with every dependency missing. Central is the default, and a
+    populated .m2p makes later builds offline in practice without declaring it.
+  -->
+</settings>
