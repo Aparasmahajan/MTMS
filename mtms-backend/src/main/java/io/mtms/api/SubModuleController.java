@@ -3,7 +3,7 @@ package io.mtms.api;
 import io.mtms.application.Actor;
 import io.mtms.application.SnapshotService;
 import io.mtms.application.usecase.CellUseCases;
-import io.mtms.application.usecase.ModuleUseCases;
+import io.mtms.application.usecase.SubModuleUseCases;
 import io.mtms.domain.view.Snapshot;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.constraints.NotBlank;
@@ -17,34 +17,34 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Modules, their subactivities and links, plus the two sign-off actions. */
+/** Modules, their subActivities and links, plus the two sign-off actions. */
 @RestController
-@RequestMapping("/api/v1/modules")
-public class ModuleController {
+@RequestMapping("/api/v1/sub-modules")
+public class SubModuleController {
 
-  private final ModuleUseCases modules;
+  private final SubModuleUseCases modules;
   private final CellUseCases cells;
   private final SnapshotService snapshots;
 
-  public ModuleController(
-      ModuleUseCases modules, CellUseCases cells, SnapshotService snapshots) {
+  public SubModuleController(
+      SubModuleUseCases modules, CellUseCases cells, SnapshotService snapshots) {
     this.modules = modules;
     this.cells = cells;
     this.snapshots = snapshots;
   }
 
-  public record CreateModuleRequest(
-      @NotBlank String nodeType, @NotBlank String name, String owner) {}
+  public record CreateSubModuleRequest(
+      @NotBlank String moduleName, @NotBlank String name, String owner) {}
 
   @PostMapping
   public ApiResponse.Success<Snapshot> create(
-      @RequestBody CreateModuleRequest request, Actor actor) {
-    modules.create(actor, request.nodeType(), request.name(), request.owner());
+      @RequestBody CreateSubModuleRequest request, Actor actor) {
+    modules.create(actor, request.moduleName(), request.name(), request.owner());
     return ApiResponse.ok(snapshots.of(actor));
   }
 
   /**
-   * Edits a module.
+   * Edits a sub-module.
    *
    * <p>Taken as a raw {@link JsonNode} rather than a record because the two fields are
    * <em>tri-state</em>: absent, present-and-null, or present-with-a-value. Clearing an owner
@@ -53,14 +53,14 @@ public class ModuleController {
    */
   @PatchMapping("/{id}")
   public ApiResponse.Success<Snapshot> update(
-      @PathVariable("id") UUID moduleId, @RequestBody JsonNode body, Actor actor) {
+      @PathVariable("id") UUID subModuleId, @RequestBody JsonNode body, Actor actor) {
 
     boolean ownerPresent = body.has("owner");
     boolean datePresent = body.has("fni_target_date");
 
     modules.setFields(
         actor,
-        moduleId,
+        subModuleId,
         ownerPresent && !body.get("owner").isNull() ? body.get("owner").asText() : null,
         ownerPresent,
         datePresent && !body.get("fni_target_date").isNull()
@@ -72,8 +72,8 @@ public class ModuleController {
   }
 
   @DeleteMapping("/{id}")
-  public ApiResponse.Success<Snapshot> delete(@PathVariable("id") UUID moduleId, Actor actor) {
-    modules.delete(actor, moduleId);
+  public ApiResponse.Success<Snapshot> delete(@PathVariable("id") UUID subModuleId, Actor actor) {
+    modules.delete(actor, subModuleId);
     return ApiResponse.ok(snapshots.of(actor));
   }
 
@@ -81,8 +81,8 @@ public class ModuleController {
 
   @PostMapping("/{id}/confirm-prod")
   public ApiResponse.Success<Snapshot> confirmProd(
-      @PathVariable("id") UUID moduleId, Actor actor) {
-    int changed = cells.confirmLoadedInProd(actor, moduleId);
+      @PathVariable("id") UUID subModuleId, Actor actor) {
+    int changed = cells.confirmLoadedInProd(actor, subModuleId);
     return ApiResponse.ok(snapshots.of(actor), Map.of("cells_changed", changed));
   }
 
@@ -90,40 +90,40 @@ public class ModuleController {
 
   @PostMapping("/{id}/fni")
   public ApiResponse.Success<Snapshot> fni(
-      @PathVariable("id") UUID moduleId, @RequestBody(required = false) FniRequest request,
+      @PathVariable("id") UUID subModuleId, @RequestBody(required = false) FniRequest request,
       Actor actor) {
 
     // Defaults to closing: the button that sends this says "Sign off FNI".
     boolean close = request == null || request.close() == null || request.close();
-    cells.signOffFni(actor, moduleId, close);
+    cells.signOffFni(actor, subModuleId, close);
     return ApiResponse.ok(snapshots.of(actor));
   }
 
-  // --- Subactivities ---------------------------------------------------------
+  // --- Sub-activities ---------------------------------------------------------
 
-  public record SubactivityRequest(@NotBlank String name) {}
+  public record SubActivityRequest(@NotBlank String name) {}
 
-  @PostMapping("/{id}/subactivities")
-  public ApiResponse.Success<Snapshot> addSubactivity(
-      @PathVariable("id") UUID moduleId, @RequestBody SubactivityRequest request, Actor actor) {
-    modules.addSubactivity(actor, moduleId, request.name());
+  @PostMapping("/{id}/sub-activities")
+  public ApiResponse.Success<Snapshot> addSubActivity(
+      @PathVariable("id") UUID subModuleId, @RequestBody SubActivityRequest request, Actor actor) {
+    modules.addSubActivity(actor, subModuleId, request.name());
     return ApiResponse.ok(snapshots.of(actor));
   }
 
-  @PatchMapping("/{id}/subactivities/{subId}")
-  public ApiResponse.Success<Snapshot> renameSubactivity(
-      @PathVariable("id") UUID moduleId,
-      @PathVariable("subId") UUID subactivityId,
-      @RequestBody SubactivityRequest request,
+  @PatchMapping("/{id}/sub-activities/{subId}")
+  public ApiResponse.Success<Snapshot> renameSubActivity(
+      @PathVariable("id") UUID subModuleId,
+      @PathVariable("subId") UUID subActivityId,
+      @RequestBody SubActivityRequest request,
       Actor actor) {
-    modules.renameSubactivity(actor, moduleId, subactivityId, request.name());
+    modules.renameSubActivity(actor, subModuleId, subActivityId, request.name());
     return ApiResponse.ok(snapshots.of(actor));
   }
 
-  @DeleteMapping("/{id}/subactivities/{subId}")
-  public ApiResponse.Success<Snapshot> deleteSubactivity(
-      @PathVariable("id") UUID moduleId, @PathVariable("subId") UUID subactivityId, Actor actor) {
-    modules.deleteSubactivity(actor, moduleId, subactivityId);
+  @DeleteMapping("/{id}/sub-activities/{subId}")
+  public ApiResponse.Success<Snapshot> deleteSubActivity(
+      @PathVariable("id") UUID subModuleId, @PathVariable("subId") UUID subActivityId, Actor actor) {
+    modules.deleteSubActivity(actor, subModuleId, subActivityId);
     return ApiResponse.ok(snapshots.of(actor));
   }
 
@@ -133,8 +133,8 @@ public class ModuleController {
 
   @PostMapping("/{id}/links")
   public ApiResponse.Success<Snapshot> addLink(
-      @PathVariable("id") UUID moduleId, @RequestBody LinkRequest request, Actor actor) {
-    modules.addLink(actor, moduleId, request.type(), request.label(), request.url());
+      @PathVariable("id") UUID subModuleId, @RequestBody LinkRequest request, Actor actor) {
+    modules.addLink(actor, subModuleId, request.type(), request.label(), request.url());
     return ApiResponse.ok(snapshots.of(actor));
   }
 }

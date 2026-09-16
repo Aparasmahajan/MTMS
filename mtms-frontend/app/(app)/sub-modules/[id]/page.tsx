@@ -1,4 +1,4 @@
-import { ModuleScreen } from '@/components/screens/ModuleScreen';
+import { SubModuleScreen } from '@/components/screens/SubModuleScreen';
 
 /**
  * A module's detail page.
@@ -11,6 +11,6 @@ import { ModuleScreen } from '@/components/screens/ModuleScreen';
  * existed only so the export could prerender one page per module, and that build now lives
  * in `mtms-static`.
  */
-export default function ModulePage() {
-  return <ModuleScreen />;
+export default function SubModulePage() {
+  return <SubModuleScreen />;
 }

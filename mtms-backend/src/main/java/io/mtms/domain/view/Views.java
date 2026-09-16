@@ -9,7 +9,7 @@ import java.util.List;
  *
  * <p>A port of {@code lib/shared/views.ts}. The wire carries <em>facts</em> — status, who,
  * when, whether a cell is a roll-up — and never presentation. Every glyph, tone and tooltip is
- * derived on the client from those facts by one function, so the matrix and the module detail
+ * derived on the client from those facts by one function, so the matrix and the sub-module detail
  * cannot disagree about what a cell looks like.
  *
  * <p>Field names are camelCase here and snake_case on the wire; the naming strategy is set once
@@ -20,18 +20,18 @@ public final class Views {
   private Views() {}
 
   /**
-   * @param rolledUp true when the value is derived from subactivities and must not be edited
-   *     directly. The client disables the cell and opens the subactivities instead.
+   * @param rolledUp true when the value is derived from subActivities and must not be edited
+   *     directly. The client disables the cell and opens the sub-activities instead.
    */
   public record CellView(
       String columnKey,
       String status,
       boolean rolledUp,
-      int subactivityCount,
+      int subActivityCount,
       String changedBy,
       String changedAt) {}
 
-  public record SubactivityView(String id, String name, int readiness, List<CellView> cells) {}
+  public record SubActivityView(String id, String name, int readiness, List<CellView> cells) {}
 
   public record LinkView(String id, String type, String label, String url) {}
 
@@ -40,14 +40,14 @@ public final class Views {
 
   /**
    * @param missing counted columns not yet done, by label — the "missing X, Y, Z" line under a
-   *     module's name.
+   *     sub-module's name.
    * @param blankCount how many cells nobody has filled in. Tracked separately from "not done"
    *     because they are different problems: one is work outstanding, the other is a gap in the
    *     record.
    */
-  public record ModuleView(
+  public record SubModuleView(
       String id,
-      String nodeType,
+      String moduleName,
       String name,
       String owner,
       String fniTargetDate,
@@ -58,18 +58,18 @@ public final class Views {
       List<String> missing,
       int blankCount,
       List<CellView> cells,
-      List<SubactivityView> subactivities,
+      List<SubActivityView> subActivities,
       List<LinkView> links,
       RunView lastRun) {}
 
   /**
-   * @param moduleLabel "CFX · 128_TGRP…", or "—" when the change was not about one module.
+   * @param subModuleLabel "CFX · 128_TGRP…", or "—" when the change was not about one sub-module.
    */
   public record AuditView(
       String id,
       String scope,
-      String moduleId,
-      String moduleLabel,
+      String subModuleId,
+      String subModuleLabel,
       String label,
       String what,
       String who,
@@ -77,8 +77,8 @@ public final class Views {
 
   public record DefectView(
       String id,
-      String moduleId,
-      String moduleLabel,
+      String subModuleId,
+      String subModuleLabel,
       String phase,
       String ticketKey,
       String ticketUrl,
@@ -92,10 +92,10 @@ public final class Views {
 
   public record LibraryView(
       String id,
-      String nodeType,
+      String moduleName,
       String name,
       String version,
-      int subactivityCount,
+      int subActivityCount,
       int usedInProjects,
       boolean inThisProject) {}
 
@@ -141,7 +141,7 @@ public final class Views {
    * @param active whether the column is on the grid and in the maths. False only for a column
    *     whose environment is switched off. Derived, never stored — the flag lives on the
    *     environment, so turning preprod back on brings all six of its columns back at once.
-   *     Every column is still projected onto every module, inactive ones included, so the cells
+   *     Every column is still projected onto every sub-module, inactive ones included, so the cells
    *     behind a hidden environment stay addressable and come back untouched.
    */
   public record ColumnView(
@@ -180,7 +180,7 @@ public final class Views {
 
   public record ConfigView(
       List<ColumnView> columns,
-      List<String> nodeTypes,
+      List<String> moduleNames,
       List<Projects.Stage> stages,
       List<String> owners,
       List<String> linkTypes,

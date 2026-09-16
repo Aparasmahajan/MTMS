@@ -29,7 +29,7 @@ public class DefectController {
   }
 
   public record CreateDefectRequest(
-      @NotBlank String moduleId,
+      @NotBlank String subModuleId,
       @NotBlank String phase,
       @NotBlank String severity,
       @NotBlank String description,
@@ -42,7 +42,7 @@ public class DefectController {
 
     defects.create(
         actor,
-        UUID.fromString(request.moduleId()),
+        UUID.fromString(request.subModuleId()),
         request.phase(),
         request.severity(),
         request.description(),

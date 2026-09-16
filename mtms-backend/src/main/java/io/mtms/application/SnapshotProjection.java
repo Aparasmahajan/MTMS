@@ -60,14 +60,14 @@ public final class SnapshotProjection {
       ProjectData data,
       AccessData access,
       List<Projects.Project> allProjects,
-      Map<UUID, Integer> moduleCounts,
+      Map<UUID, Integer> subModuleCounts,
       Instant now) {
 
     // Reading a project you cannot see is a 403, and it is checked here rather than in the
     // controller so that every path into the projection is covered by the same line.
     actor.require(PermissionKey.PROJECT_VIEW);
 
-    // Every column is projected onto every module, including those behind a switched-off
+    // Every column is projected onto every sub-module, including those behind a switched-off
     // environment: the cells stay addressable and come back untouched when it is switched on
     // again. `activeColumns` is what decides the grid and the maths.
     List<Projects.DeliverableColumn> columns = data.orderedColumns();
@@ -77,77 +77,77 @@ public final class SnapshotProjection {
         activeColumns.stream().filter(Projects.DeliverableColumn::counts).toList();
 
     Map<String, Modules.Cell> cellIndex = indexCells(data.cells());
-    List<Views.ModuleView> modules =
-        data.modules().stream()
-            .map(module -> moduleView(module, data, columns, activeColumns, countedColumns, cellIndex))
+    List<Views.SubModuleView> subModules =
+        data.subModules().stream()
+            .map(module -> subModuleView(module, data, columns, activeColumns, countedColumns, cellIndex))
             .toList();
 
-    Map<UUID, String> moduleLabels = new HashMap<>();
-    data.modules().forEach(module -> moduleLabels.put(module.id(), module.label()));
+    Map<UUID, String> subModuleLabels = new HashMap<>();
+    data.subModules().forEach(module -> subModuleLabels.put(module.id(), module.label()));
 
     return new Snapshot(
         me(actor),
         new Snapshot.Org(data.tenant().id().toString(), data.tenant().name()),
         new Snapshot.ProjectRef(
             data.project().id().toString(), data.project().key(), data.project().name()),
-        projectSummaries(allProjects, moduleCounts),
+        projectSummaries(allProjects, subModuleCounts),
         configView(data, columns),
-        modules,
-        auditViews(data.audit(), moduleLabels),
-        defectViews(data.defects(), moduleLabels),
-        libraryViews(data.library(), data.modules()),
+        subModules,
+        auditViews(data.audit(), subModuleLabels),
+        defectViews(data.defects(), subModuleLabels),
+        libraryViews(data.library(), data.subModules()),
         roleViews(access.roles()),
         userViews(access, data.tenant(), allProjects),
         memberViews(actor, access, data.project().id(), allProjects),
         invitationViews(access, data.tenant(), allProjects),
-        driftView(data, columns, modules, now));
+        driftView(data, columns, subModules, now));
   }
 
   // ---------------------------------------------------------------------------
-  // Modules and cells
+  // Sub-modules and cells
   // ---------------------------------------------------------------------------
 
-  /** Keyed by (module, subactivity, column). The empty string stands in for a null subactivity. */
-  private static String cellKey(UUID moduleId, UUID subactivityId, String columnKey) {
-    return moduleId + "/" + (subactivityId == null ? "" : subactivityId) + ":" + columnKey;
+  /** Keyed by (module, subActivity, column). The empty string stands in for a null subActivity. */
+  private static String cellKey(UUID subModuleId, UUID subActivityId, String columnKey) {
+    return subModuleId + "/" + (subActivityId == null ? "" : subActivityId) + ":" + columnKey;
   }
 
   private static Map<String, Modules.Cell> indexCells(List<Modules.Cell> cells) {
     Map<String, Modules.Cell> index = new HashMap<>();
     for (Modules.Cell cell : cells) {
-      index.put(cellKey(cell.moduleId(), cell.subactivityId(), cell.columnKey()), cell);
+      index.put(cellKey(cell.subModuleId(), cell.subActivityId(), cell.columnKey()), cell);
     }
     return index;
   }
 
   /** A cell nobody has touched does not exist in storage; it reads back as a blank. */
   private static Modules.Cell statusOf(
-      Map<String, Modules.Cell> index, UUID moduleId, UUID subactivityId, String columnKey) {
+      Map<String, Modules.Cell> index, UUID subModuleId, UUID subActivityId, String columnKey) {
     return index.getOrDefault(
-        cellKey(moduleId, subactivityId, columnKey),
-        new Modules.Cell(moduleId, subactivityId, columnKey, StatusVocabulary.BLANK, null, null));
+        cellKey(subModuleId, subActivityId, columnKey),
+        new Modules.Cell(subModuleId, subActivityId, columnKey, StatusVocabulary.BLANK, null, null));
   }
 
-  private Views.ModuleView moduleView(
-      Modules.Module module,
+  private Views.SubModuleView subModuleView(
+      Modules.SubModule module,
       ProjectData data,
       List<Projects.DeliverableColumn> columns,
       List<Projects.DeliverableColumn> activeColumns,
       List<Projects.DeliverableColumn> countedColumns,
       Map<String, Modules.Cell> cellIndex) {
 
-    List<Modules.Subactivity> subs = data.subactivitiesOf(module.id());
+    List<Modules.SubActivity> subs = data.subActivitiesOf(module.id());
 
-    List<Views.SubactivityView> subactivityViews =
+    List<Views.SubActivityView> subActivityViews =
         subs.stream()
             .map(
-                subactivity -> {
+                subActivity -> {
                   List<Views.CellView> cells =
                       columns.stream()
                           .map(
                               column -> {
                                 Modules.Cell cell =
-                                    statusOf(cellIndex, module.id(), subactivity.id(), column.key());
+                                    statusOf(cellIndex, module.id(), subActivity.id(), column.key());
                                 return new Views.CellView(
                                     column.key(),
                                     cell.status(),
@@ -163,9 +163,9 @@ public final class SnapshotProjection {
                           .map(column -> statusIn(cells, column.key()))
                           .toList();
 
-                  return new Views.SubactivityView(
-                      subactivity.id().toString(),
-                      subactivity.name(),
+                  return new Views.SubActivityView(
+                      subActivity.id().toString(),
+                      subActivity.name(),
                       StatusVocabulary.readiness(counted),
                       cells);
                 })
@@ -181,8 +181,8 @@ public final class SnapshotProjection {
                         StatusVocabulary.rollUp(
                             subs.stream()
                                 .map(
-                                    subactivity ->
-                                        statusOf(cellIndex, module.id(), subactivity.id(), column.key())
+                                    subActivity ->
+                                        statusOf(cellIndex, module.id(), subActivity.id(), column.key())
                                             .status())
                                 .toList());
                     return new Views.CellView(column.key(), status, true, subs.size(), null, null);
@@ -198,11 +198,11 @@ public final class SnapshotProjection {
             countedColumns.stream().map(column -> statusIn(cells, column.key())).toList());
 
     Optional<Modules.Run> run =
-        data.runs().stream().filter(candidate -> candidate.moduleId().equals(module.id())).findFirst();
+        data.runs().stream().filter(candidate -> candidate.subModuleId().equals(module.id())).findFirst();
 
-    return new Views.ModuleView(
+    return new Views.SubModuleView(
         module.id().toString(),
-        module.nodeType(),
+        module.moduleName(),
         module.name(),
         module.owner(),
         module.fniTargetDate() == null ? null : module.fniTargetDate().toString(),
@@ -222,7 +222,7 @@ public final class SnapshotProjection {
                 .filter(column -> StatusVocabulary.BLANK.equals(statusIn(cells, column.key())))
                 .count(),
         cells,
-        subactivityViews,
+        subActivityViews,
         data.linksOf(module.id()).stream()
             .map(
                 link ->
@@ -257,7 +257,7 @@ public final class SnapshotProjection {
   }
 
   private List<Snapshot.ProjectSummary> projectSummaries(
-      List<Projects.Project> projects, Map<UUID, Integer> moduleCounts) {
+      List<Projects.Project> projects, Map<UUID, Integer> subModuleCounts) {
     return projects.stream()
         .filter(project -> !project.archived())
         .map(
@@ -267,7 +267,7 @@ public final class SnapshotProjection {
                     project.key(),
                     project.name(),
                     project.configured(),
-                    moduleCounts.getOrDefault(project.id(), 0)))
+                    subModuleCounts.getOrDefault(project.id(), 0)))
         .toList();
   }
 
@@ -282,7 +282,7 @@ public final class SnapshotProjection {
 
     return new Views.ConfigView(
         columnViews,
-        data.config().nodeTypes(),
+        data.config().moduleNames(),
         data.config().stages(),
         data.config().owners(),
         data.config().linkTypes(),
@@ -307,7 +307,7 @@ public final class SnapshotProjection {
   }
 
   private List<Views.AuditView> auditViews(
-      List<Audit.AuditEntry> entries, Map<UUID, String> moduleLabels) {
+      List<Audit.AuditEntry> entries, Map<UUID, String> subModuleLabels) {
     return entries.stream()
         .sorted(Comparator.comparing(Audit.AuditEntry::at).reversed())
         .map(
@@ -315,10 +315,10 @@ public final class SnapshotProjection {
                 new Views.AuditView(
                     entry.id().toString(),
                     entry.scope().wire(),
-                    entry.moduleId() == null ? null : entry.moduleId().toString(),
-                    entry.moduleId() == null
+                    entry.subModuleId() == null ? null : entry.subModuleId().toString(),
+                    entry.subModuleId() == null
                         ? "—"
-                        : moduleLabels.getOrDefault(entry.moduleId(), "—"),
+                        : subModuleLabels.getOrDefault(entry.subModuleId(), "—"),
                     entry.label(),
                     entry.what(),
                     entry.who(),
@@ -327,15 +327,15 @@ public final class SnapshotProjection {
   }
 
   private List<Views.DefectView> defectViews(
-      List<Defects.Defect> defects, Map<UUID, String> moduleLabels) {
+      List<Defects.Defect> defects, Map<UUID, String> subModuleLabels) {
     return defects.stream()
         .sorted(Comparator.comparing(Defects.Defect::createdAt).reversed())
         .map(
             defect ->
                 new Views.DefectView(
                     defect.id().toString(),
-                    defect.moduleId().toString(),
-                    moduleLabels.getOrDefault(defect.moduleId(), "—"),
+                    defect.subModuleId().toString(),
+                    subModuleLabels.getOrDefault(defect.subModuleId(), "—"),
                     defect.phase().wire(),
                     defect.ticketKey(),
                     defect.ticketKey().isEmpty() ? "" : ticketBaseUrl + "/" + defect.ticketKey(),
@@ -350,21 +350,21 @@ public final class SnapshotProjection {
   }
 
   private List<Views.LibraryView> libraryViews(
-      List<Modules.ModuleLibraryEntry> library, List<Modules.Module> projectModules) {
+      List<Modules.LibraryEntry> library, List<Modules.SubModule> projectSubModules) {
     return library.stream()
         .map(
             entry ->
                 new Views.LibraryView(
                     entry.id().toString(),
-                    entry.nodeType(),
+                    entry.moduleName(),
                     entry.name(),
                     entry.version(),
-                    entry.subactivityNames().size(),
+                    entry.subActivityNames().size(),
                     entry.usedInProjects(),
-                    projectModules.stream()
+                    projectSubModules.stream()
                         .anyMatch(
                             module ->
-                                module.nodeType().equals(entry.nodeType())
+                                module.moduleName().equals(entry.moduleName())
                                     && module.name().equals(entry.name()))))
         .toList();
   }
@@ -506,7 +506,7 @@ public final class SnapshotProjection {
   private DriftViews.DriftView driftView(
       ProjectData data,
       List<Projects.DeliverableColumn> columns,
-      List<Views.ModuleView> modules,
+      List<Views.SubModuleView> subModules,
       Instant now) {
 
     List<DriftAnalysis.Resolved> resolved =
@@ -554,8 +554,8 @@ public final class SnapshotProjection {
 
     return new DriftViews.DriftView(
         rows,
-        DriftAnalysis.warnings(resolved, data.driftReports(), modules, now),
-        PromotionGate.evaluate(columns, modules, rows),
+        DriftAnalysis.warnings(resolved, data.driftReports(), subModules, now),
+        PromotionGate.evaluate(columns, subModules, rows),
         reports,
         promotions);
   }

@@ -3,7 +3,7 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'MTMS — Flow One',
-  description: 'Getting change activities into production: modules, deliverables and who changed what.',
+  description: 'Getting change activities into production: sub-modules, deliverables and who changed what.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

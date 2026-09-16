@@ -8,7 +8,7 @@ import java.util.UUID;
 /**
  * What the super admin console reads.
  *
- * <p>Counts, names and status. Deliberately no module name, deliverable, defect, ticket key or
+ * <p>Counts, names and status. Deliberately no sub-module name, deliverable, defect, ticket key or
  * project audit entry appears anywhere in this shape, and none should be added: a platform
  * operator provisions organisations, they do not work inside them. The type is the boundary —
  * if the data is not in the record, no careless projection can leak it.
@@ -23,7 +23,7 @@ public record PlatformView(Me me, List<Organisation> organisations, List<Audit.P
   /** Somebody who can administer an organisation, so one is never left without an owner. */
   public record Administrator(String displayName, String email, String status) {}
 
-  public record ProjectSummary(UUID id, String key, String name, boolean configured, int moduleCount) {}
+  public record ProjectSummary(UUID id, String key, String name, boolean configured, int subModuleCount) {}
 
   /**
    * @param configuredProjectCount projects with at least one deliverable column. The rest are
@@ -39,7 +39,7 @@ public record PlatformView(Me me, List<Organisation> organisations, List<Audit.P
       int projectCount,
       int configuredProjectCount,
       int userCount,
-      int moduleCount,
+      int subModuleCount,
       List<Administrator> admins,
       List<ProjectSummary> projects) {}
 }

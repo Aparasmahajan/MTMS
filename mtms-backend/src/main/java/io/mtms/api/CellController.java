@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
  * Cell editing — a click-to-advance cycle, no modal.
  *
  * <p>Returns the whole snapshot rather than the changed cell. One round trip refreshes every
- * derived number on screen: the module's readiness, its stage, the roll-up above it, the
+ * derived number on screen: the sub-module's readiness, its stage, the roll-up above it, the
  * promotion gate. Returning just the cell would leave the client recomputing all of that, and it
  * would eventually recompute one of them differently.
  */
@@ -36,17 +36,17 @@ public class CellController {
    *     matrix sends. Supply one to set it outright.
    */
   public record AdvanceRequest(
-      @NotBlank String moduleId, String subactivityId, @NotBlank String columnKey, String status) {}
+      @NotBlank String subModuleId, String subActivityId, @NotBlank String columnKey, String status) {}
 
   @PatchMapping
   public ApiResponse.Success<Snapshot> advance(@RequestBody AdvanceRequest request, Actor actor) {
     cells.advance(
         actor,
         new CellUseCases.AdvanceCommand(
-            UUID.fromString(request.moduleId()),
-            request.subactivityId() == null || request.subactivityId().isBlank()
+            UUID.fromString(request.subModuleId()),
+            request.subActivityId() == null || request.subActivityId().isBlank()
                 ? null
-                : UUID.fromString(request.subactivityId()),
+                : UUID.fromString(request.subActivityId()),
             request.columnKey(),
             request.status()));
 

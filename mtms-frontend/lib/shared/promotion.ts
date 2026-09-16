@@ -1,6 +1,6 @@
 import type { DeliverableColumn } from './domain';
 import { toneOf } from './vocabulary';
-import type { DriftRowView, ModuleView, PromotionGateView } from './views';
+import type { DriftRowView, SubModuleView, PromotionGateView } from './views';
 
 /**
  * The promotion gate.
@@ -16,10 +16,10 @@ import type { DriftRowView, ModuleView, PromotionGateView } from './views';
  */
 export function promotionGate(
   columns: readonly DeliverableColumn[],
-  modules: readonly ModuleView[],
+  subModules: readonly SubModuleView[],
   rows: readonly DriftRowView[],
 ): PromotionGateView {
-  const lowest = modules.length ? Math.min(...modules.map((module) => module.readiness)) : 0;
+  const lowest = subModules.length ? Math.min(...subModules.map((subModule) => subModule.readiness)) : 0;
   const mismatches = rows.filter(
     (row) => row.verdict === 'Prod behind' || row.verdict === 'Patched in place',
   );
@@ -35,8 +35,8 @@ export function promotionGate(
   const signOff = (columnKey: string) => {
     const column = columns.find((candidate) => candidate.key === columnKey);
     if (!column) return { present: false, outstanding: 0 };
-    const outstanding = modules.filter((module) => {
-      const cell = module.cells.find((candidate) => candidate.column_key === columnKey);
+    const outstanding = subModules.filter((subModule) => {
+      const cell = subModule.cells.find((candidate) => candidate.column_key === columnKey);
       return !cell || toneOf(cell.status) !== 'done';
     }).length;
     return { present: true, outstanding };
@@ -48,8 +48,8 @@ export function promotionGate(
   const checks = [
     {
       text: 'Every counted deliverable is Loaded in prod',
-      detail: modules.length ? `lowest module ${lowest}%` : 'no modules',
-      passed: modules.length > 0 && lowest === 100,
+      detail: subModules.length ? `lowest module ${lowest}%` : 'no modules',
+      passed: subModules.length > 0 && lowest === 100,
     },
     {
       text: 'Preprod hash matches the prod hash',

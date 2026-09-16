@@ -40,7 +40,7 @@ import org.springframework.transaction.annotation.Transactional;
  * admin could grant it to themselves and mint organisations. The flag is set by the seed or by
  * a database administrator; nothing reachable from the API turns it on.
  *
- * <p><b>Nothing here reads or writes project data.</b> No cell, module, defect or project audit
+ * <p><b>Nothing here reads or writes project data.</b> No cell, sub-module, defect or project audit
  * entry is touched. It creates the shell — organisation, roles, first admin, empty project —
  * and stops. What goes inside belongs to that organisation's admin; being able to create a
  * thing is not a reason to be able to read inside it.
@@ -97,7 +97,7 @@ public class PlatformUseCases {
   /**
    * Every organisation, with counts and the people who can administer it.
    *
-   * <p>Counts and names only. No module name, defect, ticket key or audit entry appears in the
+   * <p>Counts and names only. No sub-module name, defect, ticket key or audit entry appears in the
    * result, and none should be added: this is the screen for someone who provisions
    * organisations, not someone who works inside one.
    */
@@ -113,7 +113,7 @@ public class PlatformUseCases {
             .toList()) {
 
       List<Projects.Project> tenantProjects = projects.findAllByTenant(tenant.id());
-      Map<UUID, Integer> moduleCounts = projects.moduleCounts(tenant.id());
+      Map<UUID, Integer> subModuleCounts = projects.subModuleCounts(tenant.id());
       List<Tenancy.User> users = access.findUsers(tenant.id());
       List<Tenancy.Membership> memberships = access.memberships(tenant.id());
 
@@ -148,7 +148,7 @@ public class PlatformUseCases {
               tenantProjects.size(),
               (int) tenantProjects.stream().filter(Projects.Project::configured).count(),
               users.size(),
-              tenantProjects.stream().mapToInt(p -> moduleCounts.getOrDefault(p.id(), 0)).sum(),
+              tenantProjects.stream().mapToInt(p -> subModuleCounts.getOrDefault(p.id(), 0)).sum(),
               admins,
               tenantProjects.stream()
                   .map(
@@ -158,7 +158,7 @@ public class PlatformUseCases {
                               project.key(),
                               project.name(),
                               project.configured(),
-                              moduleCounts.getOrDefault(project.id(), 0)))
+                              subModuleCounts.getOrDefault(project.id(), 0)))
                   .toList()));
     }
 
@@ -307,7 +307,7 @@ public class PlatformUseCases {
   /**
    * Creates an empty project in an organisation.
    *
-   * <p>Empty is the point: no columns, no node types, no stages. The team that owns it defines
+   * <p>Empty is the point: no columns, no modules, no stages. The team that owns it defines
    * its own process on the Configure screen, which is what makes this application generic. A
    * platform operator seeding a project with one team's columns would be deciding another
    * team's process for them.

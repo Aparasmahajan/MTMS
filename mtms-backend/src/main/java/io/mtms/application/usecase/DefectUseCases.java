@@ -3,7 +3,7 @@ package io.mtms.application.usecase;
 import io.mtms.application.Actor;
 import io.mtms.application.ServiceException;
 import io.mtms.application.port.DefectRepository;
-import io.mtms.application.port.ModuleRepository;
+import io.mtms.application.port.SubModuleRepository;
 import io.mtms.domain.PermissionKey;
 import io.mtms.domain.model.Audit;
 import io.mtms.domain.model.Defects;
@@ -18,11 +18,11 @@ import org.springframework.transaction.annotation.Transactional;
 public class DefectUseCases {
 
   private final DefectRepository defects;
-  private final ModuleRepository modules;
+  private final SubModuleRepository modules;
   private final MutationSupport support;
 
   public DefectUseCases(
-      DefectRepository defects, ModuleRepository modules, MutationSupport support) {
+      DefectRepository defects, SubModuleRepository modules, MutationSupport support) {
     this.defects = defects;
     this.modules = modules;
     this.support = support;
@@ -31,7 +31,7 @@ public class DefectUseCases {
   @Transactional
   public UUID create(
       Actor actor,
-      UUID moduleId,
+      UUID subModuleId,
       String phase,
       String severity,
       String description,
@@ -43,14 +43,14 @@ public class DefectUseCases {
 
     var module =
         modules
-            .find(projectId, moduleId)
+            .find(projectId, subModuleId)
             .orElseThrow(() -> ServiceException.notFound("That module is not in this project."));
 
     Defects.Defect defect =
         new Defects.Defect(
             UUID.randomUUID(),
             projectId,
-            moduleId,
+            subModuleId,
             Defects.Phase.fromWire(phase),
             ticketKey == null ? "" : ticketKey,
             childReqId == null ? "" : childReqId,
@@ -66,13 +66,13 @@ public class DefectUseCases {
     support.record(
         actor, projectId, Audit.Scope.MODULE, "DEFECT",
         "defect raised — " + defect.severity().wire() + ", " + defect.phase().wire(),
-        moduleId, null);
+        subModuleId, null);
 
     support.emit(
-        actor, projectId, Audit.DomainEventName.DEFECT_RAISED, moduleId.toString(),
+        actor, projectId, Audit.DomainEventName.DEFECT_RAISED, subModuleId.toString(),
         Map.of(
             "defect_id", defect.id().toString(),
-            "module_id", moduleId.toString(),
+            "module_id", subModuleId.toString(),
             "severity", defect.severity().wire(),
             "module", module.label()));
 
@@ -105,11 +105,11 @@ public class DefectUseCases {
 
       support.record(
           actor, projectId, Audit.Scope.MODULE, "DEFECT",
-          "defect " + defect.status().wire() + " → " + next.wire(), defect.moduleId(), null);
+          "defect " + defect.status().wire() + " → " + next.wire(), defect.subModuleId(), null);
 
       support.emit(
           actor, projectId, Audit.DomainEventName.DEFECT_TRANSITIONED,
-          defect.moduleId().toString(),
+          defect.subModuleId().toString(),
           Map.of(
               "defect_id", defect.id().toString(),
               "from", defect.status().wire(),
@@ -123,7 +123,7 @@ public class DefectUseCases {
 
       support.record(
           actor, projectId, Audit.Scope.MODULE, "DEFECT",
-          "defect assigned to " + (next == null ? "nobody" : next), defect.moduleId(), null);
+          "defect assigned to " + (next == null ? "nobody" : next), defect.subModuleId(), null);
     }
 
     defects.update(updated);
@@ -142,20 +142,20 @@ public class DefectUseCases {
 
     defects.delete(defectId);
     support.record(
-        actor, projectId, Audit.Scope.MODULE, "DEFECT", "defect deleted", defect.moduleId(), null);
+        actor, projectId, Audit.Scope.MODULE, "DEFECT", "defect deleted", defect.subModuleId(), null);
     support.bump(projectId);
   }
 
   private static Defects.Defect withStatus(Defects.Defect defect, Defects.Status status) {
     return new Defects.Defect(
-        defect.id(), defect.projectId(), defect.moduleId(), defect.phase(), defect.ticketKey(),
+        defect.id(), defect.projectId(), defect.subModuleId(), defect.phase(), defect.ticketKey(),
         defect.childReqId(), defect.severity(), defect.description(), defect.raisedBy(),
         defect.assignee(), status, defect.createdAt());
   }
 
   private static Defects.Defect withAssignee(Defects.Defect defect, String assignee) {
     return new Defects.Defect(
-        defect.id(), defect.projectId(), defect.moduleId(), defect.phase(), defect.ticketKey(),
+        defect.id(), defect.projectId(), defect.subModuleId(), defect.phase(), defect.ticketKey(),
         defect.childReqId(), defect.severity(), defect.description(), defect.raisedBy(),
         assignee, defect.status(), defect.createdAt());
   }

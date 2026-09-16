@@ -15,28 +15,28 @@ import { formatStamp, missingLine } from '@/lib/shared/views';
  * why a cell click changes this screen too.
  */
 export default function DashboardPage() {
-  const { snapshot, can, reasonFor, moduleHref } = useTracker();
+  const { snapshot, can, reasonFor, subModuleHref } = useTracker();
   const router = useRouter();
-  const { modules, config } = snapshot;
+  const { sub_modules: subModules, config } = snapshot;
 
   const stats = useMemo(() => {
-    const fullyDone = modules.filter((module) => module.readiness === 100).length;
-    const notStarted = modules.filter((module) => module.readiness === 0).length;
-    const blankCells = modules.reduce((total, module) => total + module.blank_count, 0);
+    const fullyDone = subModules.filter((subModule) => subModule.readiness === 100).length;
+    const notStarted = subModules.filter((subModule) => subModule.readiness === 0).length;
+    const blankCells = subModules.reduce((total, subModule) => total + subModule.blank_count, 0);
 
     return {
       fullyDone,
       notStarted,
-      partWay: modules.length - fullyDone - notStarted,
+      partWay: subModules.length - fullyDone - notStarted,
       blankCells,
-      noTarget: modules.filter((module) => !module.fni_target_date).length,
-      noOwner: modules.filter((module) => !module.owner).length,
-      noRitm: modules.filter((module) => {
-        const cell = module.cells.find((entry) => entry.column_key === 'ritm');
+      noTarget: subModules.filter((subModule) => !subModule.fni_target_date).length,
+      noOwner: subModules.filter((subModule) => !subModule.owner).length,
+      noRitm: subModules.filter((subModule) => {
+        const cell = subModule.cells.find((entry) => entry.column_key === 'ritm');
         return !cell || cell.status !== 'raised';
       }).length,
     };
-  }, [modules]);
+  }, [subModules]);
 
   // Every figure below counts over the deliverable columns. With none configured they
   // would all read zero, which looks like a project in trouble rather than one not yet
@@ -51,18 +51,18 @@ export default function DashboardPage() {
     );
   }
 
-  const byNodeType = config.node_types
-    .map((nodeType) => {
-      const rows = modules.filter((module) => module.node_type === nodeType);
+  const byModule = config.module_names
+    .map((moduleName) => {
+      const rows = subModules.filter((subModule) => subModule.module_name === moduleName);
       const average = rows.length
-        ? Math.round(rows.reduce((total, module) => total + module.readiness, 0) / rows.length)
+        ? Math.round(rows.reduce((total, subModule) => total + subModule.readiness, 0) / rows.length)
         : 0;
-      return { nodeType, count: rows.length, average };
+      return { moduleName, count: rows.length, average };
     })
     .filter((entry) => entry.count > 0);
 
-  const closest = modules
-    .filter((module) => module.readiness > 0 && module.readiness < 100)
+  const closest = subModules
+    .filter((subModule) => subModule.readiness > 0 && subModule.readiness < 100)
     .sort((a, b) => b.readiness - a.readiness)
     .slice(0, 5);
 
@@ -70,7 +70,7 @@ export default function DashboardPage() {
     {
       label: 'Fully loaded in prod',
       value: stats.fullyDone,
-      note: `of ${modules.length} modules`,
+      note: `of ${subModules.length} sub-modules`,
       href: '/matrix?ready=Loaded+in+prod',
     },
     {
@@ -95,9 +95,9 @@ export default function DashboardPage() {
 
   const gaps = [
     { count: stats.blankCells, text: 'cells with no status at all, so readiness cannot be trusted' },
-    { count: stats.noTarget, text: 'modules with no target date for prod loading' },
-    { count: stats.noOwner, text: 'modules with no owner recorded' },
-    { count: stats.noRitm, text: 'modules where no RITM has been raised' },
+    { count: stats.noTarget, text: 'sub-modules with no target date for prod loading' },
+    { count: stats.noOwner, text: 'sub-modules with no owner recorded' },
+    { count: stats.noRitm, text: 'sub-modules where no RITM has been raised' },
   ];
 
   return (
@@ -105,14 +105,14 @@ export default function DashboardPage() {
       <PageTitle
         kicker={`${snapshot.org.name} / ${snapshot.project.key}`}
         title="Prod readiness"
-        lede={`${modules.length} modules across ${byNodeType.length} node types. A module is a node type plus an activity; readiness is measured per deliverable.`}
+        lede={`${subModules.length} sub-modules across ${byModule.length} modules. A sub-module is a module plus an activity; readiness is measured per deliverable.`}
         actions={
           <>
             <Link href="/matrix" className="btn btn-secondary">
               Open matrix
             </Link>
             <Link href="/library" className="btn btn-primary">
-              Add a module
+              Add a sub-module
             </Link>
           </>
         }
@@ -182,14 +182,14 @@ export default function DashboardPage() {
         }}
       >
         <div>
-          <SectionHeading first>Readiness by node type</SectionHeading>
+          <SectionHeading first>Readiness by module</SectionHeading>
           <div className="bordered">
-            {byNodeType.map((entry) => (
+            {byModule.map((entry) => (
               <button
-                key={entry.nodeType}
+                key={entry.moduleName}
                 type="button"
                 className="hoverable"
-                onClick={() => router.push(`/matrix?node=${encodeURIComponent(entry.nodeType)}`)}
+                onClick={() => router.push(`/matrix?node=${encodeURIComponent(entry.moduleName)}`)}
                 style={{
                   display: 'flex',
                   width: '100%',
@@ -213,10 +213,10 @@ export default function DashboardPage() {
                     textTransform: 'uppercase',
                   }}
                 >
-                  {entry.nodeType}
+                  {entry.moduleName}
                 </span>
                 <span style={{ width: 74, flex: 'none', fontSize: 12, color: 'var(--color-neutral-600)' }}>
-                  {entry.count} {entry.count === 1 ? 'module' : 'modules'}
+                  {entry.count} {entry.count === 1 ? 'sub-module' : 'sub-modules'}
                 </span>
                 <span className="bar" style={{ flex: 1, height: 10 }} aria-hidden>
                   <span style={{ width: `${entry.average}%` }} />
@@ -280,10 +280,10 @@ export default function DashboardPage() {
                 Nothing is part way — every module is either finished or not started.
               </div>
             ) : null}
-            {closest.map((module) => (
+            {closest.map((subModule) => (
               <Link
-                key={module.id}
-                href={moduleHref(module.id)}
+                key={subModule.id}
+                href={subModuleHref(subModule.id)}
                 className="hoverable"
                 style={{
                   display: 'block',
@@ -294,20 +294,20 @@ export default function DashboardPage() {
               >
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-3)' }}>
                   <span className="tag tag-accent" style={{ flex: 'none' }}>
-                    {module.node_type}
+                    {subModule.module_name}
                   </span>
                   <span style={{ flex: 1, fontSize: 13, lineHeight: 1.3, wordBreak: 'break-word' }}>
-                    {module.name}
+                    {subModule.name}
                   </span>
                   <span
                     className="tabular"
                     style={{ fontFamily: 'var(--font-heading)', fontSize: 16, flex: 'none' }}
                   >
-                    {module.readiness}%
+                    {subModule.readiness}%
                   </span>
                 </div>
                 <div style={{ marginTop: 'var(--space-1)', fontSize: 12, color: 'var(--color-neutral-600)' }}>
-                  {missingLine(module.missing)}
+                  {missingLine(subModule.missing)}
                 </div>
               </Link>
             ))}

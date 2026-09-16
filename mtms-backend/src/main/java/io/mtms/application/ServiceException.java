@@ -8,7 +8,7 @@ package io.mtms.application;
  * ApiExceptionHandler} turns it into a status and a {@code {error: {code, message}}} body, and
  * the client switches on the code rather than on prose that may be reworded.
  *
- * <p>Messages here are written for the person who will read them on screen. "That module
+ * <p>Messages here are written for the person who will read them on screen. "That sub-module
  * already exists in this project" tells somebody what to do next; "constraint violation" does
  * not.
  */

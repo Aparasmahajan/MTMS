@@ -8,7 +8,7 @@ import { Blueprint, SectionHeading, StatusMarker } from '@/components/primitives
 import { send } from '@/lib/client/api';
 import { optimisticAdvance } from '@/lib/client/optimistic';
 import { toneOf, TONE_STYLE } from '@/lib/shared/vocabulary';
-import { cellPresentation, formatStamp, type ModuleView, type Snapshot } from '@/lib/shared/views';
+import { cellPresentation, formatStamp, type SubModuleView, type Snapshot } from '@/lib/shared/views';
 
 /**
  * The module screen — everything about one module, and the only place the FNI chain
@@ -18,8 +18,8 @@ import { cellPresentation, formatStamp, type ModuleView, type Snapshot } from '@
  * server recomputes them from the store before it will close anything.
  */
 
-/** The quiet inline actions on a subactivity row — same weight as "remove" on a link. */
-function subactivityActionStyle(enabled: boolean) {
+/** The quiet inline actions on a sub-activity row — same weight as "remove" on a link. */
+function subActivityActionStyle(enabled: boolean) {
   return {
     fontSize: 12,
     color: 'var(--color-neutral-600)',
@@ -30,32 +30,32 @@ function subactivityActionStyle(enabled: boolean) {
   } as const;
 }
 
-function blockersFor(module: ModuleView): string[] {
+function blockersFor(subModule: SubModuleView): string[] {
   const blockers: string[] = [];
-  if (module.readiness !== 100) {
+  if (subModule.readiness !== 100) {
     blockers.push('DevOps has not confirmed every deliverable loaded in prod');
   }
-  const fni = module.cells.find((cell) => cell.column_key === 'fni');
+  const fni = subModule.cells.find((cell) => cell.column_key === 'fni');
   if (!fni || toneOf(fni.status) !== 'done') blockers.push('FNI final submission is not complete');
   return blockers;
 }
 
-export function ModuleScreen() {
+export function SubModuleScreen() {
   const { id } = useParams<{ id: string }>();
   const { snapshot, apply, can, reasonFor, setNotice } = useTracker();
-  const module = snapshot.modules.find((candidate) => candidate.id === id);
+  const subModule = snapshot.sub_modules.find((candidate) => candidate.id === id);
 
   const [linkType, setLinkType] = useState(snapshot.config.link_types[0] ?? 'RITM');
   const [linkLabel, setLinkLabel] = useState('');
   const [linkUrl, setLinkUrl] = useState('');
-  const [newSubactivity, setNewSubactivity] = useState('');
+  const [newSubActivity, setNewSubActivity] = useState('');
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
 
-  if (!module) notFound();
+  if (!subModule) notFound();
 
   const { columns, stages, owners, link_types: linkTypes } = snapshot.config;
-  const stage = stages[module.stage_index];
-  const blockers = blockersFor(module);
+  const stage = stages[subModule.stage_index];
+  const blockers = blockersFor(subModule);
   const canSignOff = can('fni.signoff');
   const canSetDate = can('fni.date');
   const canEdit = can('module.edit');
@@ -63,21 +63,21 @@ export function ModuleScreen() {
   const canConfirmProd = can('prod.confirm');
 
   const gateOpen = blockers.length === 0;
-  const signOffDisabled = !canSignOff || (!module.closed && !gateOpen);
+  const signOffDisabled = !canSignOff || (!subModule.closed && !gateOpen);
   const signOffReason = !canSignOff
     ? reasonFor('fni.signoff')
-    : module.closed
+    : subModule.closed
       ? ''
       : blockers.length
         ? `Blocked — ${blockers.join('; ')}`
         : '';
 
   function advance(columnKey: string) {
-    const cell = module!.cells.find((entry) => entry.column_key === columnKey);
+    const cell = subModule!.cells.find((entry) => entry.column_key === columnKey);
     if (!cell) return;
     if (cell.rolled_up) {
       setNotice(
-        'That value is rolled up from the subactivities and cannot be edited directly. Change it on the matrix, under this module.',
+        'That value is rolled up from the sub-activities and cannot be edited directly. Change it on the matrix, under this module.',
       );
       return;
     }
@@ -86,23 +86,23 @@ export function ModuleScreen() {
       return;
     }
     void apply(
-      (current) => optimisticAdvance(current, module!.id, null, columnKey, current.me.display_name),
+      (current) => optimisticAdvance(current, subModule!.id, null, columnKey, current.me.display_name),
       () =>
         send<Snapshot>('/api/v1/cells', 'PATCH', {
-          module_id: module!.id,
-          subactivity_id: null,
+          sub_module_id: subModule!.id,
+          sub_activity_id: null,
           column_key: columnKey,
         }),
     );
   }
 
   const handover = [
-    { label: 'Dev complete, handed to testing', by: 'development team', ok: module.readiness >= 50 },
-    { label: 'Testing signed off on lab / preprod', by: 'QA', ok: module.readiness >= 75 },
+    { label: 'Dev complete, handed to testing', by: 'development team', ok: subModule.readiness >= 50 },
+    { label: 'Testing signed off on lab / preprod', by: 'QA', ok: subModule.readiness >= 75 },
     {
       label: 'DevOps confirms every deliverable loaded in prod',
       by: 'DevOps',
-      ok: module.readiness === 100,
+      ok: subModule.readiness === 100,
     },
     {
       label: 'FNI final submission raised',
@@ -110,11 +110,11 @@ export function ModuleScreen() {
       ok: !blockers.includes('FNI final submission is not complete'),
     },
     {
-      label: 'PM marks FNI done — closes the module and its subactivities',
-      by: module.closed
-        ? `${module.closed_by ?? 'PM'}, closed`
+      label: 'PM marks FNI done — closes the sub-module and its sub-activities',
+      by: subModule.closed
+        ? `${subModule.closed_by ?? 'PM'}, closed`
         : 'waiting on the PM',
-      ok: module.closed,
+      ok: subModule.closed,
     },
   ];
 
@@ -124,7 +124,7 @@ export function ModuleScreen() {
         <Link href="/matrix" style={{ color: 'inherit' }}>
           {snapshot.project.key}
         </Link>{' '}
-        / {module.node_type}
+        / {subModule.module_name}
       </div>
 
       <div
@@ -138,7 +138,7 @@ export function ModuleScreen() {
         }}
       >
         <div style={{ minWidth: 0 }}>
-          <h1 style={{ wordBreak: 'break-word' }}>{module.name}</h1>
+          <h1 style={{ wordBreak: 'break-word' }}>{subModule.name}</h1>
           <div
             style={{
               display: 'flex',
@@ -148,13 +148,13 @@ export function ModuleScreen() {
               flexWrap: 'wrap',
             }}
           >
-            <span className="tag tag-accent">{module.node_type}</span>
+            <span className="tag tag-accent">{subModule.module_name}</span>
             <span style={{ fontSize: 13, color: 'var(--color-neutral-700)' }}>
-              {module.readiness}% of counted deliverables in prod
+              {subModule.readiness}% of counted deliverables in prod
               {stage ? ` · ${stage.label}` : ''}
             </span>
             <span style={{ fontSize: 13, color: 'var(--color-neutral-700)' }}>
-              target {module.fni_target_date ?? 'not set'}
+              target {subModule.fni_target_date ?? 'not set'}
             </span>
             <span
               style={{
@@ -169,13 +169,13 @@ export function ModuleScreen() {
               <select
                 className="input"
                 style={{ width: 150, padding: '2px 6px' }}
-                value={module.owner ?? 'unassigned'}
+                value={subModule.owner ?? 'unassigned'}
                 disabled={!canEdit}
                 title={canEdit ? undefined : reasonFor('module.edit')}
                 onChange={(event) => {
                   const value = event.target.value;
                   void apply(null, () =>
-                    send<Snapshot>(`/api/v1/modules/${module.id}`, 'PATCH', {
+                    send<Snapshot>(`/api/v1/sub-modules/${subModule.id}`, 'PATCH', {
                       owner: value === 'unassigned' ? null : value,
                     }),
                   );
@@ -198,11 +198,11 @@ export function ModuleScreen() {
           <button
             type="button"
             className="btn btn-primary"
-            disabled={!canConfirmProd || module.closed}
+            disabled={!canConfirmProd || subModule.closed}
             title={canConfirmProd ? undefined : reasonFor('prod.confirm')}
             onClick={async () => {
               const meta = await apply(null, () =>
-                send<Snapshot>(`/api/v1/modules/${module.id}/confirm-prod`, 'POST'),
+                send<Snapshot>(`/api/v1/sub-modules/${subModule.id}/confirm-prod`, 'POST'),
               );
               if (meta) {
                 setNotice(
@@ -293,13 +293,13 @@ export function ModuleScreen() {
                 className="input"
                 type="date"
                 style={{ width: 170 }}
-                value={module.fni_target_date ?? ''}
+                value={subModule.fni_target_date ?? ''}
                 disabled={!canSetDate}
                 title={canSetDate ? undefined : reasonFor('fni.date')}
                 onChange={(event) => {
                   const value = event.target.value;
                   void apply(null, () =>
-                    send<Snapshot>(`/api/v1/modules/${module.id}`, 'PATCH', {
+                    send<Snapshot>(`/api/v1/sub-modules/${subModule.id}`, 'PATCH', {
                       fni_target_date: value || null,
                     }),
                   );
@@ -312,13 +312,13 @@ export function ModuleScreen() {
                 title={signOffReason || undefined}
                 onClick={() =>
                   void apply(null, () =>
-                    send<Snapshot>(`/api/v1/modules/${module.id}/fni`, 'POST', {
-                      close: !module.closed,
+                    send<Snapshot>(`/api/v1/sub-modules/${subModule.id}/fni`, 'POST', {
+                      close: !subModule.closed,
                     }),
                   )
                 }
               >
-                {module.closed ? 'Reopen activity' : 'Mark FNI done'}
+                {subModule.closed ? 'Reopen activity' : 'Mark FNI done'}
               </button>
             </div>
 
@@ -335,7 +335,7 @@ export function ModuleScreen() {
               </div>
             ) : null}
 
-            {module.closed ? (
+            {subModule.closed ? (
               <div
                 style={{
                   marginTop: 'var(--space-4)',
@@ -355,7 +355,7 @@ export function ModuleScreen() {
 
           <SectionHeading first>Deliverables</SectionHeading>
           <Blueprint padded={false}>
-            {module.cells.map((cell) => {
+            {subModule.cells.map((cell) => {
               const column = columns.find((candidate) => candidate.key === cell.column_key);
               // A column behind a switched-off environment is in the snapshot with its
               // cell intact, but it is not part of this project's process right now.
@@ -377,7 +377,7 @@ export function ModuleScreen() {
                     <div style={{ fontSize: 13 }}>{column.full}</div>
                     <div style={{ fontSize: 11, color: 'var(--color-neutral-600)' }}>
                       {cell.rolled_up
-                        ? `rolled up from ${cell.subactivity_count} subactivities`
+                        ? `rolled up from ${cell.sub_activity_count} sub-activities`
                         : view.stamp}
                       {column.counts ? '' : ' · does not count toward prod'}
                       {column.environment ? ` · ${column.environment}` : ''}
@@ -391,13 +391,13 @@ export function ModuleScreen() {
             })}
           </Blueprint>
 
-          <SectionHeading>Subactivities</SectionHeading>
+          <SectionHeading>SubActivities</SectionHeading>
           <div className="bordered">
-            {module.subactivities.map((subactivity) => {
-              const editing = renaming?.id === subactivity.id;
+            {subModule.sub_activities.map((subActivity) => {
+              const editing = renaming?.id === subActivity.id;
               return (
                 <div
-                  key={subactivity.id}
+                  key={subActivity.id}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -411,13 +411,13 @@ export function ModuleScreen() {
                       onSubmit={(event) => {
                         event.preventDefault();
                         const value = renaming.value.trim();
-                        if (!value || value === subactivity.name) {
+                        if (!value || value === subActivity.name) {
                           setRenaming(null);
                           return;
                         }
                         void apply(null, () =>
                           send<Snapshot>(
-                            `/api/v1/modules/${module.id}/subactivities/${subactivity.id}`,
+                            `/api/v1/sub-modules/${subModule.id}/sub-activities/${subActivity.id}`,
                             'PATCH',
                             { name: value },
                           ),
@@ -430,24 +430,24 @@ export function ModuleScreen() {
                         autoFocus
                         style={{ flex: 1 }}
                         value={renaming.value}
-                        onChange={(event) => setRenaming({ id: subactivity.id, value: event.target.value })}
+                        onChange={(event) => setRenaming({ id: subActivity.id, value: event.target.value })}
                         onKeyDown={(event) => {
                           if (event.key === 'Escape') setRenaming(null);
                         }}
-                        aria-label={`Rename ${subactivity.name}`}
+                        aria-label={`Rename ${subActivity.name}`}
                       />
                       <button type="submit" className="btn btn-secondary">
                         Save
                       </button>
                     </form>
                   ) : (
-                    <span style={{ flex: 1, fontSize: 13 }}>{subactivity.name}</span>
+                    <span style={{ flex: 1, fontSize: 13 }}>{subActivity.name}</span>
                   )}
 
                   {editing ? null : (
                     <>
                       <span className="bar" style={{ width: 110, flex: 'none', height: 6 }} aria-hidden>
-                        <span style={{ width: `${subactivity.readiness}%` }} />
+                        <span style={{ width: `${subActivity.readiness}%` }} />
                       </span>
                       <span
                         className="tabular"
@@ -459,15 +459,15 @@ export function ModuleScreen() {
                           fontSize: 15,
                         }}
                       >
-                        {subactivity.readiness}
+                        {subActivity.readiness}
                       </span>
                       <div style={{ display: 'flex', gap: 'var(--space-2)', flex: 'none' }}>
                         <button
                           type="button"
                           disabled={!canEdit}
                           title={canEdit ? undefined : reasonFor('module.edit')}
-                          onClick={() => setRenaming({ id: subactivity.id, value: subactivity.name })}
-                          style={subactivityActionStyle(canEdit)}
+                          onClick={() => setRenaming({ id: subActivity.id, value: subActivity.name })}
+                          style={subActivityActionStyle(canEdit)}
                         >
                           rename
                         </button>
@@ -476,20 +476,20 @@ export function ModuleScreen() {
                           disabled={!canEdit}
                           title={
                             canEdit
-                              ? module.subactivities.length === 1
-                                ? 'Removing the last subactivity gives the module its own row back, keeping what it currently shows'
-                                : `Remove ${subactivity.name} and its deliverable row`
+                              ? subModule.sub_activities.length === 1
+                                ? 'Removing the last sub-activity gives the module its own row back, keeping what it currently shows'
+                                : `Remove ${subActivity.name} and its deliverable row`
                               : reasonFor('module.edit')
                           }
                           onClick={() =>
                             void apply(null, () =>
                               send<Snapshot>(
-                                `/api/v1/modules/${module.id}/subactivities/${subactivity.id}`,
+                                `/api/v1/sub-modules/${subModule.id}/sub-activities/${subActivity.id}`,
                                 'DELETE',
                               ),
                             )
                           }
-                          style={subactivityActionStyle(canEdit)}
+                          style={subActivityActionStyle(canEdit)}
                         >
                           remove
                         </button>
@@ -499,7 +499,7 @@ export function ModuleScreen() {
                 </div>
               );
             })}
-            {module.subactivities.length === 0 ? (
+            {subModule.sub_activities.length === 0 ? (
               <div style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 13, color: 'var(--color-neutral-600)' }}>
                 None.
               </div>
@@ -508,13 +508,13 @@ export function ModuleScreen() {
             <form
               onSubmit={(event) => {
                 event.preventDefault();
-                if (!newSubactivity.trim()) return;
+                if (!newSubActivity.trim()) return;
                 void apply(null, () =>
-                  send<Snapshot>(`/api/v1/modules/${module.id}/subactivities`, 'POST', {
-                    name: newSubactivity.trim(),
+                  send<Snapshot>(`/api/v1/sub-modules/${subModule.id}/sub-activities`, 'POST', {
+                    name: newSubActivity.trim(),
                   }),
                 ).then((result) => {
-                  if (result) setNewSubactivity('');
+                  if (result) setNewSubActivity('');
                 });
               }}
               style={{
@@ -527,19 +527,19 @@ export function ModuleScreen() {
               <input
                 className="input"
                 style={{ flex: 1 }}
-                value={newSubactivity}
-                onChange={(event) => setNewSubactivity(event.target.value)}
-                placeholder="New subactivity, e.g. Deletion"
-                aria-label="New subactivity name"
+                value={newSubActivity}
+                onChange={(event) => setNewSubActivity(event.target.value)}
+                placeholder="New sub-activity, e.g. Deletion"
+                aria-label="New sub-activity name"
               />
               <button
                 type="submit"
                 className="btn btn-secondary"
-                disabled={!canEdit || module.closed}
+                disabled={!canEdit || subModule.closed}
                 title={
                   canEdit
-                    ? module.closed
-                      ? 'This module is closed. Reopen it before changing its subactivities.'
+                    ? subModule.closed
+                      ? 'This module is closed. Reopen it before changing its sub-activities.'
                       : undefined
                     : reasonFor('module.edit')
                 }
@@ -557,15 +557,15 @@ export function ModuleScreen() {
               textWrap: 'pretty',
             }}
           >
-            {module.subactivities.length
-              ? 'The module row on the matrix is a roll-up: a column only counts as done when every subactivity is done. Edit the subactivity cells on the matrix.'
-              : 'This module has no subactivities — its deliverable row is tracked directly. Adding the first one turns that row into a roll-up and carries the deliverables it already holds onto that subactivity.'}
+            {subModule.sub_activities.length
+              ? 'The module row on the matrix is a roll-up: a column only counts as done when every sub-activity is done. Edit the sub-activity cells on the matrix.'
+              : 'This module has no sub-activities — its deliverable row is tracked directly. Adding the first one turns that row into a roll-up and carries the deliverables it already holds onto that sub-activity.'}
           </div>
 
           <SectionHeading>Defects on this module</SectionHeading>
           <div className="bordered">
             {snapshot.defects
-              .filter((defect) => defect.module_id === module.id)
+              .filter((defect) => defect.sub_module_id === subModule.id)
               .map((defect) => (
                 <div
                   key={defect.id}
@@ -599,7 +599,7 @@ export function ModuleScreen() {
                   </div>
                 </div>
               ))}
-            {snapshot.defects.filter((defect) => defect.module_id === module.id).length === 0 ? (
+            {snapshot.defects.filter((defect) => defect.sub_module_id === subModule.id).length === 0 ? (
               <div style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 13, color: 'var(--color-neutral-600)' }}>
                 None raised.
               </div>
@@ -608,7 +608,7 @@ export function ModuleScreen() {
 
           <SectionHeading>Links</SectionHeading>
           <Blueprint padded={false}>
-            {module.links.map((link) => (
+            {subModule.links.map((link) => (
               <div
                 key={link.id}
                 style={{
@@ -663,7 +663,7 @@ export function ModuleScreen() {
                 event.preventDefault();
                 if (!linkUrl.trim()) return;
                 void apply(null, () =>
-                  send<Snapshot>(`/api/v1/modules/${module.id}/links`, 'POST', {
+                  send<Snapshot>(`/api/v1/sub-modules/${subModule.id}/links`, 'POST', {
                     type: linkType,
                     label: linkLabel,
                     url: linkUrl,
@@ -728,7 +728,7 @@ export function ModuleScreen() {
           <SectionHeading first>Change history</SectionHeading>
           <div className="bordered">
             {snapshot.audit
-              .filter((entry) => entry.module_id === module.id)
+              .filter((entry) => entry.sub_module_id === subModule.id)
               .slice(0, 8)
               .map((entry) => (
                 <div
@@ -761,19 +761,19 @@ export function ModuleScreen() {
                   </span>
                 </div>
               ))}
-            {snapshot.audit.filter((entry) => entry.module_id === module.id).length === 0 ? (
+            {snapshot.audit.filter((entry) => entry.sub_module_id === subModule.id).length === 0 ? (
               <div style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 12, color: 'var(--color-neutral-600)' }}>
-                No changes recorded against this module.
+                No changes recorded against this subModule.
               </div>
             ) : null}
           </div>
 
           <SectionHeading>
             Last execution ·{' '}
-            {module.last_run ? `CHILD_REQ_ID ${module.last_run.child_req_id}` : 'no execution recorded'}
+            {subModule.last_run ? `CHILD_REQ_ID ${subModule.last_run.child_req_id}` : 'no execution recorded'}
           </SectionHeading>
           <div className="bordered">
-            {module.last_run?.phases.map((phase) => (
+            {subModule.last_run?.phases.map((phase) => (
               <div
                 key={phase.name}
                 style={{
@@ -802,16 +802,16 @@ export function ModuleScreen() {
                 </span>
               </div>
             ))}
-            {!module.last_run ? (
+            {!subModule.last_run ? (
               <div style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 12, color: 'var(--color-neutral-600)' }}>
-                No run has reported against this module.
+                No run has reported against this subModule.
               </div>
             ) : null}
           </div>
 
           <SectionHeading>Artifacts</SectionHeading>
           <div className="bordered">
-            {module.last_run?.artifacts.map((artifact) => (
+            {subModule.last_run?.artifacts.map((artifact) => (
               <div
                 key={artifact.path}
                 style={{
@@ -846,7 +846,7 @@ export function ModuleScreen() {
                 </span>
               </div>
             ))}
-            {!module.last_run ? (
+            {!subModule.last_run ? (
               <div style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 12, color: 'var(--color-neutral-600)' }}>
                 None.
               </div>
