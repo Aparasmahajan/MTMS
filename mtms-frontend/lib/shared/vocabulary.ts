@@ -1,6 +1,6 @@
 /**
  * The status vocabulary and the two derived rules that everything else reads from:
- * the subactivity roll-up, and readiness.
+ * the sub-activity roll-up, and readiness.
  *
  * These are pure — no storage, no HTTP, no React. The server enforces the FNI gate
  * with the same functions the client uses to render the matrix, so the two can never
@@ -101,20 +101,20 @@ export const STATUS_SETS = {
 // ---------------------------------------------------------------------------
 
 /**
- * A module cell is derived from its subactivities, never stored:
- * blank if any subactivity is blank; else not-done if any is; else in-progress if
- * any is; else done. Returns the actual status of the first subactivity at the
- * governing tone, so the label the user sees is one a subactivity really holds.
+ * A module cell is derived from its sub-activities, never stored:
+ * blank if any sub-activity is blank; else not-done if any is; else in-progress if
+ * any is; else done. Returns the actual status of the first sub-activity at the
+ * governing tone, so the label the user sees is one a sub-activity really holds.
  */
-export function rollUp(subactivityStatuses: readonly string[]): string {
-  if (subactivityStatuses.length === 0) return BLANK;
-  const tones = subactivityStatuses.map(toneOf);
+export function rollUp(subActivityStatuses: readonly string[]): string {
+  if (subActivityStatuses.length === 0) return BLANK;
+  const tones = subActivityStatuses.map(toneOf);
 
   for (const tone of ['blank', 'none', 'part'] as const) {
     const index = tones.indexOf(tone);
-    if (index >= 0) return tone === 'blank' ? BLANK : (subactivityStatuses[index] as string);
+    if (index >= 0) return tone === 'blank' ? BLANK : (subActivityStatuses[index] as string);
   }
-  return subactivityStatuses[0] as string;
+  return subActivityStatuses[0] as string;
 }
 
 // ---------------------------------------------------------------------------

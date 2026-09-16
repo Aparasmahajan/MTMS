@@ -39,8 +39,8 @@ public class MutationSupport {
   /**
    * Records a change in the project's audit feed.
    *
-   * <p>A deliverable status is only part of the record. Who created a module, who broke it into
-   * subactivities and who dropped a column are all things a release manager has to be able to
+   * <p>A deliverable status is only part of the record. Who created a sub-module, who broke it into
+   * sub-activities and who dropped a column are all things a release manager has to be able to
    * answer months later, so they go through here too.
    */
   public void record(
@@ -49,15 +49,15 @@ public class MutationSupport {
       Audit.Scope scope,
       String label,
       String what,
-      UUID moduleId,
-      UUID subactivityId) {
+      UUID subModuleId,
+      UUID subActivityId) {
 
     audit.append(
         new Audit.AuditEntry(
             UUID.randomUUID(),
             projectId,
-            moduleId,
-            subactivityId,
+            subModuleId,
+            subActivityId,
             scope,
             label,
             what,
@@ -73,7 +73,7 @@ public class MutationSupport {
   /**
    * Writes a domain event to the outbox.
    *
-   * @param partitionKey everything about one module must share a key, so its events stay in
+   * @param partitionKey everything about one sub-module must share a key, so its events stay in
    *     order relative to each other once they reach Kafka.
    */
   public void emit(

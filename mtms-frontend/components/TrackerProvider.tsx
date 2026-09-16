@@ -12,7 +12,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { ApiError, send } from '@/lib/client/api';
 import { hasPermission, permissionDeniedReason, type PermissionKey } from '@/lib/shared/permissions';
-import type { ModuleView, Snapshot } from '@/lib/shared/views';
+import type { SubModuleView, Snapshot } from '@/lib/shared/views';
 
 /**
  * One snapshot of the project, held client-side, with optimistic mutation.
@@ -39,9 +39,9 @@ interface TrackerContextValue {
   can: (key: PermissionKey) => boolean;
   /** The message a disabled control shows. Never let one fail silently. */
   reasonFor: (key: PermissionKey) => string;
-  moduleById: (id: string) => ModuleView | undefined;
+  subModuleById: (id: string) => SubModuleView | undefined;
   /** Where a module's detail page lives. Always a real route here — every page is dynamic. */
-  moduleHref: (id: string) => string;
+  subModuleHref: (id: string) => string;
   signOut: () => Promise<void>;
   /**
    * Always false in this build.
@@ -124,8 +124,8 @@ export function TrackerProvider({ initial, children }: { initial: Snapshot; chil
       apply,
       can: (key) => hasPermission(permissions, key),
       reasonFor: (key) => permissionDeniedReason(key),
-      moduleById: (id) => snapshot.modules.find((module) => module.id === id),
-      moduleHref: (id) => `/modules/${id}`,
+      subModuleById: (id) => snapshot.sub_modules.find((subModule) => subModule.id === id),
+      subModuleHref: (id) => `/sub-modules/${id}`,
       signOut,
       isDemo: false,
       switchRole: () => undefined,

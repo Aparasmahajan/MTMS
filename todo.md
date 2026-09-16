@@ -15,34 +15,38 @@ and made changeable from a settings screen.
 ## 1. The shape of the product
 
 ```
-Organisation  →  Project  →  Module (a node)  →  Sub-module (an activity)  →  Task
+Organisation  →  Project  →  Module  →  Sub-module  →  Sub-activity
 ```
 
-Read it as: a company has projects. A project tracks work on nodes. Each node has
-activities on it. Each activity can be broken into smaller tasks.
+Read it as: a company has projects. A project tracks work on modules. Each module has
+sub-modules on it. Each sub-module can be broken into smaller sub-activities.
 
 For CR_AUTOMATION that means:
 
-- **Module** = `SBC`, `MRF`, `CFX` — the node.
-- **Sub-module** = `5_ADDITION_DELETION_MODIFICATION_OF_SIP_FILTER_MM_IN_SBC` — the activity.
-- **Task** = `Addition`, `Deletion`, `Modification` — the pieces of that activity.
+- **Module** = `SBC`, `MRF`, `CFX` — what CR_AUTOMATION calls a node.
+- **Sub-module** = `5_ADDITION_DELETION_MODIFICATION_OF_SIP_FILTER_MM_IN_SBC` — what they
+  call an activity.
+- **Sub-activity** = `Addition`, `Deletion`, `Modification` — the pieces of that activity.
 
 Two things were settled on 10 Sept:
 
 - **There is no grouping level between organisation and project.** Projects sit directly
   under the organisation. (I started building a "tag" level and removed it again. Noted
   here so nobody rebuilds it by mistake.)
-- **Node types are chosen per project**, by that project's admin. This already works today.
+- **Modules are chosen per project**, by that project's admin. This already works today.
 
 ### The words in the code do not match
 
 The code uses different names. This has to be fixed, and it touches most files.
 
-| The code says | It really means | Note |
+**Done in the Java service and its UI on 11 Sept** (see section 4); still to do in
+`mtms-static`.
+
+| It used to say | It says now | What it is |
 |---|---|---|
-| `node_type` — just a text label | **Module** | Today it is only a grouping label, not a real thing in its own right |
-| `Module` — a node + activity pair | **Sub-module** | This is one row on the matrix |
-| `Subactivity` | **Task** | Needs a final name. "Step" is taken by the new feature below |
+| `node_type` — a text label | `Module` | A record of its own now, so a checklist, owners and a discussion can hang off it |
+| `Module` — a node + activity pair | `SubModule` | One row on the matrix |
+| `Subactivity` | `SubActivity` | The pieces of one activity |
 
 **Also needed: every project picks its own words.** CR_AUTOMATION says "node" and
 "activity". Another team will say something else entirely. So a project stores the names it
@@ -156,33 +160,124 @@ ever made, and the comments people wrote on it.
 | Can the admin add new roles? | **Yes.** Roles become something the admin sets up, not a fixed list in the code |
 | What happens when a step is deleted? | **Soft delete.** It disappears from the screens, but its history and comments are kept |
 
-### Still to decide
+Settled 11 Sept:
 
-1. **Can steps sit on a module, or only on a sub-module?** The examples are all
-   sub-modules. If a module can have its own steps too, does it add them up from its
-   sub-modules the way the matrix does, or keep its own separate list?
+| Question | Answer |
+|---|---|
+| Which level does a checklist attach to? | **The lowest one that exists.** A module with no sub-modules holds it itself; once it has sub-modules, they hold it instead. Same rule the matrix already uses |
+| And when an activity is split into sub-activities? | **On the activity by default.** An admin can push it down to the sub-activities for the ones that genuinely differ |
+| What states can a step be in? | **Three** — not done, done, **blocked**. Blocked needs a written reason, otherwise it tells nobody anything |
+| Who can tick, who can comment? | **Ticking is role-gated. Commenting is not** — anyone on the project can comment, stakeholders included |
+| Can an admin tick for someone else? | **Yes, and the history records it as an override** — "Nitin ticked this on behalf of QA", never pretending QA checked it |
+| Are owners real accounts? | **Yes.** An owner points at a person who can sign in. This is the only thing that makes notifications, @mentions and "my open steps" possible |
+| Are discussions shared between projects? | **No, private to the project.** Same boundary the rest of the app keeps. People write freely when they know who is reading |
+| What is the third level called? | **Sub-activity** — unchanged, to keep the churn down |
+| What order do we build in? | **Settle the model, then write one MySQL schema in its final shape.** Nothing to migrate later |
 
-2. **Can an admin tick a step on someone else's behalf?** Someone is on leave and the
-   release is stuck. If yes, the history must show it was an admin override — otherwise the
-   record claims the right person checked it when they did not.
+### Still open
 
-3. **Is a step just ticked or not ticked, or can it have other states?** Real checklists
-   need **not applicable** and **blocked** — a step that cannot be ticked but is not
-   outstanding either.
-
-4. **Who can read the comments on a step?** The role controls who can *write*. Is reading
-   open to everyone on the project?
-
-5. **Setting up 200 sub-modules by hand will not happen.** Needs a way to apply one list to
+1. **Setting up 200 sub-modules by hand will not happen.** Needs a way to apply one list to
    every sub-module of a node at once, and a default list for newly created sub-modules.
 
-6. **Nobody gets told anything.** If step 2 waits for step 1, someone has to notice step 1
+2. **Nobody gets told anything.** If step 2 waits for step 1, someone has to notice step 1
    was ticked. A strict order makes notifications a requirement, not a nice extra.
 
-7. **Too many settings is its own problem.** The app will soon have columns, environments,
+3. **Too many settings is its own problem.** The app will soon have columns, environments,
    stages, steps, configurations and roles — all adjustable. A settings screen nobody can
    understand is how a flexible product loses the team that only wanted a checklist. Worth
    a deliberate pass on what to hide until it is needed.
+
+---
+
+## 3a. The model, written out
+
+This is what the MySQL schema gets built from. Table names are what the code will use;
+what the screens *call* them is set per project (section 1).
+
+### The one big change: a module becomes a real thing
+
+Today a node is only a piece of text on a row (`node_type = 'SBC'`). It has to become a
+real record, because three of the new features hang off it: a module can hold a checklist,
+a module can have owners, and a module can have a discussion. None of that can attach to a
+piece of text.
+
+| New table | Was | Holds |
+|---|---|---|
+| `modules` | `node_types`, a list of strings | `SBC`, `MRF`, `CFX` — one row each, per project |
+| `sub_modules` | `modules` | `5_ADDITION_DELETION_...` — points at its module |
+| `sub_activities` | `subactivities` | `Addition`, `Deletion`, `Modification` |
+
+The matrix cells move with them: a cell is now `(sub_module, sub_activity, column)`.
+
+### Steps
+
+```
+step_definitions          the library. Written once, used anywhere
+  project, name, description, archived_at
+
+step_definition_roles     who may tick it — several roles allowed
+  step_definition, role                    ("Received CIQ" → SME, Product)
+
+step_lists                one named, ordered configuration, attached to one thing
+  project, name                            ("config1")
+  target_type, target                      module | sub_module | sub_activity
+  enforce_order                            admin's choice, per list
+  archived_at
+
+step_list_entries         which steps are in it, and in what order
+  step_list, step_definition, order_index  ← the order lives HERE, not on the step
+
+step_records              where each entry stands right now
+  entry, state                             todo | done | blocked
+  blocked_reason, changed_by, changed_at
+
+step_events               every tick and un-tick ever made. Never deleted
+  entry, from_state, to_state, by_user, at
+  is_override, override_reason
+
+step_comments             anyone on the project may write one
+  entry, author, body, created_at, archived_at
+```
+
+Three points worth keeping in mind while building it:
+
+- **The order is on `step_list_entries`, not on `step_definitions`.** That is what lets the
+  same step be first in one list and third in another.
+- **`step_records` is only a fast lookup.** `step_events` is the truth, and it is
+  append-only. If they ever disagree, the events win.
+- **Nothing here is ever hard-deleted.** `archived_at` hides a row; the history under it
+  stays.
+
+### Owners
+
+```
+owners
+  project, scope_type, scope             module | sub_module | sub_activity
+  role                                   empty = a general owner, not tied to a role
+  user
+```
+
+Several rows means several owners. That covers all three of the things asked for at once:
+different owners at different levels, owners per role, and more than one of each.
+
+### Discussions
+
+```
+threads          project, scope_type, scope, topic, created_by, archived_at
+thread_comments  thread, author, body, created_at, edited_at, archived_at
+mentions         comment, user                  ← so people actually get told
+```
+
+### Per-project wording
+
+```
+projects
+  + module_label            "Node"
+  + sub_module_label        "Activity"
+  + sub_activity_label      "Sub-activity"
+```
+
+Every screen reads these instead of having the words written into it.
 
 ---
 
@@ -190,7 +285,42 @@ ever made, and the comments people wrote on it.
 
 Roughly in the order that makes sense. Size is a rough guess.
 
-### Move the database to MySQL · medium
+### Move the database to MySQL · **done 11 Sept**
+
+Verified against a real MySQL 8.0.40, not reasoned about. Docker is unusable on this machine
+(the daemon runs, but pulling an image is refused — "Membership in the [nokiasam]
+organization is required"), so `scripts/mysql-dev.sh` downloads the standalone server zip,
+which needs no install and no admin rights. `./scripts/mysql-dev.sh schema` sets it all up.
+
+Four things only a running server would have found:
+
+1. **InnoDB refuses `ON DELETE CASCADE` on a column that a STORED generated column is built
+   from.** All three NULL-folding columns are built from cascading foreign keys. They are
+   `VIRTUAL` now, which InnoDB allows, and the reason is written in the schema so nobody
+   tidies it back.
+2. **Connector/J answers a `java.util.UUID` parameter by writing Java serialisation bytes**
+   (`AC ED 00 05 ...`) into the column. It compiles anywhere, because `JdbcTemplate` takes
+   `Object...`. Every query now goes through `Db`, a thin wrapper that converts the whole
+   argument list, so there is no un-converted path left to reach.
+3. **`LAST_INSERT_ID()` is per-connection.** The MySQL replacement for `RETURNING` read 0
+   whenever the update and the select landed on different connections — every project would
+   have shared cache key 0 and an optimistic-concurrency token that never moved. Both
+   statements are pinned to one connection explicitly rather than relying on the caller
+   being inside a transaction.
+4. Assorted: `key` is reserved, MySQL cannot read the table it is inserting into from a
+   `VALUES` subquery, and `= ANY (array)` has no MySQL equivalent (the allowed set travels
+   as the JSON the column already stores).
+
+**The JDBC layer had never been executed** — before these changes or after. It was written,
+type-checked and reviewed, and every test ran against the in-memory repositories.
+`JdbcRepositoriesMySqlTest` is the first thing that has ever run it: 12 tests covering the
+JSON round trips, the UTC timestamp round trip, the node/sub-module split, cell upserts on
+both the own row and a sub-activity's, and the revision counter. It skips rather than fails
+where there is no database.
+
+**58 tests pass** (46 domain + 12 integration).
+
+### The MySQL move, as it was planned · reference
 
 Prod is going to MySQL. The database code is currently written for PostgreSQL. Nothing here
 is difficult, but all of it needs care.
@@ -209,10 +339,55 @@ is difficult, but all of it needs care.
 **To decide:** rewrite the existing schema file for MySQL, or add a second one alongside
 it? Rewriting is much cleaner if no PostgreSQL database is live yet — and none is.
 
-### Rename the hierarchy, and let each project pick its words · medium
+### Rename the hierarchy · **done 11 Sept, in the Java service and its UI**
 
-See section 1. Two parts: rename `Subactivity` in the code once its final name is agreed,
-and store per-project display names for all three levels.
+The code now uses the words in section 1. A row on the matrix is a **sub-module**, the thing
+it sits on is a **module**, and the pieces below it are **sub-activities**.
+
+What changed: about 1,000 names across the Java service and `mtms-frontend`, the JSON the
+two exchange (`modules` → `sub_modules`, `node_type` → `module_name`, `subactivity_*` →
+`sub_activity_*`), and the web addresses (`/api/v1/modules` → `/api/v1/sub-modules`, and the
+page a person opens is now `/sub-modules/{id}`).
+
+Two things were deliberately **not** renamed, because they are written into saved rows rather
+than into code. Renaming them would be a change to existing data, and it buys nothing:
+
+- **Permission keys** stay `module.create`, `module.edit`, `module.clone`. Only the words
+  shown on screen changed.
+- **Audit scopes and event names** stay `module` and `module.closed`.
+
+**Checked properly, not assumed.** The service was started, signed into and driven through a
+browser: the dashboard, the matrix with all 18 rows and 26 columns, and a sub-module's own
+page all render from the renamed service with nothing in the browser's error log.
+
+#### Three bugs this turned up, all in code the MySQL pass had reported as finished
+
+These were real and would have stopped the application dead on its first request. They were
+never caught because the tests written during the MySQL work checked each storage method on
+its own and never checked **the read that builds a page** — which is assembled from seven
+queries, and is exactly where a missed rename hides.
+
+1. **Loading a project was never converted to MySQL.** It still asked for tables that no
+   longer exist under those names. Every page in the application depends on it.
+2. **Finding a project by its short key** was missing the quoting MySQL needs around the word
+   `key`, which is reserved.
+3. **The count beside each project in the switcher** counted modules where it meant to count
+   sub-modules — so a project with twelve activities on one node read as 1.
+
+Four tests now cover that composite read, including that one project's load cannot see
+another's rows. **62 tests pass** (46 domain + 16 integration).
+
+#### Still to do here
+
+- **`mtms/` and `mtms-static/` still use the old words.** Both are self-contained — their own
+  screens talk to their own code — so both still work correctly today. They are simply written
+  in a different vocabulary from the service now. `mtms-static` is the one shown to clients,
+  so it is worth doing; `mtms/` is the folder already marked for deletion, and renaming it
+  before deciding that would be wasted work.
+- **Each project picking its own words** is the other half of section 1 and is not started.
+  The three columns exist in the database (`module_label`, `sub_module_label`,
+  `sub_activity_label`); nothing reads them yet, so every screen still shows the built-in
+  words.
 
 ### Discussions on modules and sub-modules · medium
 
@@ -316,14 +491,31 @@ by how much I think each one is worth.
 
 ---
 
-## 6. Open questions, shortest list
+## 6. What happens next
 
-1. What is the third level called — task, item, action?
-2. Can steps sit on a module, or only on a sub-module?
-3. Can an admin tick a step for someone else, and how is that recorded?
-4. Is a step only ticked / not ticked, or does it need "not applicable" and "blocked"?
-5. Are discussions private to a project, or shared across projects using the same node?
-6. Do owners become real user accounts now, or stay as typed-in names for the moment?
-7. MySQL: rewrite the schema file, or add a second one?
-8. What gets built first? MySQL blocks going live. Steps are the feature the product needs.
-   They do not depend on each other.
+The model is settled (section 3a). The order agreed on 11 Sept:
+
+1. **Write the MySQL schema in its final shape** — new tables, renamed tables, steps,
+   owners, discussions, per-project wording, all in one file. Nothing to migrate later,
+   because nothing is live yet.
+2. **Port the database code** to MySQL and get the tests green.
+3. **Then build the features** into a database that already fits them.
+
+### Nothing is blocking
+
+Everything needed to start is decided. Two things will need an answer *during* the build,
+but neither stops it starting:
+
+- **Bulk set-up** (section 3, still open 1) — needed before a real team with 200
+  sub-modules can use it, not before the schema is written.
+- **Notifications** (still open 2) — a strict step order is much less useful without them,
+  but the steps work fine on their own first.
+
+### Worth agreeing before the schema is written
+
+One small thing, easy to get wrong later: **does a project keep working if its admin
+deletes a role that steps are gated to?** The rest of the app already answers this kind of
+question the same way every time — the record stands, the configuration change does not
+erase it. So: the step keeps its ticks and its history, and shows as *needing a role that
+no longer exists* until an admin picks a new one. Say if you would rather block the role
+from being deleted at all.

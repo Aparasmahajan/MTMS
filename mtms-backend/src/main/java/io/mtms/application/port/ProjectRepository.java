@@ -24,8 +24,8 @@ public interface ProjectRepository {
 
   Optional<Projects.Project> findByKey(UUID tenantId, String key);
 
-  /** Module counts for the project switcher, in one query rather than one per project. */
-  java.util.Map<UUID, Integer> moduleCounts(UUID tenantId);
+  /** SubModule counts for the project switcher, in one query rather than one per project. */
+  java.util.Map<UUID, Integer> subModuleCounts(UUID tenantId);
 
   void insert(Projects.Project project);
 

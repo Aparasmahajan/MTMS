@@ -34,7 +34,7 @@ const HIERARCHY = [
   {
     level: 'Project',
     who: 'Custom roles',
-    can: 'Any mix of permissions: who may create modules, update deliverables, sign off FNI, log defects.',
+    can: 'Any mix of permissions: who may create sub-modules, update deliverables, sign off FNI, log defects.',
   },
 ];
 

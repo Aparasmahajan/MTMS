@@ -29,8 +29,8 @@ class PromotionGateTest {
         UUID.randomUUID(), UUID.randomUUID(), key, key, key, List.of("notloaded", "prod"), true, 0);
   }
 
-  private static Views.ModuleView module(int readiness, Map<String, String> cells) {
-    return new Views.ModuleView(
+  private static Views.SubModuleView module(int readiness, Map<String, String> cells) {
+    return new Views.SubModuleView(
         UUID.randomUUID().toString(),
         "CFX",
         "module",
@@ -103,13 +103,13 @@ class PromotionGateTest {
   }
 
   @Test
-  @DisplayName("no modules blocks rather than vacuously passing")
-  void noModulesBlocks() {
+  @DisplayName("no subModules blocks rather than vacuously passing")
+  void noSubModulesBlocks() {
     DriftViews.PromotionGateView gate =
         PromotionGate.evaluate(List.of(column("fni"), column("access")), List.of(), List.of(row(Drift.Verdict.IN_STEP)));
 
     assertFalse(gate.checks().get(0).passed(), "nothing to promote is not a reason to promote");
-    assertEquals("no modules", gate.checks().get(0).detail());
+    assertEquals("no subModules", gate.checks().get(0).detail());
   }
 
   @Test
