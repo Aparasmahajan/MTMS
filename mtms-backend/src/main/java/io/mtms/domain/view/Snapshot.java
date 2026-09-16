@@ -34,6 +34,15 @@ public record Snapshot(
      * because that is where they are read.
      */
     List<StepViews.StepDefinitionView> stepLibrary,
+    /**
+     * The reader's own inbox, newest unread first.
+     *
+     * <p>Carried on the snapshot rather than fetched separately so that a tick which unblocks
+     * somebody updates their badge in the same round trip that updates the checklist — and so
+     * there is no second request firing on every page.
+     */
+    List<Views.NotificationView> notifications,
+    int unreadNotifications,
     DriftViews.DriftView drift) {
 
   /**

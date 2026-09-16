@@ -41,6 +41,8 @@ export interface SubActivityView {
    * activity above; these are the ones an admin pushed down because this piece differs.
    */
   step_lists: StepListView[];
+  owners: OwnerGroupView[];
+  threads: ThreadView[];
 }
 
 export interface LinkView {
@@ -78,6 +80,13 @@ export interface SubModuleView {
    * specific process one use case follows, and neither replaces the other.
    */
   step_lists: StepListView[];
+  /**
+   * One overall owner plus one per team. Separate from `owner` above, which is the single
+   * typed-in name the matrix still shows: that one is a string and can never be sent anything,
+   * these are real accounts.
+   */
+  owners: OwnerGroupView[];
+  threads: ThreadView[];
   last_run: RunView | null;
 }
 
@@ -127,6 +136,16 @@ export interface RoleView {
   name: string;
   note: string;
   permissions: PermissionKey[];
+  /** Shipped with the organisation. Marks where it came from; its permissions are still editable. */
+  is_system: boolean;
+  /**
+   * Not offered in any picker — owner teams, "who may tick this step", the member role selector.
+   * Still sent, because rows already pointing at it have to render with a name, and an admin
+   * needs something to click to bring it back. **Every picker must filter on this.**
+   */
+  hidden: boolean;
+  /** How many people hold it. Hiding a role somebody holds is refused; the screen says so first. */
+  member_count: number;
 }
 
 export interface OrgUserView {
@@ -248,6 +267,88 @@ export interface StepListView {
   entries: StepEntryView[];
 }
 
+
+// ---------------------------------------------------------------------------
+// Owners and discussions
+// ---------------------------------------------------------------------------
+
+/** One person owning one thing, in one capacity. */
+/**
+ * One message in the reader's inbox.
+ *
+ * `link` is a path, not a URL: the service does not know its own public address, and the client
+ * reading this is already at the right origin.
+ */
+export interface NotificationView {
+  id: string;
+  kind: 'mention' | 'step.blocked' | 'step.ready';
+  title: string;
+  body: string;
+  link: string;
+  at: string;
+  unread: boolean;
+}
+
+export interface OwnerView {
+  /** The row, which is what gets removed — not the user id: one person can own for two teams. */
+  owner_id: string;
+  user_id: string;
+  display_name: string;
+  email: string;
+}
+
+/**
+ * The owners of one thing, grouped by team.
+ *
+ * Only groups with somebody in them are sent, which is what makes "a project with no SME team
+ * simply does not show an SME row" true without anything deciding it. `role_id` is null for the
+ * overall owner — the one name to ask when you do not know whose problem it is.
+ */
+export interface OwnerGroupView {
+  role_id: string | null;
+  label: string;
+  people: OwnerView[];
+}
+
+export interface ThreadCommentView {
+  id: string;
+  author: string;
+  body: string;
+  created_at: string;
+  mine: boolean;
+  /** The reader was named in it. Until there is a mail transport, showing it is all we can do. */
+  mentions_me: boolean;
+}
+
+export interface ThreadView {
+  id: string;
+  topic: string;
+  opened_by: string;
+  opened_at: string;
+  mine: boolean;
+  mentions_me: boolean;
+  comments: ThreadCommentView[];
+}
+
+/**
+ * A module, with the counts the landing page and the module screen read.
+ *
+ * It has an id now, which is what lets a checklist, a set of owners and a discussion attach to
+ * it — none of which could attach to the name it used to be.
+ */
+export interface ModuleView {
+  id: string;
+  name: string;
+  description: string;
+  order_index: number;
+  sub_module_count: number;
+  /** Sub-modules with every counted deliverable done — the matrix's own definition of finished. */
+  in_prod: number;
+  readiness: number;
+  owners: OwnerGroupView[];
+  threads: ThreadView[];
+}
+
 export interface DriftRowView {
   id: string;
   /** The matrix column this deliverable is tracked as. */
@@ -323,6 +424,8 @@ export interface ColumnView extends DeliverableColumn {
 
 export interface ConfigView {
   columns: ColumnView[];
+  /** The modules as records, with ids. `module_names` stays for everything that only wants names. */
+  modules: ModuleView[];
   module_names: string[];
   stages: { id: string; label: string }[];
   owners: string[];
@@ -399,6 +502,13 @@ export interface Snapshot {
   invitations: InvitationView[];
   /** The step library, for the Configure screen and the "add a step" pickers. */
   step_library: StepDefinitionView[];
+  /**
+   * The reader's own inbox, unread first. It rides on the snapshot so a tick that unblocks
+   * somebody updates their badge in the same round trip — and so no second request fires on
+   * every page.
+   */
+  notifications: NotificationView[];
+  unread_notifications: number;
   drift: {
     rows: DriftRowView[];
     warnings: DriftWarningView[];

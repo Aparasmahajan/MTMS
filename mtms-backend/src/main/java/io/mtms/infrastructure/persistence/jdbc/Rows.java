@@ -5,9 +5,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.mtms.domain.PermissionKey;
 import io.mtms.domain.model.Audit;
 import io.mtms.domain.model.Defects;
+import io.mtms.domain.model.Discussions;
 import io.mtms.domain.model.Drift;
 import io.mtms.domain.model.Modules;
+import io.mtms.domain.model.Notifications;
+import io.mtms.domain.model.Owners;
 import io.mtms.domain.model.Projects;
+import io.mtms.domain.model.Scope;
 import io.mtms.domain.model.Steps;
 import io.mtms.domain.model.Tenancy;
 import java.util.LinkedHashSet;
@@ -74,7 +78,8 @@ final class Rows {
             rs.getString("note"),
             rs.getString("description"),
             rs.getBoolean("is_system"),
-            Set.copyOf(permissions));
+            Set.copyOf(permissions),
+            Sql.instant(rs, "archived_at"));
       };
 
   static final RowMapper<Tenancy.Membership> MEMBERSHIP =
@@ -153,6 +158,16 @@ final class Rows {
               rs.getString("label"),
               rs.getString("short_label"),
               rs.getBoolean("enabled"));
+
+  static final RowMapper<Modules.Module> MODULE =
+      (rs, n) ->
+          new Modules.Module(
+              Sql.uuid(rs, "id"),
+              Sql.uuid(rs, "project_id"),
+              rs.getString("name"),
+              rs.getString("description"),
+              rs.getInt("order_index"),
+              Sql.instant(rs, "archived_at"));
 
   static final RowMapper<Modules.SubModule> SUB_MODULE =
       (rs, n) ->
@@ -328,6 +343,66 @@ final class Rows {
   }
 
 
+  static final RowMapper<Notifications.Notification> NOTIFICATION =
+      (rs, n) ->
+          new Notifications.Notification(
+              Sql.uuid(rs, "id"),
+              Sql.uuid(rs, "tenant_id"),
+              Sql.uuid(rs, "project_id"),
+              Sql.uuid(rs, "user_id"),
+              Notifications.Kind.fromWire(rs.getString("kind")),
+              rs.getString("title"),
+              rs.getString("body"),
+              rs.getString("link"),
+              Sql.instant(rs, "created_at"),
+              Sql.instant(rs, "read_at"),
+              Sql.instant(rs, "delivered_at"));
+
+  static final RowMapper<Discussions.Thread> THREAD =
+      (rs, n) ->
+          new Discussions.Thread(
+              Sql.uuid(rs, "id"),
+              Sql.uuid(rs, "project_id"),
+              Scope.fromWire(rs.getString("scope_type")),
+              Sql.uuid(rs, "scope_id"),
+              rs.getString("topic"),
+              Sql.uuid(rs, "created_by"),
+              orUnknown(rs.getString("created_by_name")),
+              Sql.instant(rs, "created_at"),
+              Sql.instant(rs, "archived_at"));
+
+  static final RowMapper<Discussions.Comment> THREAD_COMMENT =
+      (rs, n) ->
+          new Discussions.Comment(
+              Sql.uuid(rs, "id"),
+              Sql.uuid(rs, "thread_id"),
+              Sql.uuid(rs, "author_id"),
+              orUnknown(rs.getString("author_name")),
+              rs.getString("body"),
+              Sql.instant(rs, "created_at"),
+              Sql.instant(rs, "edited_at"),
+              Sql.instant(rs, "archived_at"));
+
+  static final RowMapper<Discussions.Mention> MENTION =
+      (rs, n) ->
+          new Discussions.Mention(
+              Sql.uuid(rs, "comment_id"),
+              Sql.uuid(rs, "user_id"),
+              rs.getString("source"),
+              Sql.instant(rs, "created_at"));
+
+  static final RowMapper<Owners.Owner> OWNER =
+      (rs, n) ->
+          new Owners.Owner(
+              Sql.uuid(rs, "id"),
+              Sql.uuid(rs, "project_id"),
+              Scope.fromWire(rs.getString("scope_type")),
+              Sql.uuid(rs, "scope_id"),
+              // null = the overall owner, as opposed to a team's
+              Sql.uuid(rs, "role_id"),
+              Sql.uuid(rs, "user_id"),
+              Sql.instant(rs, "created_at"));
+
   // --- Steps -----------------------------------------------------------------
   //
   // The definition mapper leaves `roleIds` empty: the allowed roles are a separate table and
@@ -352,7 +427,7 @@ final class Rows {
               Sql.uuid(rs, "id"),
               Sql.uuid(rs, "project_id"),
               rs.getString("name"),
-              Steps.ScopeType.fromWire(rs.getString("scope_type")),
+              Scope.fromWire(rs.getString("scope_type")),
               Sql.uuid(rs, "scope_id"),
               rs.getBoolean("enforce_order"),
               Sql.instant(rs, "archived_at"),

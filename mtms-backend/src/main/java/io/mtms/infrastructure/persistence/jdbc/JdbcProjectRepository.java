@@ -3,6 +3,8 @@ package io.mtms.infrastructure.persistence.jdbc;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.mtms.application.port.ProjectData;
 import io.mtms.application.port.ProjectRepository;
+import io.mtms.application.port.DiscussionRepository;
+import io.mtms.application.port.OwnerRepository;
 import io.mtms.application.port.StepRepository;
 import io.mtms.domain.model.Projects;
 import io.mtms.domain.model.Tenancy;
@@ -29,11 +31,16 @@ public class JdbcProjectRepository implements ProjectRepository {
   private final Db jdbc;
   private final ObjectMapper mapper;
   private final StepRepository steps;
+  private final OwnerRepository owners;
+  private final DiscussionRepository discussions;
 
-  public JdbcProjectRepository(JdbcTemplate jdbc, ObjectMapper mapper, StepRepository steps) {
+  public JdbcProjectRepository(
+      JdbcTemplate jdbc, ObjectMapper mapper, StepRepository steps, OwnerRepository owners, DiscussionRepository discussions) {
     this.jdbc = new Db(jdbc);
     this.mapper = mapper;
     this.steps = steps;
+    this.owners = owners;
+    this.discussions = discussions;
   }
 
   /**
@@ -138,7 +145,9 @@ public class JdbcProjectRepository implements ProjectRepository {
             // Six more indexed reads, in the same round as the rest. The alternative is a query
             // per sub-module behind the checklist panel, which is the N+1 this record exists to
             // make impossible.
-            steps.load(projectId)));
+            steps.load(projectId),
+            owners.load(projectId),
+            discussions.load(projectId)));
   }
 
   @Override
@@ -279,6 +288,11 @@ public class JdbcProjectRepository implements ProjectRepository {
     return revision == null ? 0L : revision;
   }
 
+  @Override
+  public void updateModuleDescription(UUID moduleId, String description) {
+    jdbc.update("UPDATE modules SET description = ? WHERE id = ?", description, moduleId);
+  }
+
   // --- Columns ---------------------------------------------------------------
 
   @Override
@@ -416,14 +430,14 @@ public class JdbcProjectRepository implements ProjectRepository {
 
     return new Projects.ProjectConfig(
         projectId,
-        // Modules are rows in their own table now, not a list of strings, because a checklist,
-        // owners and a discussion all have to hang off one. Read back as the names the config
-        // screen edits. Archived ones are left out — hidden, but their sub-modules keep their
+        // Modules are rows in their own table, and they arrive as records rather than names:
+        // a checklist, owners and a discussion all hang off one, and none of those can hang off
+        // a piece of text. Archived ones are left out — hidden, but their sub-modules keep their
         // work, and switching the name back on finds it again.
         jdbc.query(
-            "SELECT name FROM modules WHERE project_id = ? AND archived_at IS NULL"
+            "SELECT * FROM modules WHERE project_id = ? AND archived_at IS NULL"
                 + " ORDER BY order_index, name",
-            (rs, n) -> rs.getString("name"),
+            Rows.MODULE,
             projectId),
         stageLabels.stream().map(label -> new Projects.Stage(stageId(label), label)).toList(),
         List.copyOf(lists.getOrDefault("owners", List.of())),

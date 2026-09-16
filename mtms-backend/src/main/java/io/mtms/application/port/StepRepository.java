@@ -1,5 +1,6 @@
 package io.mtms.application.port;
 
+import io.mtms.domain.model.Scope;
 import io.mtms.domain.model.Steps;
 import java.time.Instant;
 import java.util.List;
@@ -56,7 +57,7 @@ public interface StepRepository {
   Optional<Steps.StepList> list(UUID projectId, UUID listId);
 
   /** Every list attached to one thing, archived ones included — the caller filters. */
-  List<Steps.StepList> listsFor(UUID projectId, Steps.ScopeType scopeType, UUID scopeId);
+  List<Steps.StepList> listsFor(UUID projectId, Scope scopeType, UUID scopeId);
 
   void insertList(Steps.StepList list);
 

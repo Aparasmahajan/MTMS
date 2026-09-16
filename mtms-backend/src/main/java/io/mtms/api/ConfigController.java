@@ -52,6 +52,34 @@ public class ConfigController {
     return ApiResponse.ok(snapshots.of(actor));
   }
 
+  /**
+   * @param groupKey the deliverable — {@code filecr}. Each column under it is keyed
+   *     {@code filecr_lab}, {@code filecr_prod} and so on.
+   * @param groupLabel the header spanning them — {@code FILECR}. Twelve characters, because the
+   *     matrix has to fit a row of these across a laptop screen.
+   */
+  public record GroupedColumnRequest(
+      @NotBlank String groupKey,
+      @NotBlank String groupLabel,
+      @NotBlank String full,
+      List<String> allowed) {}
+
+  /**
+   * Adds a deliverable tracked separately on every environment.
+   *
+   * <p>A parent header with one column under it per environment — the shape that previously
+   * existed only because the seed data was written that way. One call rather than one per
+   * environment: the columns are a set, and half of them is a header the matrix cannot draw.
+   */
+  @PostMapping("/columns/grouped")
+  public ApiResponse.Success<Snapshot> addGroupedColumn(
+      @RequestBody GroupedColumnRequest request, Actor actor) {
+
+    config.addEnvironmentColumns(
+        actor, request.groupKey(), request.groupLabel(), request.full(), request.allowed());
+    return ApiResponse.ok(snapshots.of(actor));
+  }
+
   @PatchMapping("/columns/{key}")
   public ApiResponse.Success<Snapshot> updateColumn(
       @PathVariable("key") String key, @RequestBody ColumnRequest request, Actor actor) {
@@ -65,6 +93,19 @@ public class ConfigController {
   public ApiResponse.Success<Snapshot> deleteColumn(
       @PathVariable("key") String key, Actor actor) {
     config.deleteColumn(actor, key);
+    return ApiResponse.ok(snapshots.of(actor));
+  }
+
+  public record ModuleRequest(String description) {}
+
+  /** The team's own note about what a module is — the only editable field a module has. */
+  @PatchMapping("/modules/{id}")
+  public ApiResponse.Success<Snapshot> setModuleDescription(
+      @PathVariable("id") java.util.UUID moduleId,
+      @RequestBody ModuleRequest request,
+      Actor actor) {
+
+    config.setModuleDescription(actor, moduleId, request.description());
     return ApiResponse.ok(snapshots.of(actor));
   }
 

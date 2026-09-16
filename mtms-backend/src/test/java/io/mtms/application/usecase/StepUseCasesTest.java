@@ -9,10 +9,14 @@ import io.mtms.application.ServiceException;
 import io.mtms.application.port.StepData;
 import io.mtms.domain.PermissionKey;
 import io.mtms.domain.model.Modules;
+import io.mtms.domain.model.Scope;
 import io.mtms.domain.model.Steps;
 import io.mtms.domain.model.Tenancy;
 import io.mtms.infrastructure.persistence.memory.InMemoryAccessRepository;
 import io.mtms.infrastructure.persistence.memory.InMemoryDatabase;
+import io.mtms.infrastructure.persistence.memory.InMemoryDiscussionRepository;
+import io.mtms.infrastructure.persistence.memory.InMemoryNotificationRepository;
+import io.mtms.infrastructure.persistence.memory.InMemoryOwnerRepository;
 import io.mtms.infrastructure.persistence.memory.InMemoryProjectRepository;
 import io.mtms.infrastructure.persistence.memory.InMemoryStepRepository;
 import io.mtms.infrastructure.persistence.memory.InMemorySubModuleRepository;
@@ -59,12 +63,25 @@ class StepUseCasesTest {
     subModules = new InMemorySubModuleRepository(db);
     access = new InMemoryAccessRepository(db);
 
-    InMemoryProjectRepository projects = new InMemoryProjectRepository(db, steps);
+    InMemoryProjectRepository projects =
+        new InMemoryProjectRepository(
+            db, steps, new InMemoryOwnerRepository(db), new InMemoryDiscussionRepository(db));
+    InMemoryOwnerRepository ownerRows = new InMemoryOwnerRepository(db);
+    NotificationUseCases notifier =
+        new NotificationUseCases(
+            new InMemoryNotificationRepository(db),
+            access,
+            // The default transport: writes a log line and reports that nothing was sent, which
+            // is what every deployment without a webhook does.
+            new io.mtms.infrastructure.notify.LoggingNotifier());
+
     useCases =
         new StepUseCases(
             steps,
             subModules,
             access,
+            ownerRows,
+            notifier,
             new MutationSupport(
                 new InMemorySupportRepositories.AuditEntries(db),
                 new InMemorySupportRepositories.Outbox(db),
@@ -120,13 +137,13 @@ class StepUseCasesTest {
             .toList();
 
     useCases.createList(
-        anand, Steps.ScopeType.SUB_MODULE, subModuleId, "config1", enforceOrder, definitions);
+        anand, Scope.SUB_MODULE, subModuleId, "config1", enforceOrder, definitions);
     return entryIds();
   }
 
   private List<UUID> entryIds() {
     StepData data = steps.load(projectId);
-    return data.resolve(Steps.ScopeType.SUB_MODULE, subModuleId).get(0).entries().stream()
+    return data.resolve(Scope.SUB_MODULE, subModuleId).get(0).entries().stream()
         .map(entry -> entry.entry().id())
         .toList();
   }
@@ -283,16 +300,16 @@ class StepUseCasesTest {
           new Modules.SubModule(
               other, projectId, "SBC", "147_OTHER", null, null, null, null, null, Instant.now()));
 
-      useCases.createList(anand, Steps.ScopeType.SUB_MODULE, subModuleId, "a", true, List.of(ciq, test, prod));
-      useCases.createList(anand, Steps.ScopeType.SUB_MODULE, other, "b", true, List.of(prod, test, ciq));
+      useCases.createList(anand, Scope.SUB_MODULE, subModuleId, "a", true, List.of(ciq, test, prod));
+      useCases.createList(anand, Scope.SUB_MODULE, other, "b", true, List.of(prod, test, ciq));
 
       StepData data = steps.load(projectId);
       assertEquals(
           "Received CIQ",
-          data.resolve(Steps.ScopeType.SUB_MODULE, subModuleId).get(0).entries().get(0).definition().name());
+          data.resolve(Scope.SUB_MODULE, subModuleId).get(0).entries().get(0).definition().name());
       assertEquals(
           "Received CIQ",
-          data.resolve(Steps.ScopeType.SUB_MODULE, other).get(0).entries().get(2).definition().name());
+          data.resolve(Scope.SUB_MODULE, other).get(0).entries().get(2).definition().name());
     }
 
     @Test
@@ -306,7 +323,7 @@ class StepUseCasesTest {
       useCases.archiveDefinition(admin(), definition);
 
       StepData data = steps.load(projectId);
-      assertTrue(data.resolve(Steps.ScopeType.SUB_MODULE, subModuleId).get(0).entries().isEmpty());
+      assertTrue(data.resolve(Scope.SUB_MODULE, subModuleId).get(0).entries().isEmpty());
       assertEquals(1, data.eventsOf(entries.get(0)).size());
     }
 

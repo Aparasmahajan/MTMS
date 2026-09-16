@@ -51,19 +51,9 @@ export default function DashboardPage() {
     );
   }
 
-  const byModule = config.module_names
-    .map((moduleName) => {
-      const rows = subModules.filter((subModule) => subModule.module_name === moduleName);
-      const average = rows.length
-        ? Math.round(rows.reduce((total, subModule) => total + subModule.readiness, 0) / rows.length)
-        : 0;
-      // "SBC — 12 of 19 in prod". Live in production means every counted deliverable is done,
-      // which is the same 100% the matrix and the FNI gate already agree on — not a second
-      // definition of finished that could drift away from theirs.
-      const inProd = rows.filter((subModule) => subModule.readiness === 100).length;
-      return { moduleName, count: rows.length, average, inProd };
-    })
-    .filter((entry) => entry.count > 0);
+  // Counted by the server now, so this screen and the module screen cannot disagree about what
+  // "in prod" means. It is the matrix's own definition: every counted deliverable done.
+  const byModule = config.modules.filter((entry) => entry.sub_module_count > 0);
 
   const closest = subModules
     .filter((subModule) => subModule.readiness > 0 && subModule.readiness < 100)
@@ -190,10 +180,10 @@ export default function DashboardPage() {
           <div className="bordered">
             {byModule.map((entry) => (
               <button
-                key={entry.moduleName}
+                key={entry.id}
                 type="button"
                 className="hoverable"
-                onClick={() => router.push(`/matrix?node=${encodeURIComponent(entry.moduleName)}`)}
+                onClick={() => router.push(`/modules/${entry.id}`)}
                 style={{
                   display: 'flex',
                   width: '100%',
@@ -217,10 +207,11 @@ export default function DashboardPage() {
                     textTransform: 'uppercase',
                   }}
                 >
-                  {entry.moduleName}
+                  {entry.name}
                 </span>
                 <span style={{ width: 96, flex: 'none', fontSize: 12, color: 'var(--color-neutral-600)' }}>
-                  {entry.count} {entry.count === 1 ? words.subModule.lower : words.subModule.lowerMany}
+                  {entry.sub_module_count}{' '}
+                  {entry.sub_module_count === 1 ? words.subModule.lower : words.subModule.lowerMany}
                 </span>
                 {/*
                   The question a PM opens this screen to ask. An average is a summary of how far
@@ -231,12 +222,12 @@ export default function DashboardPage() {
                 <span
                   className="tabular"
                   style={{ width: 92, flex: 'none', fontSize: 12, color: 'var(--color-neutral-700)' }}
-                  title={`${entry.inProd} of ${entry.count} ${entry.count === 1 ? words.subModule.lower : words.subModule.lowerMany} have every counted deliverable loaded in prod`}
+                  title={`${entry.in_prod} of ${entry.sub_module_count} ${entry.sub_module_count === 1 ? words.subModule.lower : words.subModule.lowerMany} have every counted deliverable loaded in prod`}
                 >
-                  {entry.inProd} of {entry.count} in prod
+                  {entry.in_prod} of {entry.sub_module_count} in prod
                 </span>
                 <span className="bar" style={{ flex: 1, height: 10 }} aria-hidden>
-                  <span style={{ width: `${entry.average}%` }} />
+                  <span style={{ width: `${entry.readiness}%` }} />
                 </span>
                 <span
                   className="tabular"
@@ -248,7 +239,7 @@ export default function DashboardPage() {
                     fontSize: 16,
                   }}
                 >
-                  {entry.average}%
+                  {entry.readiness}%
                 </span>
               </button>
             ))}

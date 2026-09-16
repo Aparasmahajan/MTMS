@@ -40,6 +40,9 @@ public interface ProjectRepository {
    */
   void updateVocabulary(UUID projectId, Projects.Vocabulary vocabulary);
 
+  /** The team's own note about what a module is. The only editable field a module has. */
+  void updateModuleDescription(UUID moduleId, String description);
+
   /**
    * Increments the project's revision and returns the new value.
    *

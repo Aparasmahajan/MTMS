@@ -45,6 +45,10 @@ class PromotionGateTest {
         cells.entrySet().stream()
             .map(e -> new Views.CellView(e.getKey(), e.getValue(), false, 0, null, null))
             .toList(),
+        // sub-activities, links, checklists, owners, topics — none of which the gate reads.
+        // Positional and long: the gate only cares about readiness and the cells above.
+        List.of(),
+        List.of(),
         List.of(),
         List.of(),
         List.of(),

@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { notFound, useParams } from 'next/navigation';
 import { useTracker } from '@/components/TrackerProvider';
 import { Blueprint, SectionHeading, StatusMarker } from '@/components/primitives';
+import { DiscussionPanel } from '@/components/DiscussionPanel';
+import { OwnersPanel } from '@/components/OwnersPanel';
 import { StepChecklist } from '@/components/StepChecklist';
 import { send } from '@/lib/client/api';
 import { optimisticAdvance } from '@/lib/client/optimistic';
@@ -391,6 +393,17 @@ export function SubModuleScreen() {
               </div>
             ) : null}
           </Blueprint>
+
+          {/*
+            Owners first, then the checklist, then the deliverables. That is the order the
+            questions get asked in: who is on this, what does the process say has to happen,
+            and what is actually loaded.
+          */}
+          <OwnersPanel
+            scopeType="sub_module"
+            scopeId={subModule.id}
+            groups={subModule.owners}
+          />
 
           {/*
             Steps sit above the deliverables, not inside them. The matrix answers "is it
@@ -791,7 +804,13 @@ export function SubModuleScreen() {
         </div>
 
         <div>
-          <SectionHeading first>Change history</SectionHeading>
+          <DiscussionPanel
+            scopeType="sub_module"
+            scopeId={subModule.id}
+            threads={subModule.threads}
+          />
+
+          <SectionHeading>Change history</SectionHeading>
           <div className="bordered">
             {snapshot.audit
               .filter((entry) => entry.sub_module_id === subModule.id)

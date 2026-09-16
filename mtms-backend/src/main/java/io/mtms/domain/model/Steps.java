@@ -74,40 +74,6 @@ public final class Steps {
   }
 
   /**
-   * What a checklist hangs off.
-   *
-   * <p>The rule is the lowest level that exists — the same one the matrix already uses. A module
-   * with no sub-modules holds its own checklist; once it has sub-modules, they hold it instead.
-   * Within an activity split into sub-activities the list sits on the activity by default, and
-   * an admin pushes it down only to the sub-activities that genuinely differ.
-   */
-  public enum ScopeType {
-    MODULE("module"),
-    SUB_MODULE("sub_module"),
-    SUB_ACTIVITY("sub_activity");
-
-    private final String wire;
-
-    ScopeType(String wire) {
-      this.wire = wire;
-    }
-
-    public String wire() {
-      return wire;
-    }
-
-    public static ScopeType fromWire(String wire) {
-      String value = wire == null ? "" : wire.trim().toLowerCase(Locale.ROOT).replace('-', '_');
-      for (ScopeType scope : values()) {
-        if (scope.wire.equals(value)) {
-          return scope;
-        }
-      }
-      throw new IllegalArgumentException("Unknown scope: " + wire);
-    }
-  }
-
-  /**
    * One step in the library, written once and used anywhere.
    *
    * @param roleIds who may tick it. Several are allowed — "Received CIQ" is SME or Product — and
@@ -148,7 +114,7 @@ public final class Steps {
       UUID id,
       UUID projectId,
       String name,
-      ScopeType scopeType,
+      Scope scopeType,
       UUID scopeId,
       boolean enforceOrder,
       Instant archivedAt,

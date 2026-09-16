@@ -12,6 +12,30 @@ cd ~/mtms && set -a && . ./api.env && set +a && nohup java -jar mtms-api-1.0.0-S
 cd ~/mtms/frontend/dist-frontend && PORT=6010 HOSTNAME=0.0.0.0 nohup node server.js > ../web.log 2>&1 &
 
 
+cd ~/mtms/backend && set -a && . ./mtms.env && set +a && java -jar mtms-api-1.0.0-SNAPSHOT.jar
+restart backend
+pkill -u $USER -f mtms-api-1.0.0-SNAPSHOT.jar; sleep 2
+
+cd ~/mtms/backend && set -a && . ./mtms.env && set +a && nohup java -jar mtms-api-1.0.0-SNAPSHOT.jar > api.log 2>&1 &
+
+sleep 20; curl -s http://localhost:6011/actuator/health; echo
+grep -E "Started MtmsApplication|APPLICATION FAILED" ~/mtms/backend/api.log | tail -2
+
+
+
+
+
+devteamjava@HRMSPRODUCTION:~$ mv ~/mtms/mtms-api-1.0.0-SNAPSHOT.jar ~/mtms/backend/
+mv ~/mtms/mtms-frontend.tar.gz        ~/mtms/frontend/
+pkill -u $USER -f mtms-api-1.0.0-SNAPSHOT.jar; pkill -u $USER -f "node.*server.js"; sleep 2
+cd ~/mtms/frontend && rm -rf dist-frontend && tar -xzf mtms-frontend.tar.gz
+cd ~/mtms/backend && set -a && . ./mtms.env && set +a && nohup java -jar mtms-api-1.0.0-SNAPSHOT.jar > api.log 2>&1 &
+cd ~/mtms/frontend/dist-frontend && PORT=6010 HOSTNAME=0.0.0.0 nohup node server.js > ../web.log 2>&1 &
+mv: cannot stat '/home/devteamjava/mtms/mtms-api-1.0.0-SNAPSHOT.jar': No such file or directory
+mv: cannot stat '/home/devteamjava/mtms/mtms-frontend.tar.gz': No such file or directory
+[1] 1194758
+[2] 1194759
+devteamjava@HRMSPRODUCTION:~/mtms/frontend$ 
 
 
 status

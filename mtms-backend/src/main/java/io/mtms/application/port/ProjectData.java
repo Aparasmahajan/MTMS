@@ -44,7 +44,9 @@ public record ProjectData(
     List<Drift.Observation> driftObservations,
     List<Drift.Report> driftReports,
     List<Drift.Promotion> driftPromotions,
-    StepData steps) {
+    StepData steps,
+    List<io.mtms.domain.model.Owners.Owner> owners,
+    DiscussionData discussions) {
 
   /**
    * A project read before steps existed, or one being built in a test that does not care about
@@ -72,11 +74,21 @@ public record ProjectData(
     this(
         tenant, project, revision, columns, config, subModules, subActivities, cells, links, runs,
         library, defects, audit, driftDeliverables, driftObservations, driftReports,
-        driftPromotions, StepData.empty());
+        driftPromotions, StepData.empty(), List.of(), DiscussionData.empty());
   }
 
   public ProjectData {
     steps = steps == null ? StepData.empty() : steps;
+    owners = owners == null ? List.of() : owners;
+    discussions = discussions == null ? DiscussionData.empty() : discussions;
+  }
+
+  /** The owner rows on one thing — the overall owner and every team's, unsorted. */
+  public List<io.mtms.domain.model.Owners.Owner> ownersOf(
+      io.mtms.domain.model.Scope scopeType, UUID scopeId) {
+    return owners.stream()
+        .filter(owner -> owner.scopeType() == scopeType && owner.scopeId().equals(scopeId))
+        .toList();
   }
 
   /** What this project calls its three levels. Every screen reads these. */

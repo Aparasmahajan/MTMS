@@ -73,6 +73,18 @@ public interface AccessRepository {
 
   void updateRolePermissions(UUID roleId, java.util.Set<io.mtms.domain.PermissionKey> permissions);
 
+  /** Name, note and description. The key never moves — memberships and step gates point at it. */
+  void updateRoleDetails(UUID roleId, String name, String note, String description);
+
+  /**
+   * Hides a role, or brings it back.
+   *
+   * <p>Never a delete. A role that was ever used is referenced by memberships, by the steps it
+   * gates and by the owner rows that name it as a team; removing it would take those with it and
+   * rewrite history to say the access never existed. {@code null} un-hides.
+   */
+  void setRoleArchived(UUID roleId, java.time.Instant archivedAt);
+
   // --- Memberships -----------------------------------------------------------
 
   List<Tenancy.Membership> memberships(UUID tenantId);

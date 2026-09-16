@@ -41,7 +41,9 @@ public final class Views {
       String name,
       int readiness,
       List<CellView> cells,
-      List<StepViews.StepListView> stepLists) {}
+      List<StepViews.StepListView> stepLists,
+      List<OwnerGroupView> owners,
+      List<ThreadView> threads) {}
 
   public record LinkView(String id, String type, String label, String url) {}
 
@@ -77,6 +79,14 @@ public final class Views {
        * neither replaces the other.
        */
       List<StepViews.StepListView> stepLists,
+      /**
+       * One overall owner plus one per team. Separate from {@code owner} above, which is the
+       * single typed-in name the matrix still shows: that one is a string and supersedes
+       * nothing, these are real accounts and are what a notification could ever reach.
+       */
+      List<OwnerGroupView> owners,
+      /** Topics raised on this sub-module, newest first. */
+      List<ThreadView> threads,
       RunView lastRun) {}
 
   /**
@@ -116,7 +126,23 @@ public final class Views {
       int usedInProjects,
       boolean inThisProject) {}
 
-  public record RoleView(String id, String key, String name, String note, List<String> permissions) {}
+  /**
+   * @param hidden the role is not offered in any picker — owner lists, "who may tick this
+   *     step", the member role selector. It is still sent, because rows already pointing at it
+   *     have to render with a name rather than an id, and because an admin needs to be able to
+   *     bring it back.
+   * @param memberCount how many people hold it. Hiding a role somebody still holds is refused,
+   *     and the screen says why before they try.
+   */
+  public record RoleView(
+      String id,
+      String key,
+      String name,
+      String note,
+      List<String> permissions,
+      boolean isSystem,
+      boolean hidden,
+      int memberCount) {}
 
   public record OrgUserView(
       String id, String displayName, String email, String roleName, String scope, String status) {}
@@ -195,8 +221,80 @@ public final class Views {
     }
   }
 
+  /**
+   * One message in the reader's inbox.
+   *
+   * @param link a path, not a URL. The service does not know its own public address, and the
+   *     client reading this is already at the right origin.
+   */
+  public record NotificationView(
+      String id, String kind, String title, String body, String link, String at, boolean unread) {}
+
+  /**
+   * @param mentionsMe the reader was named in it. The one thing a screen can do about a mention
+   *     until there is a mail transport: show it where they will see it.
+   */
+  public record ThreadCommentView(
+      String id, String author, String body, String createdAt, boolean mine, boolean mentionsMe) {}
+
+  /**
+   * One topic, with everything said on it.
+   *
+   * @param mentionsMe the reader was named anywhere in the thread, so the list can mark it
+   *     before they open it.
+   */
+  public record ThreadView(
+      String id,
+      String topic,
+      String openedBy,
+      String openedAt,
+      boolean mine,
+      boolean mentionsMe,
+      List<ThreadCommentView> comments) {}
+
+  /**
+   * One person owning one thing, in one capacity.
+   *
+   * @param ownerId the row, which is what gets removed — not the user id, because one person
+   *     can legitimately own the same thing for two teams.
+   */
+  public record OwnerView(String ownerId, String userId, String displayName, String email) {}
+
+  /**
+   * The owners of one thing, grouped by team.
+   *
+   * <p>Only groups that have somebody in them are sent. That is what makes "a project with no
+   * SME team simply does not show an SME row" true without anything having to decide it: the
+   * row exists because somebody is in it, and the pickers that offer teams read the live roles.
+   *
+   * @param roleId null for the overall owner. The screen puts that group first.
+   */
+  public record OwnerGroupView(String roleId, String label, List<OwnerView> people) {}
+
+  /**
+   * A module, with the counts the landing page and the module screen read.
+   *
+   * <p>It has an id on the wire now. That is what lets a checklist, a set of owners and a
+   * discussion attach to it — none of which can attach to the name it used to be.
+   *
+   * @param inProd sub-modules on this module with every counted deliverable done. The same
+   *     100% the matrix and the FNI gate already agree on, not a second definition of finished.
+   */
+  public record ModuleView(
+      String id,
+      String name,
+      String description,
+      int orderIndex,
+      int subModuleCount,
+      int inProd,
+      int readiness,
+      List<OwnerGroupView> owners,
+      List<ThreadView> threads) {}
+
   public record ConfigView(
       List<ColumnView> columns,
+      /** The modules as records, with ids. `moduleNames` stays for everything that only wants names. */
+      List<ModuleView> modules,
       List<String> moduleNames,
       List<Projects.Stage> stages,
       List<String> owners,

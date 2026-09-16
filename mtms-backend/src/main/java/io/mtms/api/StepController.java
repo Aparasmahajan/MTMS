@@ -4,6 +4,7 @@ import io.mtms.application.Actor;
 import io.mtms.application.ServiceException;
 import io.mtms.application.SnapshotService;
 import io.mtms.application.usecase.StepUseCases;
+import io.mtms.domain.model.Scope;
 import io.mtms.domain.model.Steps;
 import io.mtms.domain.view.Snapshot;
 import jakarta.validation.constraints.NotBlank;
@@ -145,6 +146,23 @@ public class StepController {
     return ApiResponse.ok(snapshots.of(actor));
   }
 
+  public record ApplyRequest(@NotBlank String moduleName) {}
+
+  /**
+   * Copies this checklist onto every other sub-module of one module.
+   *
+   * <p>The answer carries {@code applied} in {@code meta}, because "applied to 0" and "applied
+   * to 40" are the same screen otherwise — and 0 is the interesting one, since it means every
+   * sub-module already had a list by that name.
+   */
+  @PostMapping("/lists/{id}/apply")
+  public ApiResponse.Success<Snapshot> applyToModule(
+      @PathVariable("id") UUID listId, @RequestBody ApplyRequest request, Actor actor) {
+
+    int applied = steps.applyToModule(actor, listId, request.moduleName());
+    return ApiResponse.ok(snapshots.of(actor), java.util.Map.of("applied", applied));
+  }
+
   /**
    * Takes one step off one checklist.
    *
@@ -204,9 +222,9 @@ public class StepController {
    * <p>Jackson's failure for an unknown constant is a 400 naming the Java type and listing its
    * constants, which is a stack trace wearing a message. These two say what the API accepts.
    */
-  private static Steps.ScopeType scope(String wire) {
+  private static Scope scope(String wire) {
     try {
-      return Steps.ScopeType.fromWire(wire);
+      return Scope.fromWire(wire);
     } catch (IllegalArgumentException e) {
       throw ServiceException.validation(
           "A checklist attaches to a \"sub_module\" or a \"sub_activity\".");

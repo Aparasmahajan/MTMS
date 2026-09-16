@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.mtms.domain.model.Scope;
 import io.mtms.domain.model.Steps;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -51,7 +52,7 @@ class StepGateTest {
             UUID.randomUUID(),
             UUID.randomUUID(),
             "config1",
-            Steps.ScopeType.SUB_MODULE,
+            Scope.SUB_MODULE,
             UUID.randomUUID(),
             enforceOrder,
             null,

@@ -10,8 +10,12 @@ import io.mtms.domain.StatusVocabulary;
 import io.mtms.domain.model.Audit;
 import io.mtms.domain.model.Defects;
 import io.mtms.domain.model.Drift;
+import io.mtms.domain.model.Discussions;
 import io.mtms.domain.model.Modules;
+import io.mtms.domain.model.Notifications;
+import io.mtms.domain.model.Owners;
 import io.mtms.domain.model.Projects;
+import io.mtms.domain.model.Scope;
 import io.mtms.domain.model.Steps;
 import io.mtms.domain.model.Tenancy;
 import io.mtms.domain.view.DriftViews;
@@ -65,6 +69,7 @@ public final class SnapshotProjection {
       AccessData access,
       List<Projects.Project> allProjects,
       Map<UUID, Integer> subModuleCounts,
+      List<Notifications.Notification> inbox,
       Instant now) {
 
     // Reading a project you cannot see is a 403, and it is checked here rather than in the
@@ -90,7 +95,8 @@ public final class SnapshotProjection {
             .map(
                 module ->
                     subModuleView(
-                        module, data, columns, activeColumns, countedColumns, cellIndex, stepContext))
+                        module, data, access, columns, activeColumns, countedColumns, cellIndex,
+                        stepContext, actor.userId()))
             .toList();
 
     Map<UUID, String> subModuleLabels = new HashMap<>();
@@ -107,16 +113,29 @@ public final class SnapshotProjection {
             data.vocabulary().subModule(),
             data.vocabulary().subActivity()),
         projectSummaries(allProjects, subModuleCounts),
-        configView(data, columns),
+        configView(data, access, columns, subModules, actor.userId()),
         subModules,
         auditViews(data.audit(), subModuleLabels),
         defectViews(data.defects(), subModuleLabels),
         libraryViews(data.library(), data.subModules()),
-        roleViews(access.roles()),
+        roleViews(access),
         userViews(access, data.tenant(), allProjects),
         memberViews(actor, access, data.project().id(), allProjects),
         invitationViews(access, data.tenant(), allProjects),
         stepLibraryViews(data, stepContext),
+        inbox.stream()
+            .map(
+                notification ->
+                    new Views.NotificationView(
+                        notification.id().toString(),
+                        notification.kind().wire(),
+                        notification.title(),
+                        notification.body(),
+                        notification.link(),
+                        iso(notification.createdAt()),
+                        notification.isUnread()))
+            .toList(),
+        (int) inbox.stream().filter(Notifications.Notification::isUnread).count(),
         driftView(data, columns, subModules, now));
   }
 
@@ -148,11 +167,13 @@ public final class SnapshotProjection {
   private Views.SubModuleView subModuleView(
       Modules.SubModule module,
       ProjectData data,
+      AccessData access,
       List<Projects.DeliverableColumn> columns,
       List<Projects.DeliverableColumn> activeColumns,
       List<Projects.DeliverableColumn> countedColumns,
       Map<String, Modules.Cell> cellIndex,
-      StepContext stepContext) {
+      StepContext stepContext,
+      UUID actorId) {
 
     List<Modules.SubActivity> subs = data.subActivitiesOf(module.id());
 
@@ -186,8 +207,9 @@ public final class SnapshotProjection {
                       subActivity.name(),
                       StatusVocabulary.readiness(counted),
                       cells,
-                      stepListViews(
-                          data, stepContext, Steps.ScopeType.SUB_ACTIVITY, subActivity.id()));
+                      stepListViews(data, stepContext, Scope.SUB_ACTIVITY, subActivity.id()),
+                      ownerViews(data, access, Scope.SUB_ACTIVITY, subActivity.id()),
+                      threadViews(data, actorId, Scope.SUB_ACTIVITY, subActivity.id()));
                 })
             .toList();
 
@@ -248,7 +270,9 @@ public final class SnapshotProjection {
                 link ->
                     new Views.LinkView(link.id().toString(), link.type(), link.label(), link.url()))
             .toList(),
-        stepListViews(data, stepContext, Steps.ScopeType.SUB_MODULE, module.id()),
+        stepListViews(data, stepContext, Scope.SUB_MODULE, module.id()),
+        ownerViews(data, access, Scope.SUB_MODULE, module.id()),
+        threadViews(data, actorId, Scope.SUB_MODULE, module.id()),
         run.map(
                 value ->
                     new Views.RunView(value.childReqId(), value.phases(), value.artifacts()))
@@ -292,7 +316,13 @@ public final class SnapshotProjection {
         .toList();
   }
 
-  private Views.ConfigView configView(ProjectData data, List<Projects.DeliverableColumn> columns) {
+  private Views.ConfigView configView(
+      ProjectData data,
+      AccessData access,
+      List<Projects.DeliverableColumn> columns,
+      List<Views.SubModuleView> subModules,
+      UUID readerId) {
+
     List<Views.ColumnView> columnViews =
         columns.stream()
             .map(
@@ -303,12 +333,156 @@ public final class SnapshotProjection {
 
     return new Views.ConfigView(
         columnViews,
+        moduleViews(data, access, subModules, readerId),
         data.config().moduleNames(),
         data.config().stages(),
         data.config().owners(),
         data.config().linkTypes(),
         data.config().environments(),
         DEFECT_PHASES);
+  }
+
+  /**
+   * The topics raised on one thing, with everything said on them.
+   *
+   * <p>Whole threads rather than a count plus a fetch. A discussion on one sub-module is a
+   * handful of comments, and the alternative is a request per thread the moment somebody opens
+   * the screen — which is the N+1 this projection exists to avoid, for a saving of nothing.
+   */
+  private static List<Views.ThreadView> threadViews(
+      ProjectData data, UUID readerId, Scope scopeType, UUID scopeId) {
+
+    List<Discussions.Thread> threads = data.discussions().threadsOn(scopeType, scopeId);
+    if (threads.isEmpty()) {
+      return List.of();
+    }
+
+    return threads.stream()
+        .map(
+            thread -> {
+              List<Views.ThreadCommentView> comments =
+                  data.discussions().commentsOn(thread.id()).stream()
+                      .map(
+                          comment ->
+                              new Views.ThreadCommentView(
+                                  comment.id().toString(),
+                                  comment.authorName(),
+                                  comment.body(),
+                                  iso(comment.createdAt()),
+                                  readerId.equals(comment.authorId()),
+                                  data.discussions().mentionedIn(comment.id()).contains(readerId)))
+                      .toList();
+
+              return new Views.ThreadView(
+                  thread.id().toString(),
+                  thread.topic(),
+                  thread.createdByName(),
+                  iso(thread.createdAt()),
+                  readerId.equals(thread.createdBy()),
+                  comments.stream().anyMatch(Views.ThreadCommentView::mentionsMe),
+                  comments);
+            })
+        .toList();
+  }
+
+  /**
+   * The owners of one thing, grouped by team, overall first.
+   *
+   * <p>Built from the roles and the users already in hand rather than a join, because the
+   * projection holds both and a query per sub-module is the N+1 this whole read exists to avoid.
+   *
+   * <p>A group whose role has since been hidden is still shown, with the role's name. Hiding a
+   * role stops it being offered; it does not un-assign the people who already own things for it,
+   * and quietly dropping them from the screen would be the app deciding that work was never
+   * owned.
+   */
+  private static List<Views.OwnerGroupView> ownerViews(
+      ProjectData data, AccessData access, Scope scopeType, UUID scopeId) {
+
+    List<Owners.Owner> rows = data.ownersOf(scopeType, scopeId);
+    if (rows.isEmpty()) {
+      return List.of();
+    }
+
+    Map<UUID, Tenancy.User> usersById = new HashMap<>();
+    access.users().forEach(user -> usersById.put(user.id(), user));
+    Map<UUID, Tenancy.Role> rolesById = new HashMap<>();
+    access.roles().forEach(role -> rolesById.put(role.id(), role));
+
+    // LinkedHashMap: the overall group is inserted first and stays first. It is the one to read
+    // when you do not yet know which team's problem it is.
+    Map<String, List<Views.OwnerView>> grouped = new LinkedHashMap<>();
+    Map<String, String> labels = new LinkedHashMap<>();
+
+    rows.stream()
+        .sorted(Comparator.comparing(Owners.Owner::isOverall).reversed())
+        .forEach(
+            owner -> {
+              String key = owner.isOverall() ? "" : owner.roleId().toString();
+              labels.computeIfAbsent(
+                  key,
+                  ignored ->
+                      owner.isOverall()
+                          ? "Overall owner"
+                          : Optional.ofNullable(rolesById.get(owner.roleId()))
+                              .map(Tenancy.Role::name)
+                              .orElse("a role that no longer exists"));
+
+              Tenancy.User user = usersById.get(owner.userId());
+              grouped
+                  .computeIfAbsent(key, ignored -> new ArrayList<>())
+                  .add(
+                      new Views.OwnerView(
+                          owner.id().toString(),
+                          owner.userId().toString(),
+                          user == null ? "a removed account" : user.displayName(),
+                          user == null ? "" : user.email()));
+            });
+
+    return grouped.entrySet().stream()
+        .map(
+            entry ->
+                new Views.OwnerGroupView(
+                    entry.getKey().isEmpty() ? null : entry.getKey(),
+                    labels.get(entry.getKey()),
+                    List.copyOf(entry.getValue())))
+        .toList();
+  }
+
+  /**
+   * The modules, with their counts.
+   *
+   * <p>Counted here rather than on the client because two screens want the same numbers and a
+   * second implementation of "in prod" is a second definition of finished. It is the matrix's
+   * own: every counted deliverable done.
+   */
+  private static List<Views.ModuleView> moduleViews(
+      ProjectData data, AccessData access, List<Views.SubModuleView> subModules, UUID readerId) {
+
+    return data.config().modules().stream()
+        .map(
+            module -> {
+              List<Views.SubModuleView> rows =
+                  subModules.stream()
+                      .filter(row -> row.moduleName().equals(module.name()))
+                      .toList();
+
+              return new Views.ModuleView(
+                  module.id().toString(),
+                  module.name(),
+                  module.description(),
+                  module.orderIndex(),
+                  rows.size(),
+                  (int) rows.stream().filter(row -> row.readiness() == 100).count(),
+                  rows.isEmpty()
+                      ? 0
+                      : (int)
+                          Math.round(
+                              rows.stream().mapToInt(Views.SubModuleView::readiness).average().orElse(0)),
+                  ownerViews(data, access, Scope.MODULE, module.id()),
+                  threadViews(data, readerId, Scope.MODULE, module.id()));
+            })
+        .toList();
   }
 
   /**
@@ -390,8 +564,20 @@ public final class SnapshotProjection {
         .toList();
   }
 
-  private List<Views.RoleView> roleViews(List<Tenancy.Role> roles) {
-    return roles.stream()
+  /**
+   * The roles, hidden ones included.
+   *
+   * <p>A hidden role is still sent. It has to be: memberships, step gates and owner rows already
+   * point at it and would otherwise render as a bare uuid, and an administrator needs something
+   * to click to bring it back. What changes is that every <em>picker</em> filters on the flag —
+   * which is a decision the client makes, from one field, rather than the server sending two
+   * different lists and the screens guessing which one they wanted.
+   */
+  private List<Views.RoleView> roleViews(AccessData access) {
+    return access.roles().stream()
+        .sorted(
+            Comparator.comparing(Tenancy.Role::isHidden)
+                .thenComparing(Tenancy.Role::name, String.CASE_INSENSITIVE_ORDER))
         .map(
             role ->
                 new Views.RoleView(
@@ -399,7 +585,13 @@ public final class SnapshotProjection {
                     role.key(),
                     role.name(),
                     role.note(),
-                    role.permissions().stream().map(PermissionKey::wire).sorted().toList()))
+                    role.permissions().stream().map(PermissionKey::wire).sorted().toList(),
+                    role.isSystem(),
+                    role.isHidden(),
+                    (int)
+                        access.memberships().stream()
+                            .filter(membership -> membership.roleId().equals(role.id()))
+                            .count()))
         .toList();
   }
 
@@ -582,7 +774,7 @@ public final class SnapshotProjection {
 
   /** The checklists attached to one thing, each with its entries, history and comments. */
   private List<StepViews.StepListView> stepListViews(
-      ProjectData data, StepContext context, Steps.ScopeType scopeType, UUID scopeId) {
+      ProjectData data, StepContext context, Scope scopeType, UUID scopeId) {
 
     return data.steps().resolve(scopeType, scopeId).stream()
         .map(
