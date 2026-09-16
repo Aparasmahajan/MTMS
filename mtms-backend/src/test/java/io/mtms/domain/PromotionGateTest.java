@@ -47,6 +47,7 @@ class PromotionGateTest {
             .toList(),
         List.of(),
         List.of(),
+        List.of(),
         null);
   }
 

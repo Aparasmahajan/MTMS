@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTracker } from '@/components/TrackerProvider';
 import { Blueprint, NotConfigured, PageTitle, SectionHeading } from '@/components/primitives';
-import { formatStamp, missingLine } from '@/lib/shared/views';
+import { missingLine } from '@/lib/shared/views';
 
 /**
  * Prod readiness — where the project stands, and what is not recorded.
@@ -15,7 +15,7 @@ import { formatStamp, missingLine } from '@/lib/shared/views';
  * why a cell click changes this screen too.
  */
 export default function DashboardPage() {
-  const { snapshot, can, reasonFor, subModuleHref } = useTracker();
+  const { snapshot, can, reasonFor, subModuleHref, words } = useTracker();
   const router = useRouter();
   const { sub_modules: subModules, config } = snapshot;
 
@@ -57,7 +57,11 @@ export default function DashboardPage() {
       const average = rows.length
         ? Math.round(rows.reduce((total, subModule) => total + subModule.readiness, 0) / rows.length)
         : 0;
-      return { moduleName, count: rows.length, average };
+      // "SBC — 12 of 19 in prod". Live in production means every counted deliverable is done,
+      // which is the same 100% the matrix and the FNI gate already agree on — not a second
+      // definition of finished that could drift away from theirs.
+      const inProd = rows.filter((subModule) => subModule.readiness === 100).length;
+      return { moduleName, count: rows.length, average, inProd };
     })
     .filter((entry) => entry.count > 0);
 
@@ -70,7 +74,7 @@ export default function DashboardPage() {
     {
       label: 'Fully loaded in prod',
       value: stats.fullyDone,
-      note: `of ${subModules.length} sub-modules`,
+      note: `of ${subModules.length} ${words.subModule.lowerMany}`,
       href: '/matrix?ready=Loaded+in+prod',
     },
     {
@@ -95,9 +99,9 @@ export default function DashboardPage() {
 
   const gaps = [
     { count: stats.blankCells, text: 'cells with no status at all, so readiness cannot be trusted' },
-    { count: stats.noTarget, text: 'sub-modules with no target date for prod loading' },
-    { count: stats.noOwner, text: 'sub-modules with no owner recorded' },
-    { count: stats.noRitm, text: 'sub-modules where no RITM has been raised' },
+    { count: stats.noTarget, text: `${words.subModule.lowerMany} with no target date for prod loading` },
+    { count: stats.noOwner, text: `${words.subModule.lowerMany} with no owner recorded` },
+    { count: stats.noRitm, text: `${words.subModule.lowerMany} where no RITM has been raised` },
   ];
 
   return (
@@ -105,14 +109,14 @@ export default function DashboardPage() {
       <PageTitle
         kicker={`${snapshot.org.name} / ${snapshot.project.key}`}
         title="Prod readiness"
-        lede={`${subModules.length} sub-modules across ${byModule.length} modules. A sub-module is a module plus an activity; readiness is measured per deliverable.`}
+        lede={`${subModules.length} ${words.subModule.lowerMany} across ${byModule.length} ${words.module.lowerMany}. A ${words.subModule.lower} is one ${words.module.lower} plus one piece of work on it; readiness is measured per deliverable.`}
         actions={
           <>
             <Link href="/matrix" className="btn btn-secondary">
               Open matrix
             </Link>
             <Link href="/library" className="btn btn-primary">
-              Add a sub-module
+              Add a {words.subModule.lower}
             </Link>
           </>
         }
@@ -182,7 +186,7 @@ export default function DashboardPage() {
         }}
       >
         <div>
-          <SectionHeading first>Readiness by module</SectionHeading>
+          <SectionHeading first>Readiness by {words.module.lower}</SectionHeading>
           <div className="bordered">
             {byModule.map((entry) => (
               <button
@@ -215,8 +219,21 @@ export default function DashboardPage() {
                 >
                   {entry.moduleName}
                 </span>
-                <span style={{ width: 74, flex: 'none', fontSize: 12, color: 'var(--color-neutral-600)' }}>
-                  {entry.count} {entry.count === 1 ? 'sub-module' : 'sub-modules'}
+                <span style={{ width: 96, flex: 'none', fontSize: 12, color: 'var(--color-neutral-600)' }}>
+                  {entry.count} {entry.count === 1 ? words.subModule.lower : words.subModule.lowerMany}
+                </span>
+                {/*
+                  The question a PM opens this screen to ask. An average is a summary of how far
+                  along things are; this is the count of things that are actually finished, and
+                  the two move apart exactly when it matters — nineteen activities at 95% is an
+                  average that reads well and a release with nothing in production.
+                */}
+                <span
+                  className="tabular"
+                  style={{ width: 92, flex: 'none', fontSize: 12, color: 'var(--color-neutral-700)' }}
+                  title={`${entry.inProd} of ${entry.count} ${entry.count === 1 ? words.subModule.lower : words.subModule.lowerMany} have every counted deliverable loaded in prod`}
+                >
+                  {entry.inProd} of {entry.count} in prod
                 </span>
                 <span className="bar" style={{ flex: 1, height: 10 }} aria-hidden>
                   <span style={{ width: `${entry.average}%` }} />
@@ -313,62 +330,18 @@ export default function DashboardPage() {
             ))}
           </div>
 
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'baseline',
-              justifyContent: 'space-between',
-              gap: 'var(--space-3)',
-            }}
-          >
-            <SectionHeading>Recent changes</SectionHeading>
-            {can('admin.audit.view') ? (
-              <Link
-                href="/audit"
-                style={{ fontSize: 12, color: 'var(--color-neutral-700)', flex: 'none' }}
-              >
+          {/*
+            The recent-changes panel that sat here was dropped on 15 Sept. It duplicated the
+            Audit screen in six rows and could not say enough to be useful — the link is kept
+            because "where did the feed go" is the obvious next question.
+          */}
+          {can('admin.audit.view') ? (
+            <div style={{ marginTop: 'var(--space-6)', fontSize: 12 }}>
+              <Link href="/audit" style={{ color: 'var(--color-neutral-700)' }}>
                 See every change →
               </Link>
-            ) : null}
-          </div>
-          <div className="bordered">
-            {snapshot.audit.slice(0, 6).map((entry) => (
-              <div
-                key={entry.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'baseline',
-                  gap: 'var(--space-3)',
-                  padding: 'var(--space-2) var(--space-4)',
-                  borderBottom: '1px solid var(--color-divider)',
-                  fontSize: 12,
-                }}
-              >
-                <span
-                  style={{
-                    fontFamily: 'var(--font-heading)',
-                    letterSpacing: '.06em',
-                    textTransform: 'uppercase',
-                    width: 76,
-                    flex: 'none',
-                  }}
-                >
-                  {entry.label}
-                </span>
-                <span style={{ flex: 1, color: 'var(--color-neutral-700)', wordBreak: 'break-word' }}>
-                  {entry.what}
-                </span>
-                <span style={{ color: 'var(--color-neutral-600)', flex: 'none' }}>
-                  {entry.who}, {formatStamp(entry.at)}
-                </span>
-              </div>
-            ))}
-            {snapshot.audit.length === 0 ? (
-              <div style={{ padding: 'var(--space-4)', fontSize: 13, color: 'var(--color-neutral-600)' }}>
-                Nothing has been changed yet.
-              </div>
-            ) : null}
-          </div>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

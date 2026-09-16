@@ -13,6 +13,7 @@ import { useRouter } from 'next/navigation';
 import { ApiError, send } from '@/lib/client/api';
 import { hasPermission, permissionDeniedReason, type PermissionKey } from '@/lib/shared/permissions';
 import type { SubModuleView, Snapshot } from '@/lib/shared/views';
+import { wordingOf, type Wording } from '@/lib/shared/wording';
 
 /**
  * One snapshot of the project, held client-side, with optimistic mutation.
@@ -37,6 +38,14 @@ interface TrackerContextValue {
     call: () => Promise<{ data: Snapshot; meta: Record<string, unknown> }>,
   ) => Promise<Record<string, unknown> | null>;
   can: (key: PermissionKey) => boolean;
+  /**
+   * What this project calls its three levels, with plurals and lowercase forms worked out.
+   *
+   * Every screen reads this instead of writing "sub-module" into a string. Derived from the
+   * snapshot, so changing the wording on the Configure screen re-renders the whole app in the
+   * new words without a reload.
+   */
+  words: Wording;
   /** The message a disabled control shows. Never let one fail silently. */
   reasonFor: (key: PermissionKey) => string;
   subModuleById: (id: string) => SubModuleView | undefined;
@@ -123,6 +132,7 @@ export function TrackerProvider({ initial, children }: { initial: Snapshot; chil
       setNotice,
       apply,
       can: (key) => hasPermission(permissions, key),
+      words: wordingOf(snapshot.project),
       reasonFor: (key) => permissionDeniedReason(key),
       subModuleById: (id) => snapshot.sub_modules.find((subModule) => subModule.id === id),
       subModuleHref: (id) => `/sub-modules/${id}`,

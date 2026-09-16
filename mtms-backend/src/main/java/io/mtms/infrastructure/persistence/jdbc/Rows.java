@@ -8,6 +8,7 @@ import io.mtms.domain.model.Defects;
 import io.mtms.domain.model.Drift;
 import io.mtms.domain.model.Modules;
 import io.mtms.domain.model.Projects;
+import io.mtms.domain.model.Steps;
 import io.mtms.domain.model.Tenancy;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -122,6 +123,12 @@ final class Rows {
               rs.getString("description"),
               rs.getBoolean("configured"),
               rs.getBoolean("archived"),
+              // Blank or missing folds back to the product's own words in the record's compact
+              // constructor, so a project written before these columns existed still renders.
+              new Projects.Vocabulary(
+                  rs.getString("module_label"),
+                  rs.getString("sub_module_label"),
+                  rs.getString("sub_activity_label")),
               Sql.instant(rs, "created_at"));
 
   static final RowMapper<Projects.DeliverableColumn> COLUMN =
@@ -318,6 +325,91 @@ final class Rows {
           Sql.instant(rs, "at"),
           Sql.instant(rs, "confirmed_at"));
     };
+  }
+
+
+  // --- Steps -----------------------------------------------------------------
+  //
+  // The definition mapper leaves `roleIds` empty: the allowed roles are a separate table and
+  // are merged on in JdbcStepRepository. A mapper cannot issue a second query, and one that
+  // silently produced a definition nobody could tick would be worse than one that is obviously
+  // half-built and completed in exactly one place.
+
+  static final RowMapper<Steps.Definition> STEP_DEFINITION =
+      (rs, n) ->
+          new Steps.Definition(
+              Sql.uuid(rs, "id"),
+              Sql.uuid(rs, "project_id"),
+              rs.getString("name"),
+              rs.getString("description"),
+              Set.of(),
+              Sql.instant(rs, "archived_at"),
+              Sql.instant(rs, "created_at"));
+
+  static final RowMapper<Steps.StepList> STEP_LIST =
+      (rs, n) ->
+          new Steps.StepList(
+              Sql.uuid(rs, "id"),
+              Sql.uuid(rs, "project_id"),
+              rs.getString("name"),
+              Steps.ScopeType.fromWire(rs.getString("scope_type")),
+              Sql.uuid(rs, "scope_id"),
+              rs.getBoolean("enforce_order"),
+              Sql.instant(rs, "archived_at"),
+              Sql.instant(rs, "created_at"));
+
+  static final RowMapper<Steps.Entry> STEP_ENTRY =
+      (rs, n) ->
+          new Steps.Entry(
+              Sql.uuid(rs, "id"),
+              Sql.uuid(rs, "step_list_id"),
+              Sql.uuid(rs, "step_definition_id"),
+              rs.getInt("order_index"));
+
+  static final RowMapper<Steps.Progress> STEP_PROGRESS =
+      (rs, n) ->
+          new Steps.Progress(
+              Sql.uuid(rs, "step_list_entry_id"),
+              Steps.State.fromWire(rs.getString("state")),
+              rs.getString("blocked_reason"),
+              Sql.uuid(rs, "changed_by"),
+              Sql.instant(rs, "changed_at"));
+
+  /** Reads `by_name` from a LEFT JOIN on users, so a departed account still has a name. */
+  static final RowMapper<Steps.Event> STEP_EVENT =
+      (rs, n) ->
+          new Steps.Event(
+              Sql.uuid(rs, "id"),
+              Sql.uuid(rs, "step_list_entry_id"),
+              Steps.State.fromWire(rs.getString("from_state")),
+              Steps.State.fromWire(rs.getString("to_state")),
+              rs.getBoolean("is_override"),
+              rs.getString("reason"),
+              Sql.uuid(rs, "by_user_id"),
+              orUnknown(rs.getString("by_name")),
+              Sql.instant(rs, "at"));
+
+  static final RowMapper<Steps.Comment> STEP_COMMENT =
+      (rs, n) ->
+          new Steps.Comment(
+              Sql.uuid(rs, "id"),
+              Sql.uuid(rs, "step_list_entry_id"),
+              Sql.uuid(rs, "author_id"),
+              orUnknown(rs.getString("author_name")),
+              rs.getString("body"),
+              Sql.instant(rs, "created_at"),
+              Sql.instant(rs, "edited_at"),
+              Sql.instant(rs, "archived_at"));
+
+  /**
+   * The name of an account that has since been removed.
+   *
+   * <p>`ON DELETE SET NULL` on the author keeps the comment and the event, which is the right
+   * trade: what was said and what was ticked outlive the person who did it. This is what the
+   * screen prints in their place.
+   */
+  private static String orUnknown(String displayName) {
+    return displayName == null || displayName.isBlank() ? "a removed account" : displayName;
   }
 
   private static <T> List<T> orEmpty(List<T> value) {

@@ -31,7 +31,17 @@ public final class Views {
       String changedBy,
       String changedAt) {}
 
-  public record SubActivityView(String id, String name, int readiness, List<CellView> cells) {}
+  /**
+   * @param stepLists the checklists attached to this sub-activity specifically. A list normally
+   *     sits on the activity above; these are the ones an admin pushed down because this piece
+   *     genuinely differs.
+   */
+  public record SubActivityView(
+      String id,
+      String name,
+      int readiness,
+      List<CellView> cells,
+      List<StepViews.StepListView> stepLists) {}
 
   public record LinkView(String id, String type, String label, String url) {}
 
@@ -60,6 +70,13 @@ public final class Views {
       List<CellView> cells,
       List<SubActivityView> subActivities,
       List<LinkView> links,
+      /**
+       * The checklists attached to this sub-module. Separate from the matrix rather than folded
+       * into it: the matrix is the common set of deliverables every sub-module shares, and a
+       * checklist is the specific process one use case follows. They sit side by side and
+       * neither replaces the other.
+       */
+      List<StepViews.StepListView> stepLists,
       RunView lastRun) {}
 
   /**

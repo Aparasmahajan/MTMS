@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { notFound, useParams } from 'next/navigation';
 import { useTracker } from '@/components/TrackerProvider';
 import { Blueprint, SectionHeading, StatusMarker } from '@/components/primitives';
+import { StepChecklist } from '@/components/StepChecklist';
 import { send } from '@/lib/client/api';
 import { optimisticAdvance } from '@/lib/client/optimistic';
 import { toneOf, TONE_STYLE } from '@/lib/shared/vocabulary';
@@ -42,7 +43,7 @@ function blockersFor(subModule: SubModuleView): string[] {
 
 export function SubModuleScreen() {
   const { id } = useParams<{ id: string }>();
-  const { snapshot, apply, can, reasonFor, setNotice } = useTracker();
+  const { snapshot, apply, can, reasonFor, setNotice, words } = useTracker();
   const subModule = snapshot.sub_modules.find((candidate) => candidate.id === id);
 
   const [linkType, setLinkType] = useState(snapshot.config.link_types[0] ?? 'RITM');
@@ -53,7 +54,7 @@ export function SubModuleScreen() {
 
   if (!subModule) notFound();
 
-  const { columns, stages, owners, link_types: linkTypes } = snapshot.config;
+  const { columns, stages, owners, link_types: linkTypes, module_names: moduleNames } = snapshot.config;
   const stage = stages[subModule.stage_index];
   const blockers = blockersFor(subModule);
   const canSignOff = can('fni.signoff');
@@ -124,7 +125,45 @@ export function SubModuleScreen() {
         <Link href="/matrix" style={{ color: 'inherit' }}>
           {snapshot.project.key}
         </Link>{' '}
-        / {subModule.module_name}
+        /{' '}
+        {/*
+          A picker rather than a label. A sub-module filed under the wrong module used to be
+          fixable only from the matrix, two screens away from where you noticed it — and the
+          server keeps every cell when it moves, because what was loaded is a fact about the
+          work, not about which heading it was filed under.
+        */}
+        <select
+          className="input"
+          style={{ width: 'auto', padding: '1px 6px', fontSize: 13 }}
+          value={subModule.module_name}
+          disabled={!canEdit || subModule.closed}
+          title={
+            canEdit
+              ? subModule.closed
+                ? `This ${words.subModule.lower} is closed. Reopen it before moving it.`
+                : `Move this ${words.subModule.lower} to another ${words.module.lower}`
+              : reasonFor('module.edit')
+          }
+          aria-label={`${words.module.one} this ${words.subModule.lower} sits on`}
+          onChange={(event) => {
+            const value = event.target.value;
+            if (value === subModule.module_name) return;
+            void apply(null, () =>
+              send<Snapshot>(`/api/v1/sub-modules/${subModule.id}`, 'PATCH', {
+                module_name: value,
+              }),
+            );
+          }}
+        >
+          {(moduleNames.includes(subModule.module_name)
+            ? moduleNames
+            : [subModule.module_name, ...moduleNames]
+          ).map((moduleName) => (
+            <option key={moduleName} value={moduleName}>
+              {moduleName}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div
@@ -353,6 +392,33 @@ export function SubModuleScreen() {
             ) : null}
           </Blueprint>
 
+          {/*
+            Steps sit above the deliverables, not inside them. The matrix answers "is it
+            loaded"; the checklist answers "did the process happen" — two different questions
+            that the same team asks in that order.
+          */}
+          <StepChecklist
+            lists={subModule.step_lists}
+            heading="Checklist"
+            emptyNote={
+              can('project.config')
+                ? `No checklist on this ${words.subModule.lower} yet. Build one on the Configure screen — write each step once, then attach a named list of them here.`
+                : `No checklist on this ${words.subModule.lower} yet. A project admin sets these up.`
+            }
+          />
+
+          {subModule.sub_activities.map((subActivity) => (
+            <StepChecklist
+              key={`steps-${subActivity.id}`}
+              lists={subActivity.step_lists}
+              heading={`Checklist · ${subActivity.name}`}
+              // Null, not a note: a sub-activity with no checklist of its own is the normal
+              // case — the list sits on the activity above and pushing one down is the
+              // exception. Saying "none" under every sub-activity would be noise.
+              emptyNote={null}
+            />
+          ))}
+
           <SectionHeading first>Deliverables</SectionHeading>
           <Blueprint padded={false}>
             {subModule.cells.map((cell) => {
@@ -391,7 +457,7 @@ export function SubModuleScreen() {
             })}
           </Blueprint>
 
-          <SectionHeading>SubActivities</SectionHeading>
+          <SectionHeading>{words.subActivity.many}</SectionHeading>
           <div className="bordered">
             {subModule.sub_activities.map((subActivity) => {
               const editing = renaming?.id === subActivity.id;
@@ -529,8 +595,8 @@ export function SubModuleScreen() {
                 style={{ flex: 1 }}
                 value={newSubActivity}
                 onChange={(event) => setNewSubActivity(event.target.value)}
-                placeholder="New sub-activity, e.g. Deletion"
-                aria-label="New sub-activity name"
+                placeholder={`New ${words.subActivity.lower}, e.g. Deletion`}
+                aria-label={`New ${words.subActivity.lower} name`}
               />
               <button
                 type="submit"
@@ -562,7 +628,7 @@ export function SubModuleScreen() {
               : 'This module has no sub-activities — its deliverable row is tracked directly. Adding the first one turns that row into a roll-up and carries the deliverables it already holds onto that sub-activity.'}
           </div>
 
-          <SectionHeading>Defects on this module</SectionHeading>
+          <SectionHeading>Defects on this {words.subModule.lower}</SectionHeading>
           <div className="bordered">
             {snapshot.defects
               .filter((defect) => defect.sub_module_id === subModule.id)

@@ -68,6 +68,27 @@ public class ConfigController {
     return ApiResponse.ok(snapshots.of(actor));
   }
 
+  /**
+   * @param moduleLabel absent leaves it as it is; blank puts it back to the product's own word.
+   */
+  public record VocabularyRequest(
+      String moduleLabel, String subModuleLabel, String subActivityLabel) {}
+
+  /**
+   * Sets what this project calls its three levels.
+   *
+   * <p>PATCH, and every field optional, because the Configure screen saves one box at a time as
+   * it is edited rather than making somebody fill in all three to change one.
+   */
+  @PatchMapping("/vocabulary")
+  public ApiResponse.Success<Snapshot> setVocabulary(
+      @RequestBody VocabularyRequest request, Actor actor) {
+
+    config.setVocabulary(
+        actor, request.moduleLabel(), request.subModuleLabel(), request.subActivityLabel());
+    return ApiResponse.ok(snapshots.of(actor));
+  }
+
   public record EnvironmentRequest(Boolean enabled) {}
 
   /**

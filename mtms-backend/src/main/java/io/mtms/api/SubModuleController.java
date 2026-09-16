@@ -44,9 +44,9 @@ public class SubModuleController {
   }
 
   /**
-   * Edits a sub-module.
+   * Edits a sub-module: its owner, its target date, and which module it sits on.
    *
-   * <p>Taken as a raw {@link JsonNode} rather than a record because the two fields are
+   * <p>Taken as a raw {@link JsonNode} rather than a record because the fields are
    * <em>tri-state</em>: absent, present-and-null, or present-with-a-value. Clearing an owner
    * sends {@code null}, which a record cannot distinguish from not mentioning it — and the two
    * mean different things, and are governed by different permissions.
@@ -57,6 +57,7 @@ public class SubModuleController {
 
     boolean ownerPresent = body.has("owner");
     boolean datePresent = body.has("fni_target_date");
+    boolean modulePresent = body.has("module_name");
 
     modules.setFields(
         actor,
@@ -66,7 +67,11 @@ public class SubModuleController {
         datePresent && !body.get("fni_target_date").isNull()
             ? body.get("fni_target_date").asText()
             : null,
-        datePresent);
+        datePresent,
+        modulePresent && !body.get("module_name").isNull()
+            ? body.get("module_name").asText()
+            : null,
+        modulePresent);
 
     return ApiResponse.ok(snapshots.of(actor));
   }

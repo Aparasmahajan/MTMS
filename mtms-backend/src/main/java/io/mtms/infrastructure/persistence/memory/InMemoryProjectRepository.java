@@ -2,6 +2,7 @@ package io.mtms.infrastructure.persistence.memory;
 
 import io.mtms.application.port.ProjectData;
 import io.mtms.application.port.ProjectRepository;
+import io.mtms.application.port.StepRepository;
 import io.mtms.domain.StatusVocabulary;
 import io.mtms.domain.model.Projects;
 import java.util.ArrayList;
@@ -21,9 +22,11 @@ import org.springframework.stereotype.Repository;
 public class InMemoryProjectRepository implements ProjectRepository {
 
   private final InMemoryDatabase db;
+  private final StepRepository steps;
 
-  public InMemoryProjectRepository(InMemoryDatabase db) {
+  public InMemoryProjectRepository(InMemoryDatabase db, StepRepository steps) {
     this.db = db;
+    this.steps = steps;
   }
 
   @Override
@@ -60,7 +63,8 @@ public class InMemoryProjectRepository implements ProjectRepository {
             db.driftDeliverables.stream().filter(d -> d.projectId().equals(projectId)).toList(),
             db.driftObservations.stream().filter(o -> o.projectId().equals(projectId)).toList(),
             db.driftReports.stream().filter(r -> r.projectId().equals(projectId)).toList(),
-            db.driftPromotions.stream().filter(p -> p.projectId().equals(projectId)).toList()));
+            db.driftPromotions.stream().filter(p -> p.projectId().equals(projectId)).toList(),
+            steps.load(projectId)));
   }
 
   @Override
@@ -102,6 +106,14 @@ public class InMemoryProjectRepository implements ProjectRepository {
   @Override
   public void update(Projects.Project project) {
     replace(project);
+  }
+
+  @Override
+  public void updateVocabulary(UUID projectId, Projects.Vocabulary vocabulary) {
+    db.projects.stream()
+        .filter(project -> project.id().equals(projectId))
+        .findFirst()
+        .ifPresent(project -> replace(project.withVocabulary(vocabulary)));
   }
 
   private void replace(Projects.Project project) {

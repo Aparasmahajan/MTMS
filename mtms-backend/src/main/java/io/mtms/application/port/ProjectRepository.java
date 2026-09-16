@@ -32,6 +32,15 @@ public interface ProjectRepository {
   void update(Projects.Project project);
 
   /**
+   * Changes what this project calls its three levels.
+   *
+   * <p>Its own method rather than a field on {@link #update}, because the two are edited from
+   * different screens by different people for different reasons: a project is renamed by an
+   * administrator, and the vocabulary is the team deciding what to call their own work.
+   */
+  void updateVocabulary(UUID projectId, Projects.Vocabulary vocabulary);
+
+  /**
    * Increments the project's revision and returns the new value.
    *
    * <p>Called by every mutation, in the same transaction as the change. That is what makes the
