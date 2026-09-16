@@ -408,12 +408,121 @@ projects, which the app deliberately prevents everywhere else.
 
 Today: one optional owner name per module, picked from a list of names.
 
-Wanted: an owner on the module **and** a different owner on the sub-module; owners **per
-role** (the dev owner, the QA owner, the DevOps owner); and **several owners** at any level.
+Wanted (settled 15 Sept): **one overall owner, plus one owner per team.** So a module reads:
+
+```
+Overall owner    Paras Mahajan
+Dev team         Bhavnish, Dhruv
+QA team          Vinayak, Muskan
+SME              Anand
+DevOps           Narayana
+```
+
+The team rows are **not fixed**. The admin decides which teams a project has and what they
+are called, in the same place they decide the roles (see *Roles per project*, below). A
+project with no SME team simply does not show an SME row. Several people per row, at every
+level, and a different set on the sub-module than on the module.
 
 **Worth knowing:** owners are currently just typed-in names, not real user accounts. Making
 them real accounts is the right move — it is what makes notifications and @mentions
 possible — but it is a change to existing data, not just a new field.
+
+### Roles per project · medium
+
+Today: the roles are fixed in the code — admin, release, QA, dev, viewer, DevOps. Every
+project gets the same six whether they fit or not.
+
+Wanted:
+
+- The admin can **add a role** to their project. A hardware team wants "Field Engineer"; a
+  billing team wants "Revenue Assurance". Neither should have to ask us.
+- The admin can **hide a role** the project does not use. If there is no QA team on this
+  project, QA should not appear in owner lists, in the "who can tick this step" dropdown,
+  or anywhere else. Hide, not delete — if the role was ever used, its history has to stay
+  readable.
+
+This is the same switch the owner teams read from, so build the two together.
+
+### Change the module from the sub-module screen · small
+
+Today, if a sub-module is filed under the wrong module, the only way to move it is to go
+back to the matrix and change it there. That is two screens away from where you noticed the
+problem.
+
+Wanted: a module picker on the sub-module screen itself, so it can be moved in place.
+
+### Counts per module on the landing page · small
+
+After signing in, the landing page should show, for each module, **how many of its
+sub-modules are live in production.** Something like `SBC — 12 of 19 in prod`.
+
+The data already exists — production is just a column, and the app already counts ticks per
+column. This is a new panel on a screen that exists, not new machinery.
+
+### Remove the "recent changes" panel · trivial
+
+Asked for on 15 Sept. It is being dropped from the screen it sits on.
+
+### Bug: a new project did not appear in the app for up to ten minutes · **fixed 15 Sept**
+
+Create a project in the super admin console and it showed there at once, but the project
+switcher inside the app kept showing the old list.
+
+**Why.** The app keeps a ready-made copy of each project's screen, and throws that copy away
+whenever *that* project changes. Creating a **different** project changed nothing about the
+one you were looking at, so your copy was still considered good — and the project list
+happens to be part of it. It fixed itself when you next ticked anything, or after ten
+minutes.
+
+**Fixed by** marking every project in the organisation as changed, not just the new one.
+Creating a project and granting or removing an administrator all do this now.
+
+### Invitation links must stop disappearing · small
+
+Noticed 16 Sept. When you invite somebody, the single-use link appears in a notice bar that
+you can dismiss — and that vanishes the moment you do anything else on the screen. If you
+close it before copying the link, **the link is gone for good.**
+
+Not exaggerating: the server never stores the token, only a one-way hash of it, so there is
+no screen and no database query that can ever show it again. The only repair is to delete
+the pending invitation and issue a fresh one.
+
+Wanted: for the super admin at least, issued links stay on screen until explicitly cleared
+— a short list of "invitations issued in this session", each with a copy button, surviving a
+page reload. Worth writing them to the browser's own storage so a refresh does not lose
+them.
+
+**Also worth doing at the same time:** a "reissue invitation" action, so a lost link is one
+click rather than a delete-and-recreate.
+
+### Bug: invitation links had the domain twice · **fixed 16 Sept**
+
+The link read `https://mtms.azalio.iohttps://mtms.azalio.io/accept-invite?token=…` and did
+not work.
+
+**Why.** The server already builds a complete web address, using the `MTMS_APP_BASE_URL`
+setting — that setting exists because the service sits behind a proxy and cannot see its own
+public address. The screen then stuck the site address on the front of it a second time.
+
+**Fixed by** using the server's address as-is.
+
+### Changing who administers a project · **done 15 Sept**
+
+The console could only ever *add* an administrator, and even that was broken against the
+real server — the screen called for it but the Java service had no such route, so the button
+did nothing in production. Now:
+
+- **Assign** somebody to one project, or to every project in the organisation at once.
+- **Remove** either kind. Organisation-wide access is removed from the organisation's own
+  row, never from a project's — clicking × on a project row would otherwise take away every
+  other project too, without saying so.
+- Widening somebody to organisation-wide absorbs the single-project grants they held, so the
+  same name never appears twice on a row.
+- The last administrator of an organisation cannot be removed. Assign the replacement first.
+- Somebody with no account yet is invited, and the single-use link comes back on screen.
+
+This is administrator access — who can configure a project. It is **not** the module owner
+work described under *Owners*, which is still to do.
 
 ### Parent and child columns on the Configure screen · small
 

@@ -8,13 +8,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param ticketBaseUrl defects link out to the real ticket system rather than copying it. This
  *     is the prefix the ticket key is appended to.
  * @param appBaseUrl where invitation links point. Needed because the service does not know its
- *     own public address behind a proxy.
- * @param seedOnEmptyDatabase seed the demo organisation when the database has no tenants.
- *     Convenient in development, and something you would turn off before pointing this at
- *     anything real.
+ *     own public address behind a proxy, and it is the whole address — a caller should send the
+ *     link exactly as given rather than prefixing anything to it.
  */
 @ConfigurationProperties(prefix = "mtms")
-public record MtmsProperties(String ticketBaseUrl, String appBaseUrl, boolean seedOnEmptyDatabase) {
+public record MtmsProperties(String ticketBaseUrl, String appBaseUrl) {
 
   public MtmsProperties {
     ticketBaseUrl = ticketBaseUrl == null ? "https://tms.internal/browse" : ticketBaseUrl;
