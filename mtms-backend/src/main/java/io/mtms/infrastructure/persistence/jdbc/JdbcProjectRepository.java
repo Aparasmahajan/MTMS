@@ -3,6 +3,7 @@ package io.mtms.infrastructure.persistence.jdbc;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.mtms.application.port.ProjectData;
 import io.mtms.application.port.ProjectRepository;
+import io.mtms.application.port.StepRepository;
 import io.mtms.domain.model.Projects;
 import io.mtms.domain.model.Tenancy;
 import java.util.HashMap;
@@ -27,10 +28,12 @@ public class JdbcProjectRepository implements ProjectRepository {
 
   private final Db jdbc;
   private final ObjectMapper mapper;
+  private final StepRepository steps;
 
-  public JdbcProjectRepository(JdbcTemplate jdbc, ObjectMapper mapper) {
+  public JdbcProjectRepository(JdbcTemplate jdbc, ObjectMapper mapper, StepRepository steps) {
     this.jdbc = new Db(jdbc);
     this.mapper = mapper;
+    this.steps = steps;
   }
 
   /**
@@ -131,7 +134,11 @@ public class JdbcProjectRepository implements ProjectRepository {
             jdbc.query(
                 "SELECT * FROM drift_promotions WHERE project_id = ? ORDER BY at DESC",
                 Rows.driftPromotion(mapper),
-                projectId)));
+                projectId),
+            // Six more indexed reads, in the same round as the rest. The alternative is a query
+            // per sub-module behind the checklist panel, which is the N+1 this record exists to
+            // make impossible.
+            steps.load(projectId)));
   }
 
   @Override
@@ -184,11 +191,33 @@ public class JdbcProjectRepository implements ProjectRepository {
   public void insert(Projects.Project project) {
     jdbc.update(
         """
-        INSERT INTO projects (id, tenant_id, `key`, name, description, configured, archived, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO projects (id, tenant_id, `key`, name, description, configured, archived,
+                              module_label, sub_module_label, sub_activity_label, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         project.id(), project.tenantId(), project.key(), project.name(), project.description(),
-        project.configured(), project.archived(), Sql.timestamp(project.createdAt()));
+        project.configured(), project.archived(),
+        project.vocabulary().module(), project.vocabulary().subModule(),
+        project.vocabulary().subActivity(), Sql.timestamp(project.createdAt()));
+  }
+
+  /**
+   * The three label columns, and only those.
+   *
+   * <p>Deliberately not folded into {@link #update}: that statement is written by the rename and
+   * archive paths, which have no opinion about the vocabulary, and passing it through them would
+   * mean any caller that built a {@code Project} without reading the current labels would quietly
+   * reset them to the defaults.
+   */
+  @Override
+  public void updateVocabulary(UUID projectId, Projects.Vocabulary vocabulary) {
+    jdbc.update(
+        """
+        UPDATE projects
+           SET module_label = ?, sub_module_label = ?, sub_activity_label = ?
+         WHERE id = ?
+        """,
+        vocabulary.module(), vocabulary.subModule(), vocabulary.subActivity(), projectId);
   }
 
   @Override

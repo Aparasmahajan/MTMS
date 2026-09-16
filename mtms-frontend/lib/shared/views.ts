@@ -36,6 +36,11 @@ export interface SubActivityView {
   name: string;
   readiness: number;
   cells: CellView[];
+  /**
+   * Checklists attached to this sub-activity specifically. A list normally sits on the
+   * activity above; these are the ones an admin pushed down because this piece differs.
+   */
+  step_lists: StepListView[];
 }
 
 export interface LinkView {
@@ -67,6 +72,12 @@ export interface SubModuleView {
   cells: CellView[];
   sub_activities: SubActivityView[];
   links: LinkView[];
+  /**
+   * The checklists attached to this sub-module. Deliberately not folded into the matrix: the
+   * matrix is the common set of deliverables every sub-module shares, a checklist is the
+   * specific process one use case follows, and neither replaces the other.
+   */
+  step_lists: StepListView[];
   last_run: RunView | null;
 }
 
@@ -154,6 +165,87 @@ export interface InvitationView {
   role_name: string;
   scope: string;
   state: string;
+}
+
+
+// ---------------------------------------------------------------------------
+// Steps — the reusable checklist
+// ---------------------------------------------------------------------------
+
+/**
+ * One step in the project's library, written once and used on any number of checklists.
+ *
+ * `role_names` empty means the step names no role that still exists — nobody can tick it,
+ * and an admin has to pick one. That is the safe direction: a step whose last allowed role
+ * was deleted quietly becoming one anybody may tick is the opposite of what gating meant.
+ */
+export interface StepDefinitionView {
+  id: string;
+  name: string;
+  description: string;
+  role_ids: string[];
+  role_names: string[];
+  /** How many checklists currently contain it, so retiring one is an informed decision. */
+  used_in: number;
+}
+
+export interface StepEventView {
+  id: string;
+  from: string;
+  to: string;
+  /** "not done → done", already worded by the server. */
+  what: string;
+  is_override: boolean;
+  reason: string | null;
+  by: string;
+  at: string;
+}
+
+export interface StepCommentView {
+  id: string;
+  author: string;
+  body: string;
+  created_at: string;
+  /** Whether the reader wrote it. Removal is still checked server-side. */
+  mine: boolean;
+}
+
+/**
+ * One step on one checklist.
+ *
+ * `can_tick` and `locked_reason` are answers, not raw facts — the server has already applied
+ * the order rule and the role rule and says whether this reader may act. Nothing here
+ * recomputes them. A client that guessed would eventually guess differently from the server,
+ * and produce the worst failure a permission system has: a control that looks available and
+ * then refuses.
+ */
+export interface StepEntryView {
+  id: string;
+  definition_id: string;
+  name: string;
+  description: string;
+  state: 'todo' | 'done' | 'blocked';
+  blocked_reason: string | null;
+  changed_by: string | null;
+  changed_at: string | null;
+  allowed_roles: string[];
+  can_tick: boolean;
+  /** True when this reader can only act by overriding the role gate — warn before they do. */
+  is_override_for_me: boolean;
+  locked_reason: string;
+  history: StepEventView[];
+  comments: StepCommentView[];
+}
+
+export interface StepListView {
+  id: string;
+  name: string;
+  /** Whether the order is a real sequence. The server refuses an out-of-turn tick. */
+  enforce_order: boolean;
+  readiness: number;
+  done_count: number;
+  blocked_count: number;
+  entries: StepEntryView[];
 }
 
 export interface DriftRowView {
@@ -282,7 +374,19 @@ export interface Snapshot {
     is_super_admin: boolean;
   };
   org: { id: string; name: string };
-  project: { id: string; key: string; name: string };
+  /**
+   * `module_label`, `sub_module_label` and `sub_activity_label` are what *this* project calls
+   * its three levels — "Node" and "Activity" for CR_AUTOMATION. Read them through
+   * `useVocabulary()` rather than reaching in here, so every screen words it the same way.
+   */
+  project: {
+    id: string;
+    key: string;
+    name: string;
+    module_label: string;
+    sub_module_label: string;
+    sub_activity_label: string;
+  };
   projects: { id: string; key: string; name: string; configured: boolean; sub_module_count: number }[];
   config: ConfigView;
   sub_modules: SubModuleView[];
@@ -293,6 +397,8 @@ export interface Snapshot {
   users: OrgUserView[];
   members: MemberView[];
   invitations: InvitationView[];
+  /** The step library, for the Configure screen and the "add a step" pickers. */
+  step_library: StepDefinitionView[];
   drift: {
     rows: DriftRowView[];
     warnings: DriftWarningView[];

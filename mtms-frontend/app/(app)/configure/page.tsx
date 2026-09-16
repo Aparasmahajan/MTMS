@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import { useTracker } from '@/components/TrackerProvider';
 import { Blueprint, PageTitle } from '@/components/primitives';
+import { StepsPanel } from '@/components/config/StepsPanel';
+import { WordingPanel } from '@/components/config/WordingPanel';
 import { send } from '@/lib/client/api';
 import type { ConfigList, Environment } from '@/lib/shared/domain';
 import { PROD_ENVIRONMENT } from '@/lib/shared/domain';
@@ -369,7 +371,7 @@ function Environments({
 }
 
 export default function ConfigurePage() {
-  const { snapshot, apply, can, reasonFor } = useTracker();
+  const { snapshot, apply, can, reasonFor, words } = useTracker();
   const { config, project } = snapshot;
   const [newColumn, setNewColumn] = useState('');
   const canConfig = can('project.config');
@@ -598,7 +600,7 @@ export default function ConfigurePage() {
         }}
       >
         <ConfigSet
-          title="Modules"
+          title={words.module.many}
           hint="more will come"
           list="modules"
           placeholder="e.g. HSS"
@@ -620,13 +622,17 @@ export default function ConfigurePage() {
         />
         <ConfigSet
           title="Link types"
-          hint="attachable to a module"
+          hint={`attachable to a ${words.subModule.lower}`}
           list="link_types"
           placeholder="e.g. Test report"
           values={config.link_types.map((type) => ({ key: type, label: type }))}
         />
 
         <Environments environments={config.environments} columns={config.columns} />
+
+        <WordingPanel />
+
+        <StepsPanel />
 
         <div style={{ gridColumn: '1 / -1' }}>
           <Blueprint>

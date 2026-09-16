@@ -51,6 +51,16 @@ public interface AccessRepository {
 
   void clearInviteToken(UUID userId);
 
+  /**
+   * Issues a fresh invitation token for somebody who has not accepted yet.
+   *
+   * <p>Needed because the token itself is never stored — only its sha256 — so a link that was
+   * lost before it was copied cannot be shown again by any screen or any query. Reissuing
+   * replaces the hash, which invalidates the old link and produces a new one, and it is the only
+   * repair there is short of deleting the account and recreating it.
+   */
+  void setInviteToken(UUID userId, String tokenHash, java.time.Instant expiresAt);
+
   // --- Roles -----------------------------------------------------------------
 
   List<Tenancy.Role> roles(UUID tenantId);

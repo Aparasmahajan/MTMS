@@ -132,6 +132,12 @@ public class InMemoryAccessRepository implements AccessRepository {
         existing.user(), existing.passwordHash(), null, null));
   }
 
+  @Override
+  public void setInviteToken(UUID userId, String tokenHash, java.time.Instant expiresAt) {
+    replaceUser(userId, existing -> new Tenancy.UserWithSecret(
+        existing.user(), existing.passwordHash(), tokenHash, expiresAt));
+  }
+
   private void replaceUser(
       UUID userId, java.util.function.UnaryOperator<Tenancy.UserWithSecret> change) {
     for (int i = 0; i < db.users.size(); i++) {

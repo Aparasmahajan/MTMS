@@ -16,8 +16,48 @@ public final class Projects {
   private Projects() {}
 
   /**
+   * What one project calls the three levels it tracks.
+   *
+   * <p>CR_AUTOMATION says "Node" and "Activity". A hardware team says something else entirely,
+   * and a billing team something else again. The product's own names — module, sub-module,
+   * sub-activity — stay in the code, the database and the API; these are what the screens
+   * print, and they are per project because two projects in one organisation legitimately use
+   * different words for the same shape.
+   *
+   * <p>Blank is not a value. An empty label would render as a gap on every screen that reads
+   * it, so the compact constructor folds blank back to the product's own word rather than
+   * letting one project break its own headings.
+   */
+  public record Vocabulary(String module, String subModule, String subActivity) {
+
+    public static final Vocabulary DEFAULT = new Vocabulary("Module", "Sub-module", "Sub-activity");
+
+    public Vocabulary {
+      module = orDefault(module, DEFAULT_MODULE);
+      subModule = orDefault(subModule, DEFAULT_SUB_MODULE);
+      subActivity = orDefault(subActivity, DEFAULT_SUB_ACTIVITY);
+    }
+
+    private static final String DEFAULT_MODULE = "Module";
+    private static final String DEFAULT_SUB_MODULE = "Sub-module";
+    private static final String DEFAULT_SUB_ACTIVITY = "Sub-activity";
+
+    private static String orDefault(String value, String fallback) {
+      String trimmed = value == null ? "" : value.trim();
+      // Forty is what the column holds. Truncating beats an insert that fails at the end of a
+      // request the user has already been told succeeded.
+      if (trimmed.isEmpty()) {
+        return fallback;
+      }
+      return trimmed.length() > 40 ? trimmed.substring(0, 40) : trimmed;
+    }
+  }
+
+  /**
    * @param configured a project with no columns has not been stood up yet, and the UI offers to
    *     configure it rather than showing an empty matrix that looks broken.
+   * @param vocabulary what this project calls its three levels. Every screen reads these
+   *     instead of having the words written into it.
    */
   public record Project(
       UUID id,
@@ -27,7 +67,30 @@ public final class Projects {
       String description,
       boolean configured,
       boolean archived,
-      Instant createdAt) {}
+      Vocabulary vocabulary,
+      Instant createdAt) {
+
+    public Project {
+      vocabulary = vocabulary == null ? Vocabulary.DEFAULT : vocabulary;
+    }
+
+    /** A project using the product's own words — what a new one gets until somebody changes it. */
+    public Project(
+        UUID id,
+        UUID tenantId,
+        String key,
+        String name,
+        String description,
+        boolean configured,
+        boolean archived,
+        Instant createdAt) {
+      this(id, tenantId, key, name, description, configured, archived, Vocabulary.DEFAULT, createdAt);
+    }
+
+    public Project withVocabulary(Vocabulary next) {
+      return new Project(id, tenantId, key, name, description, configured, archived, next, createdAt);
+    }
+  }
 
   /**
    * A deliverable column — one tracked thing, for every sub-module in the project.

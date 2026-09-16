@@ -164,6 +164,22 @@ public class PlatformController {
   }
 
   /**
+   * Issues a fresh invitation link for somebody who has not accepted yet.
+   *
+   * <p>POST rather than PATCH: it creates a new token and invalidates the old one, which is an
+   * action rather than an edit to a field.
+   */
+  @PostMapping("/organisations/{id}/invitations/{userId}/reissue")
+  public ApiResponse.Success<PlatformView> reissueInvitation(
+      @PathVariable("id") UUID tenantId, @PathVariable("userId") UUID userId, Actor actor) {
+
+    PlatformUseCases.AssignedAdministrator reissued =
+        platform.reissueInvitation(actor, tenantId, userId);
+
+    return ApiResponse.ok(platform.view(actor), assignedMeta(reissued));
+  }
+
+  /**
    * Map keys again, written as the frontend reads them.
    *
    * <p>A {@link java.util.HashMap} rather than {@code Map.of}, which rejects a null value:

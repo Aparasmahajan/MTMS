@@ -207,6 +207,65 @@ public class ConfigUseCases {
   }
 
   /**
+   * Changes what this project calls its three levels.
+   *
+   * <p>This is the other half of making the product generic. Columns and stages made the
+   * <em>process</em> configurable; this makes the <em>vocabulary</em> configurable, so a team
+   * that says "node" and "activity" is not reading somebody else's words on every screen.
+   *
+   * <p>Only the labels move. Nothing renames a table, a permission key or a route: those are
+   * written into stored rows and into client code, and changing them to follow a label would be
+   * a migration every time somebody edited a text box. The product keeps its own names
+   * underneath and the screens print these.
+   *
+   * <p>Absent means unchanged, and blank means "back to the default" — the record folds an empty
+   * label to the product's own word rather than letting a project ship a screen with a gap in
+   * the heading.
+   */
+  @Transactional
+  public void setVocabulary(
+      Actor actor, String moduleLabel, String subModuleLabel, String subActivityLabel) {
+
+    actor.require(PermissionKey.PROJECT_CONFIG);
+    UUID projectId = actor.projectId();
+
+    Projects.Project project =
+        projects
+            .findById(actor.tenantId(), projectId)
+            .orElseThrow(() -> ServiceException.notFound("That project does not exist."));
+
+    Projects.Vocabulary before = project.vocabulary();
+    Projects.Vocabulary after =
+        new Projects.Vocabulary(
+            moduleLabel == null ? before.module() : moduleLabel,
+            subModuleLabel == null ? before.subModule() : subModuleLabel,
+            subActivityLabel == null ? before.subActivity() : subActivityLabel);
+
+    if (after.equals(before)) {
+      return;
+    }
+
+    projects.updateVocabulary(projectId, after);
+    support.recordProjectChange(
+        actor,
+        projectId,
+        "CONFIG",
+        "wording — "
+            + before.module()
+            + " / "
+            + before.subModule()
+            + " / "
+            + before.subActivity()
+            + " → "
+            + after.module()
+            + " / "
+            + after.subModule()
+            + " / "
+            + after.subActivity());
+    support.bump(projectId);
+  }
+
+  /**
    * A column must allow at least one real status.
    *
    * <p>{@code blank} is rejected specifically: it is a tone and a rendering, never a value a

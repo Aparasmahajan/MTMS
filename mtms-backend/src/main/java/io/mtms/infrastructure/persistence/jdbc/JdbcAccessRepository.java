@@ -145,6 +145,18 @@ public class JdbcAccessRepository implements AccessRepository {
         "UPDATE users SET invite_token_hash = NULL, invite_expires_at = NULL WHERE id = ?", userId);
   }
 
+  @Override
+  public void setInviteToken(UUID userId, String tokenHash, java.time.Instant expiresAt) {
+    // Replaces whatever was there. The previous link stops working the moment this lands, which
+    // is the point: a reissue exists because the old one was lost, and two live links to one
+    // account would be a second way in that nobody is tracking.
+    jdbc.update(
+        "UPDATE users SET invite_token_hash = ?, invite_expires_at = ? WHERE id = ?",
+        tokenHash,
+        Sql.timestamp(expiresAt),
+        userId);
+  }
+
   // --- Roles -----------------------------------------------------------------
 
   @Override

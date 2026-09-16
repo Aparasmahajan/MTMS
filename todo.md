@@ -118,7 +118,140 @@ system nicely. And the demo starts signed in as **Nitin**.
 
 ---
 
-## 3. Steps — the main new feature
+## 2a. Shipped 16 Sept — steps, wording, and the small pile
+
+Everything below was built in the Java service and `mtms-frontend`. `mtms-static` and `mtms/`
+were deliberately not touched, so they are now a release behind and still work on their own.
+
+**The schema did not change.** That is the 11 Sept decision paying off: `V1__initial_schema.sql`
+was written in its final shape, with the nine `step_*` tables and the three `*_label` columns
+already in it and nothing reading them. This release is the code that reads them. There is no
+migration.
+
+### Steps — built
+
+The model in §3a, unchanged, with the three levels kept apart: `Steps.Definition` is the
+library, `Steps.StepList` plus `Steps.Entry` is one named configuration with the order **on
+the entry**, and `Progress` / `Event` / `Comment` are what happened. `Event` is append-only
+and is the truth; `Progress` is a fast lookup.
+
+The rules are one file, `StepGate`, and it is pure. The use case calls it to decide and the
+projection calls the same functions to tell the screen *why* a control is disabled — so the
+two cannot drift into disagreeing, which is how a permission system ends up with a button
+that looks available and then refuses. The answer travels on the wire as `can_tick` and
+`locked_reason`; the client never recomputes either.
+
+What is gated by what, because it is three different things and they were easy to confuse:
+
+| | Gated by |
+|---|---|
+| Building the library and the checklists | `project.config` — the same permission that owns columns and stages |
+| Ticking a step | The roles named on the step. Not a permission: it is the admin's statement about who checks this particular thing |
+| Commenting | Nothing. Anyone who can see the project, stakeholders included |
+
+**No new permission key, on purpose.** A new key would be held by nobody until an
+administrator granted it to every role by hand, so the feature would have shipped switched
+off in the one deployment that exists.
+
+**A `project.config` holder may tick anything, and the event records it as an override** —
+"Anand ticked this on behalf of QA", with a reason. The screen warns before it happens. That
+flag is the difference between an audit trail and a decoration.
+
+Answers to the questions §3 left open, as built:
+
+- **A step naming no role can be ticked by nobody, not by everybody.** The case that decides
+  it is a step whose last allowed role was deleted from the organisation: treating "no roles"
+  as unrestricted would silently turn the most carefully gated step in the project into the
+  only one anyone can tick. The screens say "needs a role" and everything already recorded
+  stands.
+- **Only ticking is ordered.** Un-ticking and blocking are always allowed. A sequence is a
+  claim about the order work is *done* in, never a reason to stop somebody correcting the
+  record.
+- **The refusal names the step in the way**, and names the earliest one rather than the
+  nearest — "step 1 is not done yet" is actionable; "out of order" sends somebody to do step
+  2, which they also cannot do.
+- **Taking a step off a checklist is refused once anything has been recorded against it.**
+  That one delete would take the ticks, the history and the comments with it by cascade. The
+  message points at retiring the step instead, which keeps everything.
+
+**Not built: module-scoped checklists.** The schema, the domain and the repository all carry
+`scope_type = 'module'`, because the rule is "the lowest level that exists" and a module with
+no sub-modules has to hold its own. What is missing is upstream: a module reaches the API as a
+*name* in the project's configuration and has no id on the wire, so there is nothing for a
+caller to attach a list to. Exposing module ids touches the configuration shape, the Configure
+screen and the matrix, so it is its own change. The API refuses `module` with that reason
+rather than guessing.
+
+### Per-project wording — built
+
+The three `*_label` columns are read and written. `PATCH /api/v1/config/vocabulary` sets them,
+one box at a time, from a panel on Configure; they arrive on `snapshot.project` and every
+screen reads them through one helper, `wordingOf`, which derives the plural, the lowercase and
+the mid-sentence form from the single word the admin typed.
+
+Three small decisions in that helper, each with a visible failure behind it: `Activity` →
+`Activities` rather than `Activitys`; `Journey` → `Journeys` rather than `Journeies`; and
+`CFX` stays `CFX` mid-sentence rather than becoming `3 cfx`, which reads as a typo.
+
+**Only the labels move.** Nothing renames a table, a permission key or a route — those are
+written into stored rows and into client code, and following a text box with a migration every
+time somebody edited it would be a bad trade for a heading. Which also means it is safe to try
+a word and change your mind, and the panel says so.
+
+### The small pile — built
+
+- **Move a sub-module between modules from its own screen.** A picker where the breadcrumb
+  used to print the module name. Every cell travels with it: what was loaded is a fact about
+  the work, not about which heading it was filed under. The server checks the module is one
+  the project configures, and that `(module, name)` stays unique.
+- **Counts per module on the landing page** — `SBC — 12 of 19 in prod`, beside the average.
+  "In prod" means readiness 100%, the same definition the matrix and the FNI gate already use,
+  rather than a second definition of finished that could drift away from theirs. The two
+  numbers disagree exactly when it matters: nineteen activities at 95% is an average that
+  reads well and a release with nothing in production.
+- **The "recent changes" panel is gone.** The link to the Audit screen stays, because "where
+  did the feed go" is the obvious next question.
+- **Invitation links stop disappearing.** Issued links are written into the browser's own
+  storage and stay on the console until explicitly cleared, with a copy button each. And
+  **reissue**: `POST /api/v1/platform/organisations/{id}/invitations/{userId}/reissue` mints a
+  fresh token for somebody who has not accepted, which is the only repair there has ever been
+  — the server stores a hash and can never show a link again. The previous link stops working
+  immediately, because two live links into one account would be a second way in that nobody is
+  tracking. Refused for an account that has already accepted: that is a password reset wearing
+  the wrong name.
+
+### What this cost in tests
+
+**75 backend tests**, up from 46. Fourteen pin `StepGate` as functions; fifteen drive
+`StepUseCases` end to end against the in-memory store — who may tick, what an override
+records, what a strict order refuses and names, that un-ticking is never held up by it, that
+retiring keeps history, that removing a ticked entry is refused. **31 frontend tests**, up
+from 22, the nine new ones on the wording.
+
+**Nine more MySQL integration tests were written and have not run.** There is no MySQL on this
+machine, so all 25 integration tests skip. Until they are run, `JdbcStepRepository` is in
+exactly the position the whole JDBC layer was in before 11 Sept: written, type-checked,
+reviewed, never executed. That is precisely where the last three real bugs were found — see
+§4. `mtms-backend/scripts/mysql-dev.sh up` and then `./mvn.sh test`.
+
+**No screen was clicked.** The API cannot be signed into here: an empty in-memory database has
+no accounts and nothing creates one since the seeder was removed. The service was started from
+the built JAR and every new route answers 401 rather than 404, so the wiring is real — but the
+checklist panel, the wording editor and the invitation list are type-checked and built, not
+used.
+
+### And the release itself
+
+`scripts/release.sh` replaces the nine loose commands in `com.txt`: `build`, `package`,
+`deploy`, `restart`, `status`. Three of those commands were destructive and one was silently
+order-dependent, which is a bad shape for something pasted in by hand at the end of a day. It
+also runs the tests, copies `public/` into the standalone bundle (Next.js does not, and
+missing it serves HTML with no assets), and says which log holds the reason when something is
+down.
+
+---
+
+## 3. Steps — the main new feature · **built 16 Sept, see §2a**
 
 **In one sentence:** a reusable checklist that the admin builds once and then attaches to
 whichever modules and sub-modules need it, where only the right role can tick each item.
@@ -384,10 +517,9 @@ another's rows. **62 tests pass** (46 domain + 16 integration).
   in a different vocabulary from the service now. `mtms-static` is the one shown to clients,
   so it is worth doing; `mtms/` is the folder already marked for deletion, and renaming it
   before deciding that would be wasted work.
-- **Each project picking its own words** is the other half of section 1 and is not started.
-  The three columns exist in the database (`module_label`, `sub_module_label`,
-  `sub_activity_label`); nothing reads them yet, so every screen still shows the built-in
-  words.
+- **Each project picking its own words** — **done 16 Sept**, see §2a. The three columns
+  (`module_label`, `sub_module_label`, `sub_activity_label`) are read and written, and every
+  screen in `mtms-frontend` prints them. `mtms-static` still shows the built-in words.
 
 ### Discussions on modules and sub-modules · medium
 
@@ -443,7 +575,7 @@ Wanted:
 
 This is the same switch the owner teams read from, so build the two together.
 
-### Change the module from the sub-module screen · small
+### Change the module from the sub-module screen · **done 16 Sept**
 
 Today, if a sub-module is filed under the wrong module, the only way to move it is to go
 back to the matrix and change it there. That is two screens away from where you noticed the
@@ -451,7 +583,7 @@ problem.
 
 Wanted: a module picker on the sub-module screen itself, so it can be moved in place.
 
-### Counts per module on the landing page · small
+### Counts per module on the landing page · **done 16 Sept**
 
 After signing in, the landing page should show, for each module, **how many of its
 sub-modules are live in production.** Something like `SBC — 12 of 19 in prod`.
@@ -459,7 +591,7 @@ sub-modules are live in production.** Something like `SBC — 12 of 19 in prod`.
 The data already exists — production is just a column, and the app already counts ticks per
 column. This is a new panel on a screen that exists, not new machinery.
 
-### Remove the "recent changes" panel · trivial
+### Remove the "recent changes" panel · **done 16 Sept**
 
 Asked for on 15 Sept. It is being dropped from the screen it sits on.
 
@@ -477,7 +609,7 @@ minutes.
 **Fixed by** marking every project in the organisation as changed, not just the new one.
 Creating a project and granting or removing an administrator all do this now.
 
-### Invitation links must stop disappearing · small
+### Invitation links must stop disappearing · **done 16 Sept**
 
 Noticed 16 Sept. When you invite somebody, the single-use link appears in a notice bar that
 you can dismiss — and that vanishes the moment you do anything else on the screen. If you
@@ -538,6 +670,12 @@ the admin defines, the step configurations, the discussion, and the full list of
 ---
 
 ## 5. Ideas worth considering
+
+> **The short list of what to pick up next is now `todo-next.md`.** It takes the items below,
+> reorders them by what the 16 Sept release changed — three got much cheaper, one stopped being
+> optional, one unblocks four others — and leads with the integration tests, which have still
+> never run. This section stays as the full reasoning behind each idea.
+
 
 You asked what else could make this one of a kind for product management. These are ordered
 by how much I think each one is worth.
@@ -602,13 +740,18 @@ by how much I think each one is worth.
 
 ## 6. What happens next
 
-The model is settled (section 3a). The order agreed on 11 Sept:
+The order agreed on 11 Sept, and where it stands:
 
-1. **Write the MySQL schema in its final shape** — new tables, renamed tables, steps,
-   owners, discussions, per-project wording, all in one file. Nothing to migrate later,
-   because nothing is live yet.
-2. **Port the database code** to MySQL and get the tests green.
-3. **Then build the features** into a database that already fits them.
+1. ~~**Write the MySQL schema in its final shape**~~ — done 11 Sept, and it has not been
+   touched since. Steps and the wording columns landed on 16 Sept with no migration, which is
+   what that decision bought.
+2. ~~**Port the database code** to MySQL and get the tests green.~~ — done 11 Sept.
+3. **Build the features** into a database that already fits them. Steps and per-project
+   wording are done (§2a). Still to build: **owners**, **roles per project**,
+   **discussions**, the rebuilt module screen, and parent/child columns on Configure.
+
+The first thing to do on the next machine that has a database is run the integration tests.
+Nine of them were written for steps and none has executed.
 
 ### Nothing is blocking
 

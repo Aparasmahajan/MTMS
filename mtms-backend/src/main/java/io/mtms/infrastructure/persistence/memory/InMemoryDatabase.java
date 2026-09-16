@@ -5,6 +5,7 @@ import io.mtms.domain.model.Defects;
 import io.mtms.domain.model.Drift;
 import io.mtms.domain.model.Modules;
 import io.mtms.domain.model.Projects;
+import io.mtms.domain.model.Steps;
 import io.mtms.domain.model.Tenancy;
 import java.util.List;
 import java.util.Map;
@@ -51,6 +52,13 @@ public class InMemoryDatabase {
   public final List<Modules.Run> runs = new CopyOnWriteArrayList<>();
   public final List<Modules.LibraryEntry> library = new CopyOnWriteArrayList<>();
 
+  public final List<Steps.Definition> stepDefinitions = new CopyOnWriteArrayList<>();
+  public final List<Steps.StepList> stepLists = new CopyOnWriteArrayList<>();
+  public final List<Steps.Entry> stepEntries = new CopyOnWriteArrayList<>();
+  public final List<Steps.Progress> stepProgress = new CopyOnWriteArrayList<>();
+  public final List<Steps.Event> stepEvents = new CopyOnWriteArrayList<>();
+  public final List<Steps.Comment> stepComments = new CopyOnWriteArrayList<>();
+
   public final List<Defects.Defect> defects = new CopyOnWriteArrayList<>();
   public final List<Audit.AuditEntry> audit = new CopyOnWriteArrayList<>();
   public final List<Audit.PlatformAuditEntry> platformAudit = new CopyOnWriteArrayList<>();
@@ -77,6 +85,7 @@ public class InMemoryDatabase {
     List.of(
             tenants, users, roles, memberships, invitations, refreshTokens,
             projects, columns, subModules, subActivities, cells, links, runs, library,
+            stepDefinitions, stepLists, stepEntries, stepProgress, stepEvents, stepComments,
             defects, audit, platformAudit, events,
             driftDeliverables, driftObservations, driftReports, driftPromotions)
         .forEach(List::clear);

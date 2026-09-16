@@ -2,14 +2,17 @@ package io.mtms.infrastructure.persistence.jdbc;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.mtms.application.port.ProjectData;
+import io.mtms.application.port.StepData;
 import io.mtms.domain.PermissionKey;
 import io.mtms.domain.model.Audit;
 import io.mtms.domain.model.Modules;
 import io.mtms.domain.model.Projects;
+import io.mtms.domain.model.Steps;
 import io.mtms.domain.model.Tenancy;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -56,6 +59,7 @@ class JdbcRepositoriesMySqlTest {
   private static JdbcAccessRepository access;
   private static JdbcProjectRepository projects;
   private static JdbcSubModuleRepository subModules;
+  private static JdbcStepRepository steps;
 
   @BeforeAll
   static void migrate() {
@@ -75,7 +79,8 @@ class JdbcRepositoriesMySqlTest {
     jdbc = new JdbcTemplate(ds);
     ObjectMapper mapper = new ObjectMapper();
     access = new JdbcAccessRepository(jdbc);
-    projects = new JdbcProjectRepository(jdbc, mapper);
+    steps = new JdbcStepRepository(jdbc);
+    projects = new JdbcProjectRepository(jdbc, mapper, steps);
     subModules = new JdbcSubModuleRepository(jdbc, mapper);
 
     access.insertTenant(
@@ -403,6 +408,238 @@ class JdbcRepositoriesMySqlTest {
       assertEquals("FILECR·PROD", read.get(0).label());
       assertEquals(subModuleId, read.get(0).subModuleId());
       assertEquals(NOW, read.get(0).at());
+    }
+  }
+
+  /**
+   * Steps, against the real server.
+   *
+   * <p>Five of these exist because of things only InnoDB says out loud: a CHECK constraint that
+   * refuses a blocked row with no reason, a cascade that takes a step's history with its entry,
+   * and a join table that empties itself when a role is deleted. None of that is true of the
+   * in-memory repository, so none of it would ever have been noticed there.
+   */
+  @Nested
+  @DisplayName("steps")
+  class StepStorage {
+
+    private UUID role(String key) {
+      UUID id = UUID.randomUUID();
+      access.insertRole(
+          new Tenancy.Role(id, TENANT, key, key.toUpperCase(), "", "", false, Set.of(PermissionKey.PROJECT_VIEW)));
+      return id;
+    }
+
+    private UUID subModule(UUID projectId, String name) {
+      UUID id = UUID.randomUUID();
+      subModules.insert(
+          new Modules.SubModule(id, projectId, "SBC", name, null, null, null, null, null, NOW));
+      return id;
+    }
+
+    @Test
+    @DisplayName("a definition round-trips with the roles allowed to tick it")
+    void definitionRoles() {
+      UUID project = newProject();
+      UUID qa = role("qa" + UUID.randomUUID().toString().substring(0, 6));
+      UUID sme = role("sme" + UUID.randomUUID().toString().substring(0, 6));
+
+      UUID id = UUID.randomUUID();
+      steps.insertDefinition(
+          new Steps.Definition(id, project, "Received CIQ", "from the customer", Set.of(qa, sme), null, NOW));
+
+      Steps.Definition read = steps.definition(project, id).orElseThrow();
+      assertEquals(Set.of(qa, sme), read.roleIds());
+      assertEquals("from the customer", read.description());
+      assertEquals(NOW, read.createdAt());
+    }
+
+    @Test
+    @DisplayName("the order lives on the entry, so one step is first here and third there")
+    void orderIsPerList() {
+      UUID project = newProject();
+      UUID one = subModule(project, "ACTIVITY_ONE");
+      UUID two = subModule(project, "ACTIVITY_TWO");
+
+      UUID ciq = UUID.randomUUID();
+      UUID test = UUID.randomUUID();
+      steps.insertDefinition(new Steps.Definition(ciq, project, "CIQ", "", Set.of(), null, NOW));
+      steps.insertDefinition(new Steps.Definition(test, project, "Testing", "", Set.of(), null, NOW));
+
+      UUID listA = UUID.randomUUID();
+      UUID listB = UUID.randomUUID();
+      steps.insertList(
+          new Steps.StepList(listA, project, "config1", Steps.ScopeType.SUB_MODULE, one, true, null, NOW));
+      steps.insertList(
+          new Steps.StepList(listB, project, "config2", Steps.ScopeType.SUB_MODULE, two, false, null, NOW));
+
+      steps.insertEntry(new Steps.Entry(UUID.randomUUID(), listA, ciq, 0));
+      steps.insertEntry(new Steps.Entry(UUID.randomUUID(), listA, test, 1));
+      // The same two steps, the other way round.
+      steps.insertEntry(new Steps.Entry(UUID.randomUUID(), listB, test, 0));
+      steps.insertEntry(new Steps.Entry(UUID.randomUUID(), listB, ciq, 1));
+
+      StepData data = steps.load(project);
+      assertEquals("CIQ", data.resolve(Steps.ScopeType.SUB_MODULE, one).get(0).entries().get(0).definition().name());
+      assertEquals("Testing", data.resolve(Steps.ScopeType.SUB_MODULE, two).get(0).entries().get(0).definition().name());
+    }
+
+    @Test
+    @DisplayName("a tick round-trips, and the event that made it stays")
+    void tickAndEvent() {
+      UUID project = newProject();
+      UUID subModuleId = subModule(project, "ACTIVITY_TICK");
+      UUID userId = UUID.randomUUID();
+      access.insertUser(
+          new Tenancy.UserWithSecret(
+              new Tenancy.User(userId, TENANT, userId + "@azalio.io", "Vinayak", false,
+                  Tenancy.UserStatus.ACTIVE, null, NOW),
+              "hash", null, null));
+
+      UUID definition = UUID.randomUUID();
+      steps.insertDefinition(new Steps.Definition(definition, project, "Testing done", "", Set.of(), null, NOW));
+
+      UUID listId = UUID.randomUUID();
+      steps.insertList(
+          new Steps.StepList(listId, project, "config1", Steps.ScopeType.SUB_MODULE, subModuleId, false, null, NOW));
+      UUID entryId = UUID.randomUUID();
+      steps.insertEntry(new Steps.Entry(entryId, listId, definition, 0));
+
+      steps.upsertProgress(new Steps.Progress(entryId, Steps.State.DONE, null, userId, NOW));
+      steps.appendEvent(
+          new Steps.Event(UUID.randomUUID(), entryId, Steps.State.TODO, Steps.State.DONE, false, null, userId, "Vinayak", NOW));
+
+      StepData data = steps.load(project);
+      assertEquals(Steps.State.DONE, data.resolveOne(steps.list(project, listId).orElseThrow())
+          .entries().get(0).progress().state());
+      assertEquals(NOW, data.eventsOf(entryId).get(0).at());
+      // The display name comes from the LEFT JOIN, not from the event row.
+      assertEquals("Vinayak", data.eventsOf(entryId).get(0).byName());
+    }
+
+    /** The CHECK constraint. MySQL below 8.0.16 parses this and ignores it — hence the minimum. */
+    @Test
+    @DisplayName("MySQL refuses a blocked step with no reason")
+    void blockedNeedsAReason() {
+      UUID project = newProject();
+      UUID subModuleId = subModule(project, "ACTIVITY_BLOCK");
+      UUID definition = UUID.randomUUID();
+      steps.insertDefinition(new Steps.Definition(definition, project, "Prod load", "", Set.of(), null, NOW));
+
+      UUID listId = UUID.randomUUID();
+      steps.insertList(
+          new Steps.StepList(listId, project, "config1", Steps.ScopeType.SUB_MODULE, subModuleId, false, null, NOW));
+      UUID entryId = UUID.randomUUID();
+      steps.insertEntry(new Steps.Entry(entryId, listId, definition, 0));
+
+      assertThrows(
+          Exception.class,
+          () -> steps.upsertProgress(new Steps.Progress(entryId, Steps.State.BLOCKED, null, null, NOW)));
+    }
+
+    @Test
+    @DisplayName("archiving a step hides it from the checklists and keeps its history")
+    void archivingKeepsHistory() {
+      UUID project = newProject();
+      UUID subModuleId = subModule(project, "ACTIVITY_ARCHIVE");
+      UUID definition = UUID.randomUUID();
+      steps.insertDefinition(new Steps.Definition(definition, project, "Old step", "", Set.of(), null, NOW));
+
+      UUID listId = UUID.randomUUID();
+      steps.insertList(
+          new Steps.StepList(listId, project, "config1", Steps.ScopeType.SUB_MODULE, subModuleId, false, null, NOW));
+      UUID entryId = UUID.randomUUID();
+      steps.insertEntry(new Steps.Entry(entryId, listId, definition, 0));
+      steps.appendEvent(
+          new Steps.Event(UUID.randomUUID(), entryId, Steps.State.TODO, Steps.State.DONE, false, null, null, null, NOW));
+
+      steps.archiveDefinition(definition, NOW);
+
+      StepData data = steps.load(project);
+      assertTrue(data.resolve(Steps.ScopeType.SUB_MODULE, subModuleId).get(0).entries().isEmpty());
+      // Gone from the screen, still in the record. That is the whole point of archiving.
+      assertEquals(1, data.eventsOf(entryId).size());
+    }
+
+    @Test
+    @DisplayName("one project cannot see another's checklists")
+    void isolatesProjects() {
+      UUID mine = newProject();
+      UUID theirs = newProject();
+      UUID subModuleId = subModule(theirs, "ACTIVITY_THEIRS");
+
+      UUID definition = UUID.randomUUID();
+      steps.insertDefinition(new Steps.Definition(definition, theirs, "Theirs", "", Set.of(), null, NOW));
+      UUID listId = UUID.randomUUID();
+      steps.insertList(
+          new Steps.StepList(listId, theirs, "config1", Steps.ScopeType.SUB_MODULE, subModuleId, false, null, NOW));
+      steps.insertEntry(new Steps.Entry(UUID.randomUUID(), listId, definition, 0));
+
+      assertTrue(steps.load(mine).lists().isEmpty());
+      assertTrue(steps.load(mine).definitions().isEmpty());
+      assertEquals(1, steps.load(theirs).lists().size());
+    }
+  }
+
+  @Nested
+  @DisplayName("per-project wording")
+  class Vocabulary {
+
+    @Test
+    @DisplayName("the three labels round-trip, and a new project starts on the defaults")
+    void roundTrip() {
+      UUID project = newProject();
+      assertEquals("Module", projects.findById(TENANT, project).orElseThrow().vocabulary().module());
+
+      projects.updateVocabulary(project, new Projects.Vocabulary("Node", "Activity", "Sub-activity"));
+
+      Projects.Vocabulary read = projects.findById(TENANT, project).orElseThrow().vocabulary();
+      assertEquals("Node", read.module());
+      assertEquals("Activity", read.subModule());
+      assertEquals("Sub-activity", read.subActivity());
+    }
+
+    /** Renaming or archiving a project must not quietly reset the words it chose. */
+    @Test
+    @DisplayName("an ordinary project update leaves the wording alone")
+    void updateDoesNotResetWording() {
+      UUID project = newProject();
+      projects.updateVocabulary(project, new Projects.Vocabulary("Node", "Activity", "Piece"));
+
+      Projects.Project current = projects.findById(TENANT, project).orElseThrow();
+      projects.update(
+          new Projects.Project(
+              current.id(), current.tenantId(), current.key(), "Renamed", current.description(),
+              current.configured(), current.archived(), current.createdAt()));
+
+      assertEquals("Node", projects.findById(TENANT, project).orElseThrow().vocabulary().module());
+    }
+  }
+
+  @Nested
+  @DisplayName("moving a sub-module between modules")
+  class MoveModule {
+
+    @Test
+    @DisplayName("it changes the module and keeps every cell")
+    void keepsCells() {
+      UUID project = newProject();
+      UUID id = UUID.randomUUID();
+      subModules.insert(
+          new Modules.SubModule(id, project, "SBC", "ACTIVITY_MOVE", null, "Paras", null, null, null, NOW));
+      subModules.upsertCell(new Modules.Cell(id, null, "filecr_prod", "prod", "Narayana", NOW));
+
+      Modules.SubModule current = subModules.find(project, id).orElseThrow();
+      subModules.update(
+          new Modules.SubModule(
+              current.id(), current.projectId(), "CFX", current.name(), current.libraryEntryId(),
+              current.owner(), current.fniTargetDate(), current.fniClosedAt(), current.fniClosedBy(),
+              current.createdAt()));
+
+      assertEquals("CFX", subModules.find(project, id).orElseThrow().moduleName());
+      // The deliverable row travels with it: what was loaded is a fact about the work, not
+      // about which heading it was filed under.
+      assertEquals("prod", subModules.cells(id).get(0).status());
     }
   }
 }
