@@ -2,8 +2,11 @@ package io.mtms.infrastructure.persistence.memory;
 
 import io.mtms.application.port.ProjectData;
 import io.mtms.application.port.ProjectRepository;
+import io.mtms.application.port.DiscussionRepository;
+import io.mtms.application.port.OwnerRepository;
 import io.mtms.application.port.StepRepository;
 import io.mtms.domain.StatusVocabulary;
+import io.mtms.domain.model.Modules;
 import io.mtms.domain.model.Projects;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -23,10 +26,15 @@ public class InMemoryProjectRepository implements ProjectRepository {
 
   private final InMemoryDatabase db;
   private final StepRepository steps;
+  private final OwnerRepository owners;
+  private final DiscussionRepository discussions;
 
-  public InMemoryProjectRepository(InMemoryDatabase db, StepRepository steps) {
+  public InMemoryProjectRepository(
+      InMemoryDatabase db, StepRepository steps, OwnerRepository owners, DiscussionRepository discussions) {
     this.db = db;
     this.steps = steps;
+    this.owners = owners;
+    this.discussions = discussions;
   }
 
   @Override
@@ -64,7 +72,9 @@ public class InMemoryProjectRepository implements ProjectRepository {
             db.driftObservations.stream().filter(o -> o.projectId().equals(projectId)).toList(),
             db.driftReports.stream().filter(r -> r.projectId().equals(projectId)).toList(),
             db.driftPromotions.stream().filter(p -> p.projectId().equals(projectId)).toList(),
-            steps.load(projectId)));
+            steps.load(projectId),
+            owners.load(projectId),
+            discussions.load(projectId)));
   }
 
   @Override
@@ -133,6 +143,29 @@ public class InMemoryProjectRepository implements ProjectRepository {
   @Override
   public long currentRevision(UUID projectId) {
     return db.revision(projectId);
+  }
+
+  @Override
+  public void updateModuleDescription(UUID moduleId, String description) {
+    Projects.ProjectConfig current =
+        db.configs.values().stream()
+            .filter(config -> config.moduleById(moduleId).isPresent())
+            .findFirst()
+            .orElse(null);
+    if (current == null) {
+      return;
+    }
+    db.configs.put(
+        current.projectId(),
+        new Projects.ProjectConfig(
+            current.projectId(),
+            current.modules().stream()
+                .map(module -> module.id().equals(moduleId) ? module.withDescription(description) : module)
+                .toList(),
+            current.stages(),
+            current.owners(),
+            current.linkTypes(),
+            current.environments()));
   }
 
   // --- Columns ---------------------------------------------------------------
@@ -255,7 +288,7 @@ public class InMemoryProjectRepository implements ProjectRepository {
       Projects.ProjectConfig config, List<Projects.Environment> environments) {
     return new Projects.ProjectConfig(
         config.projectId(),
-        config.moduleNames(),
+        config.modules(),
         config.stages(),
         config.owners(),
         config.linkTypes(),
@@ -266,14 +299,25 @@ public class InMemoryProjectRepository implements ProjectRepository {
       Projects.ProjectConfig config, Projects.ConfigList list, String value) {
 
     return switch (list) {
-      case MODULES -> new Projects.ProjectConfig(
-          config.projectId(), append(config.moduleNames(), value), config.stages(),
-          config.owners(), config.linkTypes(), config.environments());
+      case MODULES -> {
+        // A record, not a string: a module carries an id because a checklist, owners and a
+        // discussion all hang off one. Adding a name that is already there changes nothing,
+        // which is the same answer the JDBC side gets from ON DUPLICATE KEY UPDATE.
+        List<Modules.Module> modules = new ArrayList<>(config.modules());
+        if (modules.stream().noneMatch(module -> module.name().equals(value))) {
+          modules.add(
+              new Modules.Module(
+                  UUID.randomUUID(), config.projectId(), value, "", modules.size(), null));
+        }
+        yield new Projects.ProjectConfig(
+            config.projectId(), List.copyOf(modules), config.stages(),
+            config.owners(), config.linkTypes(), config.environments());
+      }
       case OWNERS -> new Projects.ProjectConfig(
-          config.projectId(), config.moduleNames(), config.stages(),
+          config.projectId(), config.modules(), config.stages(),
           append(config.owners(), value), config.linkTypes(), config.environments());
       case LINK_TYPES -> new Projects.ProjectConfig(
-          config.projectId(), config.moduleNames(), config.stages(),
+          config.projectId(), config.modules(), config.stages(),
           config.owners(), append(config.linkTypes(), value), config.environments());
       case STAGES -> {
         List<Projects.Stage> stages = new ArrayList<>(config.stages());
@@ -284,7 +328,7 @@ public class InMemoryProjectRepository implements ProjectRepository {
           stages.add(new Projects.Stage(id, value));
         }
         yield new Projects.ProjectConfig(
-            config.projectId(), config.moduleNames(), List.copyOf(stages),
+            config.projectId(), config.modules(), List.copyOf(stages),
             config.owners(), config.linkTypes(), config.environments());
       }
     };
@@ -294,17 +338,21 @@ public class InMemoryProjectRepository implements ProjectRepository {
       Projects.ProjectConfig config, Projects.ConfigList list, String value) {
 
     return switch (list) {
+      // Dropped from the visible list, which is what archiving looks like from in here. The
+      // JDBC side sets archived_at instead, and either way the sub-modules recorded against
+      // the module keep their work and find it again if the name comes back.
       case MODULES -> new Projects.ProjectConfig(
-          config.projectId(), remove(config.moduleNames(), value), config.stages(),
-          config.owners(), config.linkTypes(), config.environments());
+          config.projectId(),
+          config.modules().stream().filter(module -> !module.name().equals(value)).toList(),
+          config.stages(), config.owners(), config.linkTypes(), config.environments());
       case OWNERS -> new Projects.ProjectConfig(
-          config.projectId(), config.moduleNames(), config.stages(),
+          config.projectId(), config.modules(), config.stages(),
           remove(config.owners(), value), config.linkTypes(), config.environments());
       case LINK_TYPES -> new Projects.ProjectConfig(
-          config.projectId(), config.moduleNames(), config.stages(),
+          config.projectId(), config.modules(), config.stages(),
           config.owners(), remove(config.linkTypes(), value), config.environments());
       case STAGES -> new Projects.ProjectConfig(
-          config.projectId(), config.moduleNames(),
+          config.projectId(), config.modules(),
           config.stages().stream()
               .filter(stage -> !stage.label().equals(value) && !stage.id().equals(value))
               .toList(),

@@ -3,12 +3,16 @@ package io.mtms.application.usecase;
 import io.mtms.application.Actor;
 import io.mtms.application.ServiceException;
 import io.mtms.application.port.AccessRepository;
+import io.mtms.application.port.OwnerRepository;
 import io.mtms.application.port.StepRepository;
 import io.mtms.application.port.SubModuleRepository;
 import io.mtms.domain.PermissionKey;
 import io.mtms.domain.StepGate;
 import io.mtms.domain.model.Audit;
 import io.mtms.domain.model.Modules;
+import io.mtms.domain.model.Notifications;
+import io.mtms.domain.model.Owners;
+import io.mtms.domain.model.Scope;
 import io.mtms.domain.model.Steps;
 import io.mtms.domain.model.Tenancy;
 import java.time.Instant;
@@ -50,16 +54,22 @@ public class StepUseCases {
   private final StepRepository steps;
   private final SubModuleRepository subModules;
   private final AccessRepository access;
+  private final OwnerRepository owners;
+  private final NotificationUseCases notifications;
   private final MutationSupport support;
 
   public StepUseCases(
       StepRepository steps,
       SubModuleRepository subModules,
       AccessRepository access,
+      OwnerRepository owners,
+      NotificationUseCases notifications,
       MutationSupport support) {
     this.steps = steps;
     this.subModules = subModules;
     this.access = access;
+    this.owners = owners;
+    this.notifications = notifications;
     this.support = support;
   }
 
@@ -148,7 +158,7 @@ public class StepUseCases {
   @Transactional
   public UUID createList(
       Actor actor,
-      Steps.ScopeType scopeType,
+      Scope scopeType,
       UUID scopeId,
       String name,
       boolean enforceOrder,
@@ -176,11 +186,11 @@ public class StepUseCases {
     support.record(
         actor,
         projectId,
-        scopeType == Steps.ScopeType.MODULE ? Audit.Scope.PROJECT : Audit.Scope.MODULE,
+        scopeType == Scope.MODULE ? Audit.Scope.PROJECT : Audit.Scope.MODULE,
         "STEPS",
         "checklist added — " + trimmed + ", " + order + (order == 1 ? " step" : " steps"),
-        scopeType == Steps.ScopeType.SUB_MODULE ? scopeId : null,
-        scopeType == Steps.ScopeType.SUB_ACTIVITY ? scopeId : null);
+        scopeType == Scope.SUB_MODULE ? scopeId : null,
+        scopeType == Scope.SUB_ACTIVITY ? scopeId : null);
     support.bump(projectId);
     return list.id();
   }
@@ -303,6 +313,100 @@ public class StepUseCases {
     support.bump(projectId);
   }
 
+  /**
+   * Copies one checklist onto every sub-module of a module.
+   *
+   * <p>Without this the feature does not survive contact with a real project. CR_AUTOMATION has
+   * eighteen sub-modules today and the real number is in the hundreds; nobody is going to attach
+   * a checklist to two hundred things one at a time, so a checklist gets built on a handful of
+   * rows as a demonstration and then abandoned.
+   *
+   * <p>Three decisions, and the second is the one that could have gone badly:
+   *
+   * <ul>
+   *   <li><strong>It copies, it does not link.</strong> Each sub-module gets its own list and its
+   *       own entries, so ticking one does not tick forty and an admin can edit one afterwards
+   *       without touching the rest. The same choice the module library already makes.
+   *   <li><strong>It adds alongside, it never replaces.</strong> A sub-module that already has a
+   *       checklist keeps it. A bulk action that silently overwrote somebody's bespoke list is
+   *       the kind of thing that gets a tool banned, and the model allows several lists on one
+   *       thing precisely so this does not have to choose.
+   *   <li><strong>Sub-modules that already have a list by this name are skipped</strong>, not
+   *       duplicated — so running it twice after adding a sub-module does the obvious thing
+   *       instead of leaving half the project with two copies.
+   * </ul>
+   *
+   * @return how many sub-modules it landed on. The caller reports it, because "applied to 0"
+   *     and "applied to 40" look identical otherwise.
+   */
+  @Transactional
+  public int applyToModule(Actor actor, UUID listId, String moduleName) {
+    actor.require(PermissionKey.PROJECT_CONFIG);
+    UUID projectId = actor.projectId();
+
+    Steps.StepList source = requireList(projectId, listId);
+    Steps.ResolvedList resolved = steps.load(projectId).resolveOne(source);
+
+    if (resolved.entries().isEmpty()) {
+      throw ServiceException.validation(
+          "\"" + source.name() + "\" has no steps on it yet, so there is nothing to apply.");
+    }
+
+    List<Modules.SubModule> targets =
+        subModules.findAll(projectId).stream()
+            .filter(subModule -> subModule.moduleName().equals(moduleName))
+            .filter(subModule -> !subModule.id().equals(source.scopeId()))
+            .toList();
+
+    if (targets.isEmpty()) {
+      throw ServiceException.validation(
+          "There are no other sub-modules on " + moduleName + " to apply it to.");
+    }
+
+    int applied = 0;
+    for (Modules.SubModule target : targets) {
+      boolean already =
+          steps.listsFor(projectId, Scope.SUB_MODULE, target.id()).stream()
+              .anyMatch(list -> !list.isArchived() && list.name().equals(source.name()));
+      if (already) {
+        continue;
+      }
+
+      Steps.StepList copy =
+          new Steps.StepList(
+              UUID.randomUUID(),
+              projectId,
+              source.name(),
+              Scope.SUB_MODULE,
+              target.id(),
+              source.enforceOrder(),
+              null,
+              Instant.now());
+      steps.insertList(copy);
+
+      int order = 0;
+      for (Steps.ResolvedEntry entry : resolved.entries()) {
+        steps.insertEntry(
+            new Steps.Entry(UUID.randomUUID(), copy.id(), entry.definition().id(), order++));
+      }
+      applied++;
+    }
+
+    support.recordProjectChange(
+        actor,
+        projectId,
+        "STEPS",
+        "checklist applied — "
+            + source.name()
+            + " to "
+            + applied
+            + (applied == 1 ? " sub-module on " : " sub-modules on ")
+            + moduleName
+            + (applied == targets.size() ? "" : ", skipping those that already had it"));
+    support.bump(projectId);
+    return applied;
+  }
+
   // ---------------------------------------------------------------------------
   // Ticking
   // ---------------------------------------------------------------------------
@@ -397,20 +501,118 @@ public class StepUseCases {
                 + ")"
             : "";
 
-    Scope scope = scopeOf(projectId, list);
+    AuditTarget where = scopeOf(projectId, list);
+    announce(actor, list, entry, definition, target, reason, where);
     support.record(
         actor,
         projectId,
-        scope.auditScope(),
+        where.auditScope(),
         "STEPS",
         definition.name()
             + " — "
             + StepGate.describe(current, target)
             + onBehalf
             + (target == Steps.State.BLOCKED ? " — " + reason.trim() : ""),
-        scope.subModuleId(),
-        scope.subActivityId());
+        where.subModuleId(),
+        where.subActivityId());
     support.bump(projectId);
+  }
+
+  /**
+   * Tells the people who are waiting.
+   *
+   * <p>Two events, and only two. Every other state change on a checklist concerns the person who
+   * made it and nobody else, and notifying on all of them is how a tool becomes noisy on day
+   * three, gets muted, and loses the channel permanently.
+   *
+   * <ul>
+   *   <li><strong>Blocked</strong> goes to the owners of the thing, with the reason. They are
+   *       the people who can unstick it, and "blocked" with no reason tells nobody anything.
+   *   <li><strong>Done</strong>, on an ordered list, goes to whoever may tick the step it just
+   *       unblocked. This is the one that made notifications stop being optional: a strict
+   *       order blocks the owner of step 2 until step 1 is ticked, and nothing else would ever
+   *       tell them it was.
+   * </ul>
+   */
+  private void announce(
+      Actor actor,
+      Steps.StepList list,
+      Steps.Entry entry,
+      Steps.Definition definition,
+      Steps.State target,
+      String reason,
+      AuditTarget where) {
+
+    String link = where.subModuleId() == null ? "/matrix" : "/sub-modules/" + where.subModuleId();
+
+    if (target == Steps.State.BLOCKED) {
+      Set<UUID> ownerIds =
+          owners.findByScope(actor.projectId(), list.scopeType(), list.scopeId()).stream()
+              .map(Owners.Owner::userId)
+              .collect(java.util.stream.Collectors.toUnmodifiableSet());
+
+      notifications.notify(
+          actor,
+          ownerIds,
+          Notifications.Kind.STEP_BLOCKED,
+          definition.name() + " is blocked",
+          reason == null ? "" : reason.trim(),
+          link);
+      return;
+    }
+
+    if (target != Steps.State.DONE || !list.enforceOrder()) {
+      return;
+    }
+
+    // Re-read, so the freshly-ticked state is in it. `nextTickable` is asking what is true now,
+    // not what was true when this method was entered.
+    Steps.ResolvedList resolved = steps.load(actor.projectId()).resolveOne(list);
+    nextTickable(resolved, entry.id())
+        .ifPresent(
+            next ->
+                notifications.notify(
+                    actor,
+                    notifications.holdersOf(actor, next.definition().roleIds()),
+                    Notifications.Kind.STEP_READY,
+                    next.definition().name() + " is ready to tick",
+                    actor.who()
+                        + " finished \""
+                        + definition.name()
+                        + "\" on "
+                        + list.name()
+                        + ", which was the last thing in the way.",
+                    link));
+  }
+
+  /**
+   * The step that just became tickable, if one did.
+   *
+   * <p>The entry after the one that moved, and only when everything before it is now done — a
+   * list can have two outstanding steps, and ticking the first of them unblocks nobody.
+   */
+  private static Optional<Steps.ResolvedEntry> nextTickable(
+      Steps.ResolvedList list, UUID justTicked) {
+
+    List<Steps.ResolvedEntry> entries = list.entries();
+    for (int i = 0; i < entries.size(); i++) {
+      if (!entries.get(i).entry().id().equals(justTicked)) {
+        continue;
+      }
+      if (i + 1 >= entries.size()) {
+        return Optional.empty();
+      }
+
+      Steps.ResolvedEntry next = entries.get(i + 1);
+      if (next.progress().state().isDone()) {
+        return Optional.empty();
+      }
+      // Everything before it has to be done, not just the one that moved.
+      boolean clear =
+          entries.subList(0, i + 1).stream().allMatch(e -> e.progress().state().isDone());
+      return clear ? Optional.of(next) : Optional.empty();
+    }
+    return Optional.empty();
   }
 
   // ---------------------------------------------------------------------------
@@ -468,12 +670,12 @@ public class StepUseCases {
   // ---------------------------------------------------------------------------
 
   /** Which sub-module and sub-activity, if any, a list's audit entry should point at. */
-  private record Scope(Audit.Scope auditScope, UUID subModuleId, UUID subActivityId) {}
+  private record AuditTarget(Audit.Scope auditScope, UUID subModuleId, UUID subActivityId) {}
 
-  private Scope scopeOf(UUID projectId, Steps.StepList list) {
+  private AuditTarget scopeOf(UUID projectId, Steps.StepList list) {
     return switch (list.scopeType()) {
-      case MODULE -> new Scope(Audit.Scope.PROJECT, null, null);
-      case SUB_MODULE -> new Scope(Audit.Scope.MODULE, list.scopeId(), null);
+      case MODULE -> new AuditTarget(Audit.Scope.PROJECT, null, null);
+      case SUB_MODULE -> new AuditTarget(Audit.Scope.MODULE, list.scopeId(), null);
       case SUB_ACTIVITY -> {
         // The feed is read per sub-module, so a sub-activity's entry has to carry its parent or
         // it would never appear on the screen the change was made from.
@@ -486,7 +688,7 @@ public class StepUseCases {
                 .map(Modules.SubModule::id)
                 .findFirst()
                 .orElse(null);
-        yield new Scope(Audit.Scope.MODULE, parent, list.scopeId());
+        yield new AuditTarget(Audit.Scope.MODULE, parent, list.scopeId());
       }
     };
   }
@@ -544,7 +746,7 @@ public class StepUseCases {
    * change — it touches the configuration shape, the Configure screen and the matrix — and
    * guessing one here would be worse than refusing. Refusing with the reason is what this does.
    */
-  private void requireScope(UUID projectId, Steps.ScopeType scopeType, UUID scopeId) {
+  private void requireScope(UUID projectId, Scope scopeType, UUID scopeId) {
     switch (scopeType) {
       case SUB_MODULE -> subModules
           .find(projectId, scopeId)

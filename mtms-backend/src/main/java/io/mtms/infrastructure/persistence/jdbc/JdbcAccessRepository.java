@@ -214,6 +214,19 @@ public class JdbcAccessRepository implements AccessRepository {
         });
   }
 
+  @Override
+  public void updateRoleDetails(UUID roleId, String name, String note, String description) {
+    jdbc.update(
+        "UPDATE roles SET name = ?, note = ?, description = ? WHERE id = ?",
+        name, note, description, roleId);
+  }
+
+  @Override
+  public void setRoleArchived(UUID roleId, java.time.Instant archivedAt) {
+    jdbc.update(
+        "UPDATE roles SET archived_at = ? WHERE id = ?", Sql.timestamp(archivedAt), roleId);
+  }
+
   private static List<String> wire(Set<PermissionKey> permissions) {
     return permissions.stream().map(PermissionKey::wire).toList();
   }

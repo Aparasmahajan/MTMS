@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useTracker } from '@/components/TrackerProvider';
 import { Blueprint, PageTitle, SectionHeading } from '@/components/primitives';
+import { RolesPanel } from '@/components/access/RolesPanel';
 import { send } from '@/lib/client/api';
 import { PERMISSION_GROUPS, PERMISSION_LABELS, type PermissionKey } from '@/lib/shared/permissions';
 import type { Snapshot } from '@/lib/shared/views';
@@ -57,6 +58,9 @@ export default function AccessPage() {
   const alreadyHere = new Set(members.map((member) => member.user_id));
   const addable = users.filter((user) => !alreadyHere.has(user.id));
 
+  // Hidden roles are not offered anywhere. They are still in `roles` because rows already
+  // pointing at one have to render with a name rather than an id.
+  const liveRoles = roles.filter((role) => !role.hidden);
   const selectedRole = roles.find((role) => role.id === roleId);
   const previewLabels = selectedRole
     ? selectedRole.permissions.map((key) => PERMISSION_LABELS[key])
@@ -211,7 +215,7 @@ export default function AccessPage() {
             onChange={(event) => setRoleId(event.target.value)}
             aria-label="Role"
           >
-            {roles.map((role) => (
+            {liveRoles.map((role) => (
               <option key={role.id} value={role.id}>
                 {role.name}
               </option>
@@ -292,6 +296,12 @@ export default function AccessPage() {
         </div>
       </Blueprint>
 
+      {/*
+        Which roles exist sits above what they can do, because that is the order the decisions
+        get made in: a team decides it needs a Field Engineer before it decides what one may do.
+      */}
+      <RolesPanel />
+
       <Blueprint style={{ marginBottom: 'var(--space-8)' }}>
         <div
           style={{
@@ -316,7 +326,7 @@ export default function AccessPage() {
             <thead>
               <tr>
                 <th style={{ minWidth: 250 }}>Permission</th>
-                {roles.map((role) => (
+                {liveRoles.map((role) => (
                   <th key={role.id} style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
                     {role.name}
                     <div
@@ -359,7 +369,7 @@ export default function AccessPage() {
                         {key}
                       </div>
                     </td>
-                    {roles.map((role) => {
+                    {liveRoles.map((role) => {
                       const granted = role.permissions.includes(key);
                       return (
                         <td key={role.id} style={{ textAlign: 'center', padding: 'var(--space-1)' }}>
@@ -443,7 +453,7 @@ export default function AccessPage() {
                       )
                     }
                   >
-                    {roles.map((role) => (
+                    {liveRoles.map((role) => (
                       <option key={role.id} value={role.id}>
                         {role.name}
                       </option>
@@ -534,7 +544,7 @@ export default function AccessPage() {
           onChange={(event) => setMemberRoleId(event.target.value)}
           aria-label="Role for the new member"
         >
-          {roles.map((role) => (
+          {liveRoles.map((role) => (
             <option key={role.id} value={role.id}>
               {role.name}
             </option>

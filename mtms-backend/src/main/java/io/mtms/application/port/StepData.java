@@ -1,5 +1,6 @@
 package io.mtms.application.port;
 
+import io.mtms.domain.model.Scope;
 import io.mtms.domain.model.Steps;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -38,7 +39,7 @@ public record StepData(
    * and their comments are still in {@code comments} — hiding a configuration is not the same as
    * deleting what happened under it, and the change feed keeps showing both.
    */
-  public List<Steps.ResolvedList> resolve(Steps.ScopeType scopeType, UUID scopeId) {
+  public List<Steps.ResolvedList> resolve(Scope scopeType, UUID scopeId) {
     // Checked before anything is built. The projection calls this once per sub-module and once
     // per sub-activity, and most of them have no checklist — so the common case has to cost a
     // scan of a short list rather than two maps over the whole project's step data.

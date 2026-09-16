@@ -29,9 +29,17 @@ FRONTEND="$ROOT/mtms-frontend"
 
 JAR_NAME="mtms-api-1.0.0-SNAPSHOT.jar"
 
-# Where things live on the server. Overridable, because a second environment should not need
-# a second copy of this script.
+# Where things live on the server.
+#
+# These defaults are HRMSPRODUCTION's actual layout, not a guess: the JAR and its environment
+# file sit in ~/mtms/backend, the web bundle in ~/mtms/frontend, and the environment file is
+# called mtms.env rather than api.env. Every one is overridable, because the point of putting
+# them here is that a second environment needs different values, not a second copy of the
+# script.
 REMOTE_DIR="${MTMS_REMOTE_DIR:-\$HOME/mtms}"
+API_DIR="${MTMS_API_DIR:-\$HOME/mtms/backend}"
+WEB_DIR="${MTMS_WEB_DIR:-\$HOME/mtms/frontend}"
+ENV_FILE="${MTMS_ENV_FILE:-mtms.env}"
 API_PORT="${MTMS_API_PORT:-6011}"
 WEB_PORT="${MTMS_WEB_PORT:-6010}"
 
@@ -111,10 +119,25 @@ deploy() {
   package
 
   say "Copying to $MTMS_HOST"
-  ssh "$MTMS_HOST" "mkdir -p $REMOTE_DIR/frontend"
-  scp "$BACKEND/target/$JAR_NAME" "$MTMS_HOST:$REMOTE_DIR/"
-  scp "$FRONTEND/mtms-frontend.tar.gz" "$MTMS_HOST:$REMOTE_DIR/frontend/"
+  ssh "$MTMS_HOST" "mkdir -p $API_DIR $WEB_DIR"
+  scp "$BACKEND/target/$JAR_NAME" "$MTMS_HOST:$API_DIR/"
+  scp "$FRONTEND/mtms-frontend.tar.gz" "$MTMS_HOST:$WEB_DIR/"
   scp "$ROOT/scripts/release.sh" "$MTMS_HOST:$REMOTE_DIR/"
+
+  # Checksums, before anything is restarted.
+  #
+  # Not belt and braces. A transfer to this server once arrived as "Invalid or corrupt
+  # jarfile" while reporting a byte count that matched exactly, so size proves nothing and
+  # the failure surfaces as a service that will not start — ten minutes after you stopped
+  # the one that was working.
+  say "Verifying what landed"
+  local want_jar want_web
+  want_jar=$(md5sum "$BACKEND/target/$JAR_NAME" | cut -d' ' -f1)
+  want_web=$(md5sum "$FRONTEND/mtms-frontend.tar.gz" | cut -d' ' -f1)
+
+  ssh "$MTMS_HOST" "md5sum $API_DIR/$JAR_NAME $WEB_DIR/mtms-frontend.tar.gz"     | grep -q "$want_jar" || die "the JAR did not survive the copy — checksum differs. Re-run; do NOT restart."
+  ssh "$MTMS_HOST" "md5sum $WEB_DIR/mtms-frontend.tar.gz"     | grep -q "$want_web" || die "the frontend tarball did not survive the copy — checksum differs. Re-run; do NOT restart."
+  printf '  jar %s\n  web %s\n' "$want_jar" "$want_web"
 
   say "Restarting on $MTMS_HOST"
   ssh "$MTMS_HOST" "cd $REMOTE_DIR && bash release.sh restart"
@@ -125,12 +148,17 @@ deploy() {
 # ---------------------------------------------------------------------------
 
 restart() {
-  # Expects to be run from the directory holding the jar, api.env and frontend/.
-  local here
-  here="$(pwd)"
+  # Paths, not "wherever you happen to be". The JAR and the web bundle live in two different
+  # directories on this server, so a cwd-relative script would work from one of them and fail
+  # confusingly from the other.
+  local api_dir web_dir env_path
+  api_dir="$(eval echo "$API_DIR")"
+  web_dir="$(eval echo "$WEB_DIR")"
+  env_path="$api_dir/$ENV_FILE"
 
-  [ -f "$here/$JAR_NAME" ] || die "no $JAR_NAME here. Run this from $REMOTE_DIR on the server."
-  [ -f "$here/api.env" ] || die "no api.env here — see DEPLOYMENT.md section 3 for what goes in it."
+  [ -f "$api_dir/$JAR_NAME" ] || die "no $JAR_NAME in $api_dir. Set MTMS_API_DIR if it lives elsewhere."
+  [ -f "$env_path" ] || die "no $ENV_FILE in $api_dir — see deploy/api.env.example for what goes in it."
+  [ -f "$web_dir/mtms-frontend.tar.gz" ] || die "no mtms-frontend.tar.gz in $web_dir."
 
   say "Stopping"
   # -u $USER, so this cannot reach another account's processes on a shared box.
@@ -138,29 +166,39 @@ restart() {
   pkill -u "$USER" -f "node.*server.js" || true
   sleep 2
 
+  # A port still held two seconds after the kill means the old process is not gone, and the
+  # new one will exit on "Address already in use" — which lands in the log and nowhere else,
+  # looking exactly like a startup fault.
+  if command -v ss > /dev/null && ss -ltn 2>/dev/null | grep -qE ":($API_PORT|$WEB_PORT) "; then
+    say "A port is still held — waiting"
+    sleep 5
+  fi
+
   say "Unpacking the web app"
-  cd "$here/frontend"
+  cd "$web_dir"
+  # rm first: the tarball contains dist-frontend/, and untarring over an existing one merges
+  # rather than replaces, leaving stale chunks behind that nothing will ever serve but that
+  # make the directory listing lie about which build is there.
   rm -rf dist-frontend
   tar -xzf mtms-frontend.tar.gz
 
   say "Starting the API"
-  cd "$here"
-  # `set -a` exports everything the file defines. Quoting inside api.env still matters —
+  cd "$api_dir"
+  # `set -a` exports everything the file defines. Quoting inside the env file still matters —
   # DATABASE_URL contains `&`, and unquoted it runs as three commands and never gets set.
   set -a
-  # shellcheck disable=SC1091
-  . ./api.env
+  # shellcheck disable=SC1090
+  . "$env_path"
   set +a
   nohup java -jar "$JAR_NAME" > api.log 2>&1 &
 
   say "Starting the web app"
-  cd "$here/frontend/dist-frontend"
+  cd "$web_dir/dist-frontend"
   PORT="$WEB_PORT" HOSTNAME=0.0.0.0 nohup node server.js > ../web.log 2>&1 &
 
-  # Flyway runs on the API's first start and the JVM is not quick. Ten seconds is enough for
-  # both to be answering; the check below is what actually decides.
-  sleep 10
-  cd "$here"
+  # Flyway runs on the API's first start and the JVM is not quick. Twelve seconds is what this
+  # server has needed; the check below is what actually decides.
+  sleep 12
   status
 }
 
@@ -201,7 +239,10 @@ MTMS release
 
 Environment:
   MTMS_HOST           user@server — required for deploy
-  MTMS_REMOTE_DIR     where it lives on the server (default: \$HOME/mtms)
+  MTMS_REMOTE_DIR     where release.sh itself lives (default: \$HOME/mtms)
+  MTMS_API_DIR        the JAR and its env file (default: \$HOME/mtms/backend)
+  MTMS_WEB_DIR        the web bundle (default: \$HOME/mtms/frontend)
+  MTMS_ENV_FILE       env file name inside MTMS_API_DIR (default: mtms.env)
   MTMS_API_PORT       default 6011
   MTMS_WEB_PORT       default 6010
   API_PROXY_TARGET    where the web server reaches the API (default: http://localhost:6011)

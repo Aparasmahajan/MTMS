@@ -6,8 +6,8 @@ server on port 6010. They talk over HTTP, so they can sit on one machine or two.
 Built and checked together on 16 Sept 2026. *What was verified* at the end is also honest
 about what was not.
 
-**If you have deployed this before:** §0 is the whole of what changed. There is no migration
-— deploy the new JAR and the new frontend.
+**If you have deployed this before:** §0 is the whole of what changed. **There are now two
+migrations** — read the schema note below before deploying.
 
 ---
 
@@ -15,22 +15,42 @@ about what was not.
 
 | | |
 |---|---|
-| **Steps** — the reusable checklist | New feature, on tables the schema already had. New routes under `/api/v1/steps` |
-| **Per-project wording** | Reads the three `*_label` columns on `projects` that were already there and unused |
-| **Move a sub-module between modules** | `PATCH /api/v1/sub-modules/{id}` now accepts `module_name` |
-| **Per-module "in prod" counts** on the landing page | Frontend only, counted from data already in the snapshot |
-| **The "recent changes" panel** on the landing page | Removed, as asked on 15 Sept |
-| **Invitation links stop disappearing** | The console keeps issued links until cleared, and can reissue one |
+| **Steps** — the reusable checklist | New feature, on tables the schema already had. Routes under `/api/v1/steps` |
+| **Owners** — one overall plus one per team, at every level | New. `/api/v1/owners` |
+| **Roles per project** — an admin adds or hides a role | New. `/api/v1/roles`. **Migration V2** |
+| **Discussions** with @mentions | New. `/api/v1/discussions` |
+| **Notifications** — an in-app inbox, and an optional webhook | New. `/api/v1/notifications`. **Migration V3** |
+| **Per-project wording** | Reads the three `*_label` columns that were already there and unused |
+| **Move a sub-module between modules** | `PATCH /api/v1/sub-modules/{id}` accepts `module_name` |
+| **Parent/child columns**, **bulk-apply a checklist**, **the module screen** | `/api/v1/config/columns/grouped`, `/api/v1/steps/lists/{id}/apply`, `/modules/{id}` |
+| **Per-module "in prod" counts**; **recent-changes panel removed**; **invitation links persist**, and can be reissued | |
 
-**The schema does not change, and there is no migration.** This is the pleasant consequence
-of a decision made on 11 Sept: `V1__initial_schema.sql` was written in its final shape, with
-the nine `step_*` tables and the three `module_label` / `sub_module_label` /
-`sub_activity_label` columns already in it, before any of them had code behind them. They have
-been sitting in your database unused ever since.
+**The schema changes, and Flyway handles it.** `V1__initial_schema.sql` is byte-for-byte what
+it has always been — that was the point of writing it in its final shape on 11 Sept, and it is
+why steps, owners and discussions needed no migration at all. Two things genuinely did:
 
-So this release is the code that finally reads and writes them. `V1` is byte-for-byte what it
-was, Flyway sees the checksum it expects, and an existing database needs nothing done to it —
-deploy the new JAR and the new frontend and that is the whole of it. Still 36 tables.
+- **`V2__hideable_roles.sql`** — one column, `roles.archived_at`, plus an index. Hiding a role
+  needs somewhere to record that it is hidden.
+- **`V3__notifications.sql`** — the `notifications` table.
+
+Both are additive: a column that defaults to NULL, and a new table. Nothing is dropped, nothing
+is rewritten, and no existing row is touched. Flyway sees V1 already applied and runs V2 and V3
+on the first start. **38 tables** afterwards.
+
+There is nothing to do by hand. If Flyway reports a checksum mismatch on V1, something edited
+that file after your database ran it — this release did not, so find what did before repairing
+anything.
+
+**Verified against a real MySQL 8.0.40 on 17 Sept**, which is new: all three migrations applied
+in order to a database that already held V1, and the full suite ran green against it. See *What
+was verified* at the end, which is also specific about the bug that found.
+
+**No new permission key.** Building the step library and the checklists is gated on
+`project.config`, the same permission that owns columns and stages; owners on `module.edit`;
+discussions and the inbox on `project.view`. Ticking a step is gated by the roles named on the
+step itself, which is data an admin sets. Nothing to grant before any of this works.
+
+**One optional new setting**, and everything works without it — see §3.
 
 **No new permission key.** Building the step library and the checklists is gated on
 `project.config`, the same permission that owns columns and stages. A new key would be held by
@@ -54,7 +74,7 @@ Nothing else. Redis and Kafka are **optional** — see step 3.
 
 ## 2. The database
 
-The schema `mtms` already exists. The application creates its own **36 tables** inside it on
+The schema `mtms` already exists. The application creates its own **38 tables** inside it on
 first start, so **do not run the SQL by hand**.
 
 **Creating the schema is not enough — the application also needs a user.** Missing this is
@@ -106,6 +126,18 @@ export MTMS_SECURITY_JWT_SECRET="$(openssl rand -base64 48)"
 export MTMS_CORS_ALLOWED_ORIGINS="http://YOUR-SERVER:6010"
 export MTMS_APP_BASE_URL="http://YOUR-SERVER:6010"
 
+# Optional: a Teams or Slack incoming webhook for notifications.
+#
+# Leave it unset and nothing breaks — every notification is written to the recipient's in-app
+# inbox before any transport is attempted, so unset simply means the inbox is the only channel.
+# It posts to one fixed channel, which is why the inbox is the primary route and this is the
+# broadcast: the inbox tells the person, this tells the room.
+#
+# Email is deliberately not offered. It was the obvious first choice and is not buildable on
+# the machine this was built on — the mail library is not in its offline Maven repository —
+# so it is one class and one dependency away rather than done. See `Notifier`.
+# export MTMS_NOTIFICATIONS_WEBHOOK_URL="https://outlook.office.com/webhook/..."
+
 # See "The four traps" below before changing these.
 export MTMS_SECURITY_SECURE_COOKIES=false
 export MTMS_CACHE_TYPE=memory
@@ -136,7 +168,7 @@ message anywhere**. Set it to `false` until you have HTTPS, then set it back to 
 **2. A fresh database has no way in, and nothing will create one.**
 The seeder that used to create the Flow One demo organisation and its accounts was deleted
 on 16 Sept, once the real database was populated and it had no further purpose. Nothing
-replaces it: point this at an empty schema and Flyway will build thirty-six tables with no
+replaces it: point this at an empty schema and Flyway will build thirty-eight tables with no
 organisation, no roles and no users, the service will start cleanly, and **no password will
 get you in** — there is no self sign-up, and every account is created by an invitation from
 somebody who is already an administrator.
@@ -459,38 +491,59 @@ treat that list as a record of anything.
 
 ## What was verified, and what was not
 
-**Verified on 16 Sept 2026:**
+**Verified on 17 Sept 2026, against a real MySQL 8.0.40** — the first time this has been true
+since 11 Sept:
 
-- The JAR builds and **75 tests pass** — 46 that were there before, plus 14 covering the step
-  gate (order, roles, blocking) and 15 driving the step use cases end to end against the
-  in-memory store: who may tick, what an admin's override records, what a strict order refuses
-  and names, that un-ticking is never held up by the order, that retiring a step keeps its
-  history, and that taking a ticked step off a checklist is refused.
-- The frontend type-checks with no errors, **31 unit tests pass** (22 existing, 9 new covering
-  the per-project wording and its plurals), and `next build` produces all 15 routes.
-- `scripts/release.sh package` was run end to end and produced both artefacts.
-- **The service was started from the built JAR** and answered `{"status":"UP"}`. Every new
-  route — `POST /api/v1/steps/library`, `PATCH /api/v1/steps/entries/{id}`,
-  `POST /api/v1/steps/lists`, `PATCH /api/v1/config/vocabulary` and the invitation reissue —
+- **All 155 tests pass**, including **47 integration tests that had never executed before**.
+  They cover the step tables, the owners table, the discussions tables, the notifications table,
+  the per-project wording columns and the sub-module move.
+- **All three migrations applied in order** to a database that already held V1. V1 untouched, V2
+  and V3 additive, 38 tables afterwards.
+- The JAR builds, the frontend type-checks, 31 frontend tests pass, and `next build` produces
+  all 16 routes.
+- `scripts/release.sh package` ran end to end and produced both artefacts.
+- **The service was started from the built JAR** and answered `{"status":"UP"}`. Every new route
   answers **401 rather than 404**, so the whole Spring context wires and the routes are
   registered and behind the login.
 
-**Not verified, and you should assume nothing about it:**
+### The bug that run found
 
-- **Anything against a real MySQL.** There is no MySQL on this machine, so all **25**
-  integration tests skipped — the 16 that existed and the 9 written for this release, which
-  cover the step tables, the wording columns and the sub-module move. Run
-  `mtms-backend/scripts/mysql-dev.sh up` and then `./mvn.sh test` to execute them. Until that
-  is done, the JDBC step repository is in exactly the position the whole JDBC layer was in
-  before 11 Sept: written, type-checked, reviewed, and never run. That is precisely where the
-  last three real bugs were found.
-- **The screens, in a browser.** The API cannot be signed into here — an empty in-memory
-  database has no accounts and nothing creates one — so no screen was clicked. The checklist
-  panel, the wording editor and the invitation list are type-checked and built, not used.
+One, and it would have taken the steps feature down completely.
+
+```java
+             ORDER BY ev.at DESC
+             LIMIT """
+                + EVENT_LIMIT,
+```
+
+A Java text block strips the trailing whitespace off every line, so this concatenated to
+`LIMIT1000`. The query is in `JdbcStepRepository.load`, which **every project read calls** — so
+every page of every project would have answered 500 the moment the service met MySQL. It
+compiled, it type-checked, and it was reviewed twice.
+
+It is a bind parameter now, which cannot lose a space.
+
+That is the fourth bug of exactly this kind, after the foreign key InnoDB refuses, the driver
+that writes Java serialisation bytes for a `java.util.UUID`, and `LAST_INSERT_ID()` being
+per-connection. All four were invisible to review and to the in-memory store. The lesson is not
+"write better SQL": **a repository nobody has executed is not finished**, whatever the review
+said.
+
+**Still not verified:**
+
+- **Nobody has used the application.** A fresh database has no accounts — see trap 2 — so every
+  screen built in the last three releases is type-checked, built, and has never been clicked.
+  Run `deploy/bootstrap.sql`, sign in, and spend half an hour in it before trusting any of it.
+- **`deploy/bootstrap.sql` itself** has been column-checked against the schema and never
+  executed.
+- **The webhook.** `MTMS_NOTIFICATIONS_WEBHOOK_URL` is unset here, so `LoggingNotifier` is what
+  ran. The in-app inbox is verified; the posting is not.
 - **Redis and Kafka.** The settings in step 3 switch them off.
 - **HTTPS.** Everything above ran over plain HTTP. When you add TLS, set
-  `MTMS_SECURITY_SECURE_COOKIES=true` — and note trap 1 in reverse: with HTTPS in place,
-  leaving it `false` is a real weakness, not just untidy.
+  `MTMS_SECURITY_SECURE_COOKIES=true` — and note trap 1 in reverse: with HTTPS in place, leaving
+  it `false` is a real weakness, not just untidy.
+- **Your actual server.** The MySQL used here was a local throwaway on port 13306. Host,
+  credentials and firewall are the remaining unknowns.
 
 ### From the previous release, still worth knowing
 

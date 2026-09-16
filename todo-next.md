@@ -3,47 +3,42 @@
 Written 16 Sept 2026, straight after the release that added steps, per-project wording and the
 small pile (see `todo.md` §2a for what that was).
 
-`todo.md` is the long record — every decision, why it was made, and what it cost. **This file
-is the short list of what to pick up next**, ordered by what it is worth against what it takes.
-Nothing here is a new idea nobody has considered; most of it is in `todo.md` §5 already. What
-is new is that the release just shipped changed the arithmetic on several of them — three are
-now much cheaper than they were, one has stopped being optional, and one unblocks four others
-at once. Those changes are the reason this file exists rather than a pointer to §5.
+**Updated 17 Sept**, twice. Section 4 of `todo.md` is finished — owners, roles per project,
+discussions, the module screen, parent/child columns, bulk-apply and notifications. Items 2, 3,
+4 and 5 of the original version of this list are done or resolved and have been removed, and so
+has the old item 0: the integration tests have run.
 
-There is one thing to do before any of it. It is not a feature.
+`todo.md` is the long record — every decision, why it was made, and what it cost. This file is
+the short list of what to pick up next.
+
+There is one thing to do before any of it. It is not a feature, and it has now been outstanding
+for two releases.
 
 ---
 
-## 0. Run the integration tests, on a machine with MySQL
+## 0. Sign in and use it
 
-**Before anything else, and it is not a judgement call.**
+**The integration tests have run** — `scripts/mysql-dev.sh up` works on this machine after all.
+47 of them, against MySQL 8.0.40, and they found exactly the class of bug they were written for:
+a `LIMIT` built by string concatenation came out as `LIMIT1000`, and every read of a project's
+steps would have failed. Fourth bug of that kind; all four invisible to review. See `todo.md`
+§2c.
 
-Twenty-five integration tests skipped in this release, because there is no MySQL on the
-machine it was built on. Nine of them were written for the work that just shipped and cover
-the step tables, the wording columns and the sub-module move.
+So the thing that has still never happened is **somebody using the application**. A fresh
+database has no accounts — the seeder went on 16 Sept — so every screen built across three
+releases is type-checked, built, and unclicked: the checklist panel, the wording editor, the
+owners panel, the discussion panel, the roles panel, the module screen, the inbox.
 
 ```bash
+# the throwaway server, if it is not already up
 mtms-backend/scripts/mysql-dev.sh up
-cd mtms-backend && ./mvn.sh test
+
+# a way in
+mysql -u mtms -p mtms < deploy/bootstrap.sql
 ```
 
-Until that runs, `JdbcStepRepository` is in exactly the position the entire JDBC layer was in
-before 11 Sept: written, type-checked, reviewed, and never executed once. That is not a
-hypothetical worry — it is where the last three real bugs were found, and all three would have
-stopped the application on its first request:
-
-- InnoDB refusing `ON DELETE CASCADE` on a column a stored generated column is built from.
-- Connector/J answering a `java.util.UUID` parameter by writing Java serialisation bytes into
-  the column, silently.
-- `LAST_INSERT_ID()` being per-connection, so every project shared cache key 0.
-
-None of those is findable against the in-memory store, because the in-memory store has no
-InnoDB, no driver and no connections. The step repository has had none of that scrutiny yet.
-
-**Also not done: nobody has clicked any of the new screens.** The API cannot be signed into on
-a fresh database — the seeder was removed on 16 Sept and nothing replaces it — so the checklist
-panel, the wording editor and the invitation list are type-checked and built, not used. Half an
-hour in a browser against a real database is worth more than any amount of re-reading.
+Then half an hour in a browser. It is worth more than any further review, and it is the only
+remaining way to find what is left.
 
 ---
 
@@ -76,104 +71,62 @@ Two things to get right, because they are the difference between a number and a 
 
 ---
 
-## 2. Notifications · medium · **no longer optional**
+## 2. Email, when there is a network that allows it
 
-Email first, then Teams or Slack.
+Notifications are built and working: an in-app inbox, three events, and an optional Teams or
+Slack webhook. What is not built is email, and the reason is narrow and worth recording so
+nobody re-litigates it.
 
-**This changed status in the last release.** It used to be a nice extra. Now a checklist can
-be marked `enforce_order`, which means the person who owns step 2 is *blocked* until step 1 is
-ticked — and has no way whatsoever to learn that it was. A strict order without notifications
-is a queue nobody can see the front of, and the predictable outcome is that people stop using
-the ordered lists and go back to asking in a chat.
+The mail library is not in this machine's offline Maven repository, and the build runs with
+`-o` because the network refuses the registry. So `SmtpNotifier` is one class implementing an
+interface that already exists, plus `spring-boot-starter-mail` in the pom, on any machine that
+can fetch it.
 
-**What is already there.** `Mailer` is a port with one method, and `LoggingMailer` is the only
-implementation — it writes the invitation link into a log and returns. So the seam exists and
-the first real implementation is one class plus configuration, not a redesign.
-
-**What to send, in the order they earn their place:**
-
-1. A step you can tick became tickable — the predecessor is done.
-2. A step you own was blocked, with the reason.
-3. An @mention in a comment. (A comment nobody is told about is a comment nobody reads.)
-
-**Worth deciding early:** digest or immediate. Immediate is simpler and is how people
-discover, on day three, that the tool is noisy — at which point they mute it and you have lost
-the channel permanently. A daily digest with immediate only for blocks is the safer default.
+**Decide the cadence at the same time.** Immediate is simpler, and it is how people discover on
+day three that a tool is noisy — at which point they mute it and the channel is gone for good. A
+daily digest, with immediate only for a block, is the safer default. The three events are
+already distinguished by `kind`, so this is a policy decision rather than a schema one.
 
 ---
 
-## 3. Put module ids on the wire · small · **unblocks four other things**
+## 3. File attachments on discussions
 
-Today a module reaches the API as a *name* in the project's configuration — `ProjectConfig`
-carries `List<String> moduleNames` — and has no id on the wire, even though `modules` has been
-a real table with real ids since 11 Sept.
+CIQ documents, screenshots and logs are exactly what gets pasted into a chat today and lost
+tomorrow. The discussion feature shipped without them, deliberately, because they need a
+decision this repository cannot make on its own: **where do the bytes live?**
 
-That single gap is currently blocking four separate items:
+- **The database.** Simplest to back up — the database is already the one thing that must be
+  backed up — and the one that makes the backup ten times larger.
+- **A disk on the server.** Cheapest, and it makes the application stateful: a second instance
+  cannot see the first one's files, and the backup story becomes two things instead of one.
+- **An object store.** Right answer at size, another service to run and another credential to
+  hold.
 
-| Blocked | Why |
-|---|---|
-| **Module-level checklists** | Built and working in the domain, the schema and both repositories. The API refuses `scope_type: "module"` with that reason, because there is nothing for a caller to name |
-| **Owners on a module** (§4 below) | Same — an owner row needs a scope id |
-| **Discussions on a module** | Same |
-| **The rebuilt module screen** (`todo.md` §4) | There is no id to open it by |
-
-**What it takes.** Change the configuration shape from a list of strings to a list of
-`{id, name}`, and follow it through: the config view, the Configure screen's module list, and
-the matrix grouping. It is a mechanical change over a handful of files, and it is the cheapest
-thing on this list per item unblocked.
-
-Do this before 4 or 5, not after. Both of them want it.
+None is wrong. Pick one deliberately rather than discovering it, because moving afterwards means
+moving data.
 
 ---
 
-## 4. Bulk-apply a checklist · small · **the thing between this and a real team**
+## 4. Custom fields on the module screen
 
-One action: *apply this checklist to every sub-module on this module*. Plus a default
-checklist for newly created sub-modules.
+Named in `todo.md` §4 as part of the rebuilt module screen, and the only part not built.
 
-**Why it is not optional in practice.** CR_AUTOMATION has eighteen sub-modules today and the
-real number is in the hundreds. Nobody is going to attach a checklist to two hundred things
-one at a time, so without this the feature that just shipped gets used on a handful of rows as
-a demonstration and then abandoned. This was already flagged as open in `todo.md` §3; shipping
-steps is what turns it from a note into the blocker.
-
-**One decision inside it:** does applying to all *replace* a sub-module's existing checklist or
-sit alongside it? Alongside, almost certainly — the whole design allows several lists on one
-thing, and a bulk action that silently replaces somebody's bespoke list is the kind of thing
-that gets a tool banned. Make the replace case a separate, clearly worded action if it is
-wanted at all.
+There is no table for them, and that is the point: inventing a generic
+`(entity, key, value)` store before anybody has named a specific field is how you get a schema
+nobody uses and a screen nobody fills in. Ask which two fields are actually wanted first — the
+answer is often that they are columns, or a description, and both of those already exist.
 
 ---
 
-## 5. Stop deleting cells when a column is deleted · small · **a principle currently broken**
-
-The application is careful never to destroy a record. Hidden environments keep their ticks.
-Narrowing a column's allowed statuses keeps the cells that are now off-vocabulary, and the
-Configure screen counts them and says so. Retiring a step keeps its history and its comments.
-Archiving is everywhere.
-
-**Except one place.** `deleteColumn` deletes every cell in that column, in both
-`JdbcProjectRepository` and `InMemoryProjectRepository`. The comment on it is honest about why
-— orphan cells would reappear if somebody recreated a column with the same key — but that is
-an argument for archiving the column, not for destroying months of recorded status.
-
-**What it takes.** An `archived_at` on `deliverable_columns`, the projection filtering on it,
-and the Configure screen offering "remove" as an archive. The re-creation case then resolves
-itself: a column with the same key finds the archived one and offers to bring it back with
-what it held.
-
-Small, and it makes the promise the rest of the app already keeps true everywhere.
-
----
-
-## 6. Decide what happens to the offline demo · **a decision, not a task**
+## 5. Decide what happens to the offline demo · **a decision, not a task**
 
 `mtms-static` is what gets shown to clients, and every action has to be written twice — once
 for the real server, once for the demo.
 
-**The release just shipped roughly doubled the number of actions**: the step library, the
-checklists, ticking, blocking, comments, the wording editor, the invitation list. None of it
-was written into `mtms-static`, which is why that folder is now a release behind. It still
+**Two releases have now roughly tripled the number of actions**: the step library, the
+checklists, ticking, blocking, comments, the wording editor, the invitation list, owners,
+roles, discussions and the module screen. None of it was written into `mtms-static`, which is
+why that folder is now two releases behind. It still
 works correctly on its own — it is self-contained — it simply shows an older product in older
 words.
 
@@ -196,21 +149,20 @@ already marked for deletion is wasted work, and deleting it is a decision rather
 
 ## Still outstanding from `todo.md`
 
-Not repeated here in detail — `todo.md` §4 has the full reasoning for each. Listed so this file
-is a complete picture of what is left rather than a partial one.
+Section 4 is finished apart from the three items above. What is left is section 5 — the ideas,
+not the backlog.
 
-| | Size | Note |
-|---|---|---|
-| **Owners** — one overall, plus one per team, at every level | medium | Settled 15 Sept. Wants item 3 first for module-level owners. The `owners` table already exists |
-| **Roles per project** — an admin adds or hides a role | medium | Build with owners; they read the same switch. Note that steps now gate on role ids, so hiding a role has to leave its ticks standing |
-| **Discussions** on modules and sub-modules, with @mentions and attachments | medium | `threads`, `thread_comments` and `mentions` all exist and are unused. Wants item 3 for module scope, and item 2 for the mentions to mean anything |
-| **Parent and child columns on Configure** | small | `FILECR` with `LAB`/`PRE`/`PROD` under it exists only because the seed data creates it that way; the screen cannot make one |
-| **Rebuild the module screen** | medium | Blocked on item 3 |
-| **Project templates** | medium | `todo.md` §5.3, and steps made it more valuable: a template now carries the checklists too, which is most of a team's set-up |
-| **Import from a spreadsheet** | medium | Every team adopting this is holding one |
-| **Releases**, **dependencies between sub-modules**, **blockers separate from defects**, **generated status reports**, **original vs current date**, **API tokens and a write API**, **saved views** | — | `todo.md` §5, unchanged in priority |
-
----
+| | Note |
+|---|---|
+| **Releases** — group sub-modules into "the September drop" and track it as one thing | PMs think in releases, not in individual modules. A project is one long flat list today |
+| **Project templates** | Worth more than it was: a template now carries the checklists, the roles and the wording too, which is most of a team's set-up |
+| **Import from a spreadsheet** | Every team adopting this is holding one |
+| **Dependencies between sub-modules** | "147 cannot go until 5 is done." No home in the app today |
+| **Blockers, separate from defects** | A defect is a bug; a blocker is "waiting on a third party". Steps can now be blocked with a reason, which is half of it |
+| **Status reports, generated** | The history to write the weekly update by hand is all stored |
+| **Original date versus current date** | So slippage is visible rather than quietly rewritten |
+| **API tokens and a write API** | A build that ticks "testing done" itself is worth more than any screen |
+| **Saved views** | The matrix gets wide once each project configures its own columns |
 
 ## One question still worth an answer
 

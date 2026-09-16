@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { send } from '@/lib/client/api';
 import type { Snapshot } from '@/lib/shared/views';
 import { useTracker } from './TrackerProvider';
+import { InboxMenu } from './InboxMenu';
 import { ErrorBanner, Notice } from './primitives';
 
 /**
@@ -352,6 +353,12 @@ export function AppShell({ children }: { children: ReactNode }) {
             </>
           ) : (
             <>
+              {/*
+                In the header rather than on a screen of its own. A notification people have to
+                navigate to is one they see on Friday, and two of the three kinds exist because
+                somebody is waiting.
+              */}
+              <InboxMenu />
               <span>
                 {snapshot.me.display_name}
                 {snapshot.me.role_names.length ? ` · ${snapshot.me.role_names.join(', ')}` : ''}

@@ -50,7 +50,9 @@ export function StepsPanel() {
 function StepLibrary() {
   const { snapshot, apply, can, reasonFor } = useTracker();
   const canConfig = can('project.config');
-  const roles = snapshot.roles;
+  // A hidden role cannot gate a step — it is offered nowhere, and a step gated to one reads as
+  // needing a role nobody can be given.
+  const roles = snapshot.roles.filter((role) => !role.hidden);
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -272,7 +274,7 @@ function StepEditor({ step, onDone }: { step: StepDefinitionView; onDone: () => 
         </button>
       </div>
       <RolePicker
-        roles={snapshot.roles}
+        roles={snapshot.roles.filter((role) => !role.hidden)}
         selected={roleIds}
         onToggle={(id) =>
           setRoleIds((current) =>
@@ -335,14 +337,22 @@ function Checklists() {
   const canConfig = can('project.config');
 
   const targets = useMemo(() => {
-    const options: { key: string; label: string; scopeType: string; scopeId: string; lists: StepListView[] }[] =
-      [];
+    const options: {
+      key: string;
+      label: string;
+      scopeType: string;
+      scopeId: string;
+      /** Null for a sub-activity: "apply to all" spreads across one module's sub-modules. */
+      moduleName: string | null;
+      lists: StepListView[];
+    }[] = [];
     for (const subModule of snapshot.sub_modules) {
       options.push({
         key: `sub_module:${subModule.id}`,
         label: `${subModule.module_name} · ${subModule.name}`,
         scopeType: 'sub_module',
         scopeId: subModule.id,
+        moduleName: subModule.module_name,
         lists: subModule.step_lists,
       });
       for (const subActivity of subModule.sub_activities) {
@@ -351,6 +361,7 @@ function Checklists() {
           label: `${subModule.module_name} · ${subModule.name} → ${subActivity.name}`,
           scopeType: 'sub_activity',
           scopeId: subActivity.id,
+          moduleName: null,
           lists: subActivity.step_lists,
         });
       }
@@ -417,7 +428,7 @@ function Checklists() {
           ) : null}
 
           {target?.lists.map((list) => (
-            <ChecklistEditor key={list.id} list={list} />
+            <ChecklistEditor key={list.id} list={list} moduleName={target.moduleName} />
           ))}
 
           <form
@@ -487,8 +498,13 @@ function Checklists() {
   );
 }
 
-function ChecklistEditor({ list }: { list: StepListView }) {
-  const { snapshot, apply } = useTracker();
+/**
+ * @param moduleName the module this checklist's sub-module sits on, when it sits on one. It is
+ *     what "apply to all" spreads across; a sub-activity's checklist has none, so it does not
+ *     get the button.
+ */
+function ChecklistEditor({ list, moduleName }: { list: StepListView; moduleName: string | null }) {
+  const { snapshot, apply, setNotice } = useTracker();
   const [adding, setAdding] = useState('');
 
   const available = snapshot.step_library.filter(
@@ -535,6 +551,43 @@ function ChecklistEditor({ list }: { list: StepListView }) {
           />
           strict order
         </label>
+        {/*
+          The thing that decides whether this feature survives a real project. CR_AUTOMATION has
+          eighteen sub-modules today and the real number is in the hundreds; nobody attaches a
+          checklist to two hundred things one at a time, so without this it gets built on a
+          handful of rows as a demonstration and then abandoned.
+        */}
+        {moduleName ? (
+          <button
+            type="button"
+            title={`Copy this checklist onto every other ${moduleName} sub-module that does not already have one by this name`}
+            onClick={async () => {
+              if (
+                !window.confirm(
+                  `Apply "${list.name}" to every other sub-module on ${moduleName}?` +
+                    ' Each gets its own copy, so ticking one does not tick the rest.' +
+                    ' Anything that already has a checklist by this name is skipped,' +
+                    ' and nothing is replaced.',
+                )
+              ) {
+                return;
+              }
+              const meta = await apply(null, () =>
+                send<Snapshot>(`/api/v1/steps/lists/${list.id}/apply`, 'POST', { moduleName }),
+              );
+              if (meta) {
+                setNotice(
+                  meta.applied === 0
+                    ? `Nothing to do — every other sub-module on ${moduleName} already has a checklist called "${list.name}".`
+                    : `Applied "${list.name}" to ${meta.applied} sub-module${meta.applied === 1 ? '' : 's'} on ${moduleName}.`,
+                );
+              }
+            }}
+            style={quietAction(true)}
+          >
+            apply to all
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={() => {

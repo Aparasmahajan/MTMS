@@ -57,6 +57,16 @@ mtms:
     topic: mtms.domain-events
     drain-interval-ms: 5000
 
+  notifications:
+    # A Teams or Slack incoming webhook. Unset — and unset is the default — the in-app inbox is
+    # the only channel, which is a complete one: every notification is written there before any
+    # transport is attempted.
+    #
+    # Email is deliberately not here. It was the obvious first choice and is not buildable on
+    # this machine: the mail library is not in the offline Maven repository and the network
+    # refuses the registry. It is one class and one dependency away — see Notifier.
+    # webhook-url: https://outlook.office.com/webhook/...
+
   ticket-base-url: https://tms.internal/browse
   app-base-url: http://localhost:3000
 

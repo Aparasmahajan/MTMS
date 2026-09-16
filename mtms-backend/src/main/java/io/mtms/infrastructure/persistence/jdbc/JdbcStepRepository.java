@@ -2,6 +2,7 @@ package io.mtms.infrastructure.persistence.jdbc;
 
 import io.mtms.application.port.StepData;
 import io.mtms.application.port.StepRepository;
+import io.mtms.domain.model.Scope;
 import io.mtms.domain.model.Steps;
 import java.time.Instant;
 import java.util.HashMap;
@@ -80,6 +81,12 @@ public class JdbcStepRepository implements StepRepository {
             """,
             Rows.STEP_PROGRESS,
             projectId),
+        // LIMIT is a bind parameter, not string concatenation.
+        //
+        // It was concatenated once, and a Java text block strips the trailing whitespace off
+        // every line — so the clause came out as LIMIT1000 and every read of a project's
+        // steps failed with a syntax error. It compiled, it reviewed clean, and it was dead
+        // on the first request against a real server. A bind parameter cannot lose a space.
         jdbc.query(
             """
             SELECT ev.*, u.display_name AS by_name
@@ -89,10 +96,11 @@ public class JdbcStepRepository implements StepRepository {
               LEFT JOIN users u ON u.id = ev.by_user_id
              WHERE l.project_id = ?
              ORDER BY ev.at DESC
-             LIMIT """
-                + EVENT_LIMIT,
+             LIMIT ?
+            """,
             Rows.STEP_EVENT,
-            projectId),
+            projectId,
+            EVENT_LIMIT),
         jdbc.query(
             """
             SELECT c.*, u.display_name AS author_name
@@ -226,7 +234,7 @@ public class JdbcStepRepository implements StepRepository {
   }
 
   @Override
-  public List<Steps.StepList> listsFor(UUID projectId, Steps.ScopeType scopeType, UUID scopeId) {
+  public List<Steps.StepList> listsFor(UUID projectId, Scope scopeType, UUID scopeId) {
     return jdbc.query(
         """
         SELECT * FROM step_lists

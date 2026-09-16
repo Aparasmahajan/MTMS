@@ -2,6 +2,7 @@ package io.mtms.infrastructure.persistence.memory;
 
 import io.mtms.application.port.StepData;
 import io.mtms.application.port.StepRepository;
+import io.mtms.domain.model.Scope;
 import io.mtms.domain.model.Steps;
 import java.time.Instant;
 import java.util.Comparator;
@@ -136,7 +137,7 @@ public class InMemoryStepRepository implements StepRepository {
   }
 
   @Override
-  public List<Steps.StepList> listsFor(UUID projectId, Steps.ScopeType scopeType, UUID scopeId) {
+  public List<Steps.StepList> listsFor(UUID projectId, Scope scopeType, UUID scopeId) {
     return db.stepLists.stream()
         .filter(
             list ->

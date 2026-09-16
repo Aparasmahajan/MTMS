@@ -5,6 +5,7 @@ import io.mtms.application.ServiceException;
 import io.mtms.application.port.ProjectRepository;
 import io.mtms.domain.PermissionKey;
 import io.mtms.domain.StatusVocabulary;
+import io.mtms.domain.model.Modules;
 import io.mtms.domain.model.Projects;
 import java.util.List;
 import java.util.UUID;
@@ -48,22 +49,153 @@ public class ConfigUseCases {
 
     projects.insertColumn(column);
 
-    // The first column is what makes a project configured — before that the UI offers to set
-    // it up rather than showing an empty matrix that looks broken.
-    if (existing.isEmpty()) {
-      projects
-          .findById(actor.tenantId(), projectId)
-          .ifPresent(
-              project ->
-                  projects.update(
-                      new Projects.Project(
-                          project.id(), project.tenantId(), project.key(), project.name(),
-                          project.description(), true, project.archived(), project.createdAt())));
-    }
+    markConfigured(actor, projectId, existing.isEmpty());
 
     support.recordProjectChange(actor, projectId, "CONFIG", "column added — " + label);
     support.bump(projectId);
     return column.id();
+  }
+
+  /**
+   * Adds a deliverable tracked separately on every environment — a parent header with one
+   * column under it per environment.
+   *
+   * <p>{@code FILECR} with {@code LAB} / {@code PRE} / {@code PROD} beneath it existed only
+   * because the starting data was written that way; the Configure screen could add a plain
+   * column and nothing else, so no project could ever create the shape that makes the matrix
+   * worth reading. This is that shape, made from the screen.
+   *
+   * <p><strong>It creates one column per environment, not one column with three values.</strong>
+   * That is the whole reason per-environment deliverables exist: lab, preprod and prod are not a
+   * sequence, prod can be loaded while lab never was because lab was down when the window
+   * opened, and one status per deliverable cannot say that. Each environment gets its own column
+   * and its own tick.
+   *
+   * <p>Only the prod column counts toward readiness. If lab counted, a release that skipped lab
+   * could never reach 100% and its FNI could never be signed — so the others are recorded and
+   * not scored, which is what {@code counts} means here.
+   *
+   * @param groupKey the deliverable — {@code filecr}. Each column is keyed {@code filecr_prod}.
+   * @param groupLabel the header spanning them — {@code FILECR}.
+   */
+  @Transactional
+  public List<UUID> addEnvironmentColumns(
+      Actor actor, String groupKey, String groupLabel, String full, List<String> allowed) {
+
+    actor.require(PermissionKey.PROJECT_CONFIG);
+    UUID projectId = actor.projectId();
+
+    String key = requireKey(groupKey);
+    String label = requireText(groupLabel, "A header needs a label.", 12);
+    validateAllowed(allowed);
+
+    List<Projects.Environment> environments = projects.config(projectId).environments();
+    if (environments.isEmpty()) {
+      throw ServiceException.validation(
+          "This project has no environments configured, so there is nothing to spread a"
+              + " deliverable across. Add a plain column instead.");
+    }
+
+    List<Projects.DeliverableColumn> existing = projects.columns(projectId);
+    if (existing.stream().anyMatch(column -> key.equals(column.groupKey()))) {
+      throw ServiceException.conflict("This project already tracks " + label + ".");
+    }
+
+    // Every environment, including the switched-off ones. A disabled environment's column
+    // leaves the grid and the maths but keeps existing — creating the deliverable without it
+    // would mean switching preprod back on later produced a gap rather than a column.
+    int order = existing.size();
+    List<UUID> created = new java.util.ArrayList<>();
+    for (Projects.Environment environment : environments) {
+      String columnKey = key + "_" + environment.key();
+      if (projects.column(projectId, columnKey).isPresent()) {
+        throw ServiceException.conflict(
+            "This project already has a column called " + columnKey + ".");
+      }
+
+      Projects.DeliverableColumn column =
+          new Projects.DeliverableColumn(
+              UUID.randomUUID(),
+              projectId,
+              columnKey,
+              environment.shortLabel(),
+              full + " — " + environment.label(),
+              List.copyOf(allowed),
+              // Readiness means ready in production. A lab tick records where something has
+              // been; it is not part of the definition of done.
+              Projects.PROD_ENVIRONMENT.equals(environment.key()),
+              order++,
+              environment.key(),
+              key,
+              label);
+
+      projects.insertColumn(column);
+      created.add(column.id());
+    }
+
+    markConfigured(actor, projectId, existing.isEmpty());
+
+    support.recordProjectChange(
+        actor,
+        projectId,
+        "CONFIG",
+        "deliverable added — "
+            + label
+            + ", one column per environment ("
+            + created.size()
+            + "), with only prod counting toward readiness");
+    support.bump(projectId);
+    return List.copyOf(created);
+  }
+
+  /**
+   * The first column is what makes a project configured.
+   *
+   * <p>Before that the UI offers to set it up rather than showing an empty matrix that reads as
+   * breakage. Pulled out of {@code addColumn} when a second thing started creating columns.
+   */
+  private void markConfigured(Actor actor, UUID projectId, boolean wasEmpty) {
+    if (!wasEmpty) {
+      return;
+    }
+    projects
+        .findById(actor.tenantId(), projectId)
+        .ifPresent(
+            project ->
+                projects.update(
+                    new Projects.Project(
+                        project.id(), project.tenantId(), project.key(), project.name(),
+                        project.description(), true, project.archived(), project.vocabulary(),
+                        project.createdAt())));
+  }
+
+  private static String requireKey(String value) {
+    String key = value == null ? "" : value.trim().toLowerCase(java.util.Locale.ROOT);
+    if (key.isEmpty()) {
+      throw ServiceException.validation("A deliverable needs a key.");
+    }
+    if (!key.matches("[a-z0-9_]+")) {
+      throw ServiceException.validation(
+          "A key is lowercase letters, digits and underscores — it becomes part of every column"
+              + " name under this header.");
+    }
+    if (key.length() > 24) {
+      throw ServiceException.validation(
+          "That key is too long once an environment name is appended to it.");
+    }
+    return key;
+  }
+
+  private static String requireText(String value, String message, int max) {
+    String trimmed = value == null ? "" : value.trim();
+    if (trimmed.isEmpty()) {
+      throw ServiceException.validation(message);
+    }
+    if (trimmed.length() > max) {
+      throw ServiceException.validation(
+          "That is longer than the " + max + " characters this field holds.");
+    }
+    return trimmed;
   }
 
   /**
@@ -203,6 +335,44 @@ public class ConfigUseCases {
                 + affected
                 + (affected == 1 ? " column leaves" : " columns leave")
                 + " the matrix and the readiness maths, keeping every cell");
+    support.bump(projectId);
+  }
+
+  /**
+   * Writes the team's own note about what a module is.
+   *
+   * <p>The only editable thing a module has of its own, and the reason the module screen exists
+   * at all: everything else on it — the counts, the sub-modules — is the matrix seen from one
+   * side. This is the piece that is not derivable from anything.
+   */
+  @Transactional
+  public void setModuleDescription(Actor actor, UUID moduleId, String description) {
+    actor.require(PermissionKey.MODULE_EDIT);
+    UUID projectId = actor.projectId();
+
+    Modules.Module module =
+        projects
+            .config(projectId)
+            .moduleById(moduleId)
+            .orElseThrow(() -> ServiceException.notFound("That module is not in this project."));
+
+    String next = description == null ? "" : description.trim();
+    if (next.length() > 500) {
+      throw ServiceException.validation(
+          "That is longer than the 500 characters this field holds.");
+    }
+    if (next.equals(module.description())) {
+      return;
+    }
+
+    projects.updateModuleDescription(moduleId, next);
+    support.recordProjectChange(
+        actor,
+        projectId,
+        "CONFIG",
+        next.isEmpty()
+            ? "description cleared — " + module.name()
+            : "description updated — " + module.name());
     support.bump(projectId);
   }
 

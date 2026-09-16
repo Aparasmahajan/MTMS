@@ -174,7 +174,15 @@ public final class Projects {
    */
   public record ProjectConfig(
       UUID projectId,
-      List<String> moduleNames,
+      /**
+       * The project's modules, as records rather than as the list of strings this used to be.
+       *
+       * <p>They carry ids now because three things attach to a module and none of them can
+       * attach to a piece of text: a checklist, owners and a discussion. The <em>names</em> are
+       * still what the matrix groups by and what a sub-module stores, so {@link #moduleNames()}
+       * derives them rather than storing both and letting the two disagree.
+       */
+      List<Modules.Module> modules,
       List<Stage> stages,
       List<String> owners,
       List<String> linkTypes,
@@ -183,15 +191,35 @@ public final class Projects {
     /** A configuration with nothing tracked per environment. */
     public ProjectConfig(
         UUID projectId,
-        List<String> moduleNames,
+        List<Modules.Module> modules,
         List<Stage> stages,
         List<String> owners,
         List<String> linkTypes) {
-      this(projectId, moduleNames, stages, owners, linkTypes, List.of());
+      this(projectId, modules, stages, owners, linkTypes, List.of());
     }
 
     public static ProjectConfig empty(UUID projectId) {
       return new ProjectConfig(projectId, List.of(), List.of(), List.of(), List.of(), List.of());
+    }
+
+    /**
+     * The module names, in order. Derived, never stored alongside the records.
+     *
+     * <p>Most of the application only ever wants the names — a sub-module stores its module by
+     * name, the matrix groups by name, the change feed prints the name. Keeping a second list
+     * in step with the first is exactly the kind of bookkeeping that is right for a year and
+     * then quietly is not.
+     */
+    public List<String> moduleNames() {
+      return modules.stream().map(Modules.Module::name).toList();
+    }
+
+    public java.util.Optional<Modules.Module> moduleNamed(String name) {
+      return modules.stream().filter(module -> module.name().equals(name)).findFirst();
+    }
+
+    public java.util.Optional<Modules.Module> moduleById(UUID id) {
+      return modules.stream().filter(module -> module.id().equals(id)).findFirst();
     }
 
     /**
