@@ -67,6 +67,5 @@ mtms:
     type: redis
   events:
     publisher: kafka
-  seed-on-empty-database: false
   security:
     secure-cookies: true

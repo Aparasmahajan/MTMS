@@ -23,12 +23,42 @@ public record PlatformView(Me me, List<Organisation> organisations, List<Audit.P
   /** Somebody who can administer an organisation, so one is never left without an owner. */
   public record Administrator(String displayName, String email, String status) {}
 
-  public record ProjectSummary(UUID id, String key, String name, boolean configured, int subModuleCount) {}
+  /**
+   * One person's administrator access to one project.
+   *
+   * <p>Many administrators to a project and many projects to an administrator, both — the
+   * membership row is {@code (user, project, role)}, so both directions are just rows.
+   *
+   * @param orgWide true when the access is organisation-wide and therefore covers every
+   *     project, this one included. The console shows it differently and refuses to remove
+   *     it from a single project's row, because doing so would take away far more than the
+   *     row suggests — it is removed from {@link Organisation#orgWideAdmins} instead, where
+   *     the scope of what is being taken away is what the reader is already looking at.
+   */
+  public record ProjectAdministrator(
+      UUID userId, UUID membershipId, String displayName, String email, String status, boolean orgWide) {}
+
+  /**
+   * @param admins everyone who can administer this project. A project with none is a project
+   *     nobody can configure, so the console shows that rather than leaving it to be found.
+   */
+  public record ProjectSummary(
+      UUID id,
+      String key,
+      String name,
+      boolean configured,
+      int subModuleCount,
+      List<ProjectAdministrator> admins) {}
 
   /**
    * @param configuredProjectCount projects with at least one deliverable column. The rest are
    *     shells awaiting their owner's set-up, which is a different thing from an empty project
    *     and worth distinguishing on the screen.
+   * @param admins everyone who can administer the organisation, by any route — for the summary
+   *     line, which only wants names.
+   * @param orgWideAdmins the subset whose access is organisation-wide, carrying the membership
+   *     id so it can be revoked. This is the only place an organisation-wide grant is offered
+   *     for removal: it is the one screen position where "every project" is the visible scope.
    */
   public record Organisation(
       UUID id,
@@ -41,5 +71,6 @@ public record PlatformView(Me me, List<Organisation> organisations, List<Audit.P
       int userCount,
       int subModuleCount,
       List<Administrator> admins,
+      List<ProjectAdministrator> orgWideAdmins,
       List<ProjectSummary> projects) {}
 }

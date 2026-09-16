@@ -1,19 +1,20 @@
 package io.mtms.api;
 
 import io.mtms.application.Actor;
+import io.mtms.application.ServiceException;
 import io.mtms.application.SnapshotService;
 import io.mtms.application.usecase.ConfigUseCases;
 import io.mtms.domain.model.Projects;
 import io.mtms.domain.view.Snapshot;
 import jakarta.validation.constraints.NotBlank;
 import java.util.List;
+import java.util.Locale;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /** The Configure screen. */
@@ -83,19 +84,37 @@ public class ConfigController {
     return ApiResponse.ok(snapshots.of(actor));
   }
 
-  public record ListValueRequest(@NotBlank String list, @NotBlank String value) {}
+  /**
+   * @param action {@code "add"} or {@code "remove"}. Absent means add, which is what the only
+   *     caller that ever omitted it meant.
+   */
+  public record ListValueRequest(@NotBlank String list, String action, @NotBlank String value) {}
 
+  /**
+   * Adds or removes one value from a configuration list.
+   *
+   * <p>One route for both directions, because that is the contract the Configure screen speaks
+   * and has always spoken. This previously ignored {@code action} and added unconditionally,
+   * with a separate DELETE route — taking query parameters — that no client ever called. The
+   * visible result was that removing a value from a list put it straight back, silently, with a
+   * success response. A second way to do a thing that nothing exercises is how that happened, so
+   * the DELETE route is gone rather than fixed.
+   */
   @PostMapping("/lists")
-  public ApiResponse.Success<Snapshot> addListValue(
+  public ApiResponse.Success<Snapshot> changeListValue(
       @RequestBody ListValueRequest request, Actor actor) {
-    config.addListValue(actor, Projects.ConfigList.fromWire(request.list()), request.value());
-    return ApiResponse.ok(snapshots.of(actor));
-  }
 
-  @DeleteMapping("/lists")
-  public ApiResponse.Success<Snapshot> removeListValue(
-      @RequestParam("list") String list, @RequestParam("value") String value, Actor actor) {
-    config.removeListValue(actor, Projects.ConfigList.fromWire(list), value);
+    Projects.ConfigList list = Projects.ConfigList.fromWire(request.list());
+    String action =
+        request.action() == null ? "add" : request.action().trim().toLowerCase(Locale.ROOT);
+
+    switch (action) {
+      case "add" -> config.addListValue(actor, list, request.value());
+      case "remove" -> config.removeListValue(actor, list, request.value());
+      default ->
+          throw ServiceException.validation("An action is either \"add\" or \"remove\".");
+    }
+
     return ApiResponse.ok(snapshots.of(actor));
   }
 }
