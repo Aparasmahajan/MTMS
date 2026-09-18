@@ -29,6 +29,7 @@ export default function PlatformPage() {
   const [adminName, setAdminName] = useState('');
   const [projectDrafts, setProjectDrafts] = useState<Record<string, string>>({});
   const [adminDrafts, setAdminDrafts] = useState<Record<string, string>>({});
+  const [orgAdminDrafts, setOrgAdminDrafts] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     try {
@@ -78,7 +79,7 @@ export default function PlatformPage() {
       setAdminEmail('');
       setAdminName('');
       setNotice(
-        `${meta.admin_email} is invited as the administrator. There is no mail transport yet, so send them this single-use link: ${window.location.origin}${meta.accept_url}`,
+        `${meta.admin_email} is invited as the administrator. There is no mail transport yet, so send them this single-use link: ${meta.accept_url}`,
       );
     }
   }
@@ -98,26 +99,54 @@ export default function PlatformPage() {
   }
 
   /**
-   * Assigns an administrator to one project.
+   * Assigns an administrator, to one project or to a whole organisation.
    *
-   * Somebody already in the organisation is simply granted the project. Somebody new is
+   * Somebody already in the organisation is simply granted the access. Somebody new is
    * invited, and the single-use link comes back in `meta` — there is no mail transport
    * yet, so it has to be handed over rather than sent.
+   *
+   * `accept_url` is absolute already: the server builds it from `MTMS_APP_BASE_URL`, which
+   * exists precisely because the service cannot see its own public address behind a proxy.
+   * Prefixing `window.location.origin` here is what produced links with the domain twice.
+   *
+   * One function for both scopes because the two differ only in the path and in which draft
+   * box to clear; the server decides everything that actually matters between them.
    */
-  async function addAdmin(projectId: string, projectKey: string) {
-    const email = (adminDrafts[projectId] ?? '').trim();
+  async function addAdmin(scope: 'projects' | 'organisations', id: string, where: string) {
+    const drafts = scope === 'projects' ? adminDrafts : orgAdminDrafts;
+    const setDrafts = scope === 'projects' ? setAdminDrafts : setOrgAdminDrafts;
+
+    const email = (drafts[id] ?? '').trim();
     if (!email) return;
 
     const meta = await run(() =>
-      send<PlatformView>(`/api/v1/platform/projects/${projectId}/admins`, 'POST', { email }),
+      send<PlatformView>(`/api/v1/platform/${scope}/${id}/admins`, 'POST', { email }),
     );
     if (!meta) return;
 
-    setAdminDrafts((current) => ({ ...current, [projectId]: '' }));
+    setDrafts((current) => ({ ...current, [id]: '' }));
     setNotice(
       meta.invited
-        ? `${meta.admin_email} is invited as an administrator of ${projectKey}. There is no mail transport yet, so send them this single-use link: ${window.location.origin}${meta.accept_url}`
-        : `${meta.admin_email} now administers ${projectKey}. They already had an account in this organisation, so there is nothing to send.`,
+        ? `${meta.admin_email} is invited as an administrator of ${where}. There is no mail transport yet, so send them this single-use link: ${meta.accept_url}`
+        : `${meta.admin_email} now administers ${where}. They already had an account in this organisation, so there is nothing to send.`,
+    );
+  }
+
+  /**
+   * Takes administrator access away.
+   *
+   * Removing an organisation-wide grant is the more serious of the two — it covers every
+   * project at once — so it asks first, and the question names the number.
+   */
+  async function removeAdmin(
+    scope: 'projects' | 'organisations',
+    id: string,
+    membershipId: string,
+    question: string | null,
+  ) {
+    if (question && !window.confirm(question)) return;
+    await run(() =>
+      send<PlatformView>(`/api/v1/platform/${scope}/${id}/admins/${membershipId}`, 'DELETE'),
     );
   }
 
@@ -301,6 +330,108 @@ export default function PlatformPage() {
             </button>
           </div>
 
+          {/*
+            Organisation-wide administrators, above the projects rather than inside one.
+
+            This is the grant that explains why the same name appears on every project row
+            below, and it is the only place it can be taken away — a project row cannot offer
+            to remove it, because clicking there would silently cover every other project too.
+          */}
+          <div
+            className="bordered"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-2)',
+              flexWrap: 'wrap',
+              padding: 'var(--space-3) var(--space-4)',
+              marginBottom: 'var(--space-3)',
+            }}
+          >
+            <span
+              className="kicker"
+              style={{ fontSize: 11, width: 200, flex: 'none', letterSpacing: '.09em' }}
+            >
+              Every project in this organisation
+            </span>
+
+            {(organisation.org_wide_admins ?? []).length === 0 ? (
+              <span style={{ fontSize: 12, color: 'var(--color-neutral-700)' }}>
+                Nobody — each project below is administered on its own.
+              </span>
+            ) : null}
+
+            {(organisation.org_wide_admins ?? []).map((admin) => (
+              <span
+                key={admin.membership_id}
+                title={`${admin.email} administers every project in ${organisation.name}, including ones not created yet`}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: 12,
+                  padding: '1px 8px',
+                  border: '1px solid var(--color-neutral-400)',
+                  color: 'var(--color-neutral-700)',
+                }}
+              >
+                {admin.display_name}
+                {admin.status === 'invited' ? (
+                  <span style={{ color: 'var(--color-neutral-600)' }}>· invited</span>
+                ) : null}
+                <button
+                  type="button"
+                  className="mono"
+                  disabled={busy}
+                  title={`Remove ${admin.email} from every project in ${organisation.name}`}
+                  aria-label={`Remove ${admin.email} from every project in ${organisation.name}`}
+                  onClick={() =>
+                    void removeAdmin(
+                      'organisations',
+                      organisation.id,
+                      admin.membership_id,
+                      `Remove ${admin.display_name} as administrator of all ${organisation.project_count} projects in ${organisation.name}?`,
+                    )
+                  }
+                  style={{
+                    border: 0,
+                    background: 'transparent',
+                    padding: 0,
+                    cursor: busy ? 'not-allowed' : 'pointer',
+                    color: 'var(--color-neutral-600)',
+                  }}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void addAdmin('organisations', organisation.id, organisation.name);
+              }}
+              style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}
+            >
+              <input
+                className="input"
+                style={{ width: 220, height: 28, fontSize: 12 }}
+                value={orgAdminDrafts[organisation.id] ?? ''}
+                onChange={(event) =>
+                  setOrgAdminDrafts((current) => ({
+                    ...current,
+                    [organisation.id]: event.target.value,
+                  }))
+                }
+                placeholder="name@company.com"
+                aria-label={`Assign an administrator to every project in ${organisation.name}`}
+              />
+              <button type="submit" className="btn btn-secondary" disabled={busy}>
+                Assign
+              </button>
+            </form>
+          </div>
+
           <div className="bordered">
             {organisation.projects.map((project) => (
               <div key={project.id} style={{ borderBottom: '1px solid var(--color-divider)' }}>
@@ -375,7 +506,7 @@ export default function PlatformPage() {
                       key={admin.membership_id}
                       title={
                         admin.org_wide
-                          ? `${admin.email} administers every project in ${organisation.name}`
+                          ? `${admin.email} administers every project in ${organisation.name}, so they appear on every row. Change that under "Every project in this organisation", above.`
                           : `${admin.email} administers ${project.key}`
                       }
                       style={{
@@ -403,11 +534,12 @@ export default function PlatformPage() {
                           title={`Remove ${admin.email} from ${project.key}`}
                           aria-label={`Remove ${admin.email} from ${project.key}`}
                           onClick={() =>
-                            void run(() =>
-                              send<PlatformView>(
-                                `/api/v1/platform/projects/${project.id}/admins/${admin.membership_id}`,
-                                'DELETE',
-                              ),
+                            void removeAdmin(
+                              'projects',
+                              project.id,
+                              admin.membership_id,
+                              // One project, and the chip says which — no question needed.
+                              null,
                             )
                           }
                           style={{
@@ -427,7 +559,7 @@ export default function PlatformPage() {
                   <form
                     onSubmit={(event) => {
                       event.preventDefault();
-                      void addAdmin(project.id, project.key);
+                      void addAdmin('projects', project.id, project.key);
                     }}
                     style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}
                   >

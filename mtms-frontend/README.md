@@ -8,14 +8,14 @@ by the Spring Boot service in `../mtms-backend`.
 The API has to be up first.
 
 ```bash
-cd ../mtms-backend && ./mvn.sh spring-boot:run     # :8080
+cd ../mtms-backend && ./mvn.sh spring-boot:run     # :9091
 cd ../mtms-frontend && npm run dev                 # :3000
 ```
 
-Sign in as `nitin@azalio.io` / `tracker`.
+Sign in as `paras.mahajan@azalio.io` / `paras2002`.
 
 Copy `.env.example` to `.env.local` if the service is anywhere other than
-`http://localhost:8080`.
+`http://localhost:6011`.
 
 ## What changed when the API moved out
 

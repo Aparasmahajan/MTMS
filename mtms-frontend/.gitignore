@@ -18,3 +18,7 @@ data/tracker.json.tmp
 # Python bytecode from running the drift agent locally.
 __pycache__/
 *.pyc
+
+# The assembled standalone deployable and its archive — build output, not source.
+/dist-frontend/
+/mtms-frontend.tar.gz

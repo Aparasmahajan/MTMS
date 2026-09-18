@@ -1,3 +1,26 @@
+cd "C:/Users/parmahaj/Documents/New folder/MTMS/mtms-backend" && ./mvn.sh -DskipTests package
+cd "C:/Users/parmahaj/Documents/New folder/MTMS/mtms-frontend" && rm -rf .next && NEXT_PUBLIC_API_BASE_URL= npm run build
+
+cd "C:/Users/parmahaj/Documents/New folder/MTMS/mtms-frontend" && rm -rf dist-frontend mtms-frontend.tar.gz && mkdir dist-frontend && cp -a .next/standalone/. dist-frontend/ && cp -a .next/static dist-frontend/.next/static && tar -czf mtms-frontend.tar.gz dist-frontend
+
+
+
+Restart, on the server
+pkill -u $USER -f mtms-api-1.0.0-SNAPSHOT.jar; pkill -u $USER -f "node.*server.js"
+cd ~/mtms/frontend && rm -rf dist-frontend && tar -xzf mtms-frontend.tar.gz
+cd ~/mtms && set -a && . ./api.env && set +a && nohup java -jar mtms-api-1.0.0-SNAPSHOT.jar > api.log 2>&1 &
+cd ~/mtms/frontend/dist-frontend && PORT=6010 HOSTNAME=0.0.0.0 nohup node server.js > ../web.log 2>&1 &
+
+
+
+
+status
+
+curl -s -o /dev/null -w 'api %{http_code}\n' http://localhost:6011/actuator/health
+curl -s -o /dev/null -w 'web %{http_code}\n' http://localhost:6010/login
+jobs -l
+
+
 cd mtms-backend && ./mvn.sh spring-boot:run
 
 cd mtms-frontend && npm run dev, sign in as parmahaj@mahajan.com / tracker

@@ -48,6 +48,14 @@ export interface OrganisationView {
   sub_module_count: number;
   /** Who can administer it, so an organisation is never left without an owner. */
   admins: { display_name: string; email: string; status: string }[];
+  /**
+   * The subset whose access covers every project, carrying the membership id so it can be
+   * revoked. This is the only place an organisation-wide grant is offered for removal — on a
+   * project row it would take away far more than the row suggests.
+   *
+   * Optional because the static demo's runtime does not send it yet; read it with `?? []`.
+   */
+  org_wide_admins?: ProjectAdminView[];
   projects: PlatformProjectView[];
 }
 
