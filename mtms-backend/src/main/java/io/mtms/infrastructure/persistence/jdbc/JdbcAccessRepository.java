@@ -145,6 +145,18 @@ public class JdbcAccessRepository implements AccessRepository {
         "UPDATE users SET invite_token_hash = NULL, invite_expires_at = NULL WHERE id = ?", userId);
   }
 
+  @Override
+  public void setInviteToken(UUID userId, String tokenHash, java.time.Instant expiresAt) {
+    // Replaces whatever was there. The previous link stops working the moment this lands, which
+    // is the point: a reissue exists because the old one was lost, and two live links to one
+    // account would be a second way in that nobody is tracking.
+    jdbc.update(
+        "UPDATE users SET invite_token_hash = ?, invite_expires_at = ? WHERE id = ?",
+        tokenHash,
+        Sql.timestamp(expiresAt),
+        userId);
+  }
+
   // --- Roles -----------------------------------------------------------------
 
   @Override
@@ -200,6 +212,19 @@ public class JdbcAccessRepository implements AccessRepository {
           statement.setString(2, Sql.id(roleId));
           return statement;
         });
+  }
+
+  @Override
+  public void updateRoleDetails(UUID roleId, String name, String note, String description) {
+    jdbc.update(
+        "UPDATE roles SET name = ?, note = ?, description = ? WHERE id = ?",
+        name, note, description, roleId);
+  }
+
+  @Override
+  public void setRoleArchived(UUID roleId, java.time.Instant archivedAt) {
+    jdbc.update(
+        "UPDATE roles SET archived_at = ? WHERE id = ?", Sql.timestamp(archivedAt), roleId);
   }
 
   private static List<String> wire(Set<PermissionKey> permissions) {

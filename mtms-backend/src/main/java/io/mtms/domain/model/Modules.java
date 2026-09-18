@@ -28,14 +28,29 @@ public final class Modules {
    * <p>It is a record rather than the bare string it used to be because things attach to it:
    * ownership, a checklist, a discussion. None of those can hang off a piece of text.
    *
+   * @param description the team's own note about what this module is. Editable on the module
+   *     screen; empty until somebody writes one.
    * @param archivedAt set instead of deleting. A module with sub-modules recorded against it must
    *     not take them with it, and the same name switched back on has to find its work again.
    */
   public record Module(
-      UUID id, UUID projectId, String name, int orderIndex, Instant archivedAt) {
+      UUID id,
+      UUID projectId,
+      String name,
+      String description,
+      int orderIndex,
+      Instant archivedAt) {
+
+    public Module {
+      description = description == null ? "" : description;
+    }
 
     public boolean isArchived() {
       return archivedAt != null;
+    }
+
+    public Module withDescription(String next) {
+      return new Module(id, projectId, name, next, orderIndex, archivedAt);
     }
   }
 

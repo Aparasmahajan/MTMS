@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Blueprint, ErrorBanner, Notice, PageTitle, SectionHeading } from '@/components/primitives';
+import { IssuedInvitations, useIssuedInvitations } from '@/components/IssuedInvitations';
 import { ApiError, get, send } from '@/lib/client/api';
 import { formatStamp } from '@/lib/shared/views';
 import type { PlatformView } from '@/lib/shared/platform';
@@ -30,6 +31,11 @@ export default function PlatformPage() {
   const [projectDrafts, setProjectDrafts] = useState<Record<string, string>>({});
   const [adminDrafts, setAdminDrafts] = useState<Record<string, string>>({});
   const [orgAdminDrafts, setOrgAdminDrafts] = useState<Record<string, string>>({});
+
+  // Issued links are written down rather than only announced. The notice bar they used to live
+  // in is dismissible and clears on the next action, and the server keeps only a hash of each
+  // token — so a link closed before it was copied was gone for good.
+  const issued = useIssuedInvitations();
 
   const load = useCallback(async () => {
     try {
@@ -78,8 +84,13 @@ export default function PlatformPage() {
       setOrgSlug('');
       setAdminEmail('');
       setAdminName('');
+      issued.record({
+        email: String(meta.admin_email),
+        where: orgName,
+        url: String(meta.accept_url),
+      });
       setNotice(
-        `${meta.admin_email} is invited as the administrator. There is no mail transport yet, so send them this single-use link: ${meta.accept_url}`,
+        `${meta.admin_email} is invited as the administrator. There is no mail transport yet, so send them this single-use link — it is also kept under "Invitation links issued here" until you clear it: ${meta.accept_url}`,
       );
     }
   }
@@ -125,11 +136,45 @@ export default function PlatformPage() {
     if (!meta) return;
 
     setDrafts((current) => ({ ...current, [id]: '' }));
+    if (meta.invited && meta.accept_url) {
+      issued.record({ email: String(meta.admin_email), where, url: String(meta.accept_url) });
+    }
     setNotice(
       meta.invited
-        ? `${meta.admin_email} is invited as an administrator of ${where}. There is no mail transport yet, so send them this single-use link: ${meta.accept_url}`
+        ? `${meta.admin_email} is invited as an administrator of ${where}. There is no mail transport yet, so send them this single-use link — it is also kept under "Invitation links issued here" until you clear it: ${meta.accept_url}`
         : `${meta.admin_email} now administers ${where}. They already had an account in this organisation, so there is nothing to send.`,
     );
+  }
+
+  /**
+   * Issues a fresh link for somebody who has not accepted yet.
+   *
+   * The repair for a lost link, and the reason it is one click rather than delete-and-recreate.
+   * The previous link stops working the moment this lands, which the confirmation says: two live
+   * links to one account would be a second way in that nobody is tracking.
+   */
+  async function reissue(tenantId: string, tenantName: string, userId: string, email: string) {
+    if (
+      !window.confirm(
+        `Issue a fresh invitation link for ${email}?
+
+Any link sent to them before this stops ` +
+          'working immediately.',
+      )
+    ) {
+      return;
+    }
+
+    const meta = await run(() =>
+      send<PlatformView>(
+        `/api/v1/platform/organisations/${tenantId}/invitations/${userId}/reissue`,
+        'POST',
+      ),
+    );
+    if (!meta?.accept_url) return;
+
+    issued.record({ email, where: tenantName, url: String(meta.accept_url) });
+    setNotice(`A fresh link for ${email} is under "Invitation links issued here". The old one no longer works.`);
   }
 
   /**
@@ -199,6 +244,12 @@ export default function PlatformPage() {
 
       {error ? <ErrorBanner message={error} onDismiss={() => setError(null)} /> : null}
       {notice ? <Notice message={notice} onDismiss={() => setNotice(null)} /> : null}
+
+      <IssuedInvitations
+        links={issued.links}
+        onForget={issued.forget}
+        onClear={issued.clear}
+      />
 
       <PageTitle
         kicker="Platform"
@@ -377,7 +428,28 @@ export default function PlatformPage() {
               >
                 {admin.display_name}
                 {admin.status === 'invited' ? (
-                  <span style={{ color: 'var(--color-neutral-600)' }}>· invited</span>
+                  <>
+                    <span style={{ color: 'var(--color-neutral-600)' }}>· invited</span>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      title={`Issue a fresh single-use link for ${admin.email}. The previous one stops working.`}
+                      onClick={() =>
+                        void reissue(organisation.id, organisation.name, admin.user_id, admin.email)
+                      }
+                      style={{
+                        border: 0,
+                        background: 'transparent',
+                        padding: 0,
+                        fontSize: 11,
+                        cursor: busy ? 'not-allowed' : 'pointer',
+                        color: 'var(--color-neutral-600)',
+                        textDecoration: 'underline',
+                      }}
+                    >
+                      reissue link
+                    </button>
+                  </>
                 ) : null}
                 <button
                   type="button"
@@ -522,7 +594,33 @@ export default function PlatformPage() {
                     >
                       {admin.display_name}
                       {admin.status === 'invited' ? (
-                        <span style={{ color: 'var(--color-neutral-600)' }}>· invited</span>
+                        <>
+                          <span style={{ color: 'var(--color-neutral-600)' }}>· invited</span>
+                          <button
+                            type="button"
+                            disabled={busy}
+                            title={`Issue a fresh single-use link for ${admin.email}. The previous one stops working.`}
+                            onClick={() =>
+                              void reissue(
+                                organisation.id,
+                                organisation.name,
+                                admin.user_id,
+                                admin.email,
+                              )
+                            }
+                            style={{
+                              border: 0,
+                              background: 'transparent',
+                              padding: 0,
+                              fontSize: 11,
+                              cursor: busy ? 'not-allowed' : 'pointer',
+                              color: 'var(--color-neutral-600)',
+                              textDecoration: 'underline',
+                            }}
+                          >
+                            reissue link
+                          </button>
+                        </>
                       ) : null}
                       {admin.org_wide ? (
                         <span style={{ color: 'var(--color-neutral-600)' }}>· org-wide</span>

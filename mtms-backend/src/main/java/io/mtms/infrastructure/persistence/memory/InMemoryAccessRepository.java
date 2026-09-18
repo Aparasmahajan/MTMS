@@ -132,6 +132,12 @@ public class InMemoryAccessRepository implements AccessRepository {
         existing.user(), existing.passwordHash(), null, null));
   }
 
+  @Override
+  public void setInviteToken(UUID userId, String tokenHash, java.time.Instant expiresAt) {
+    replaceUser(userId, existing -> new Tenancy.UserWithSecret(
+        existing.user(), existing.passwordHash(), tokenHash, expiresAt));
+  }
+
   private void replaceUser(
       UUID userId, java.util.function.UnaryOperator<Tenancy.UserWithSecret> change) {
     for (int i = 0; i < db.users.size(); i++) {
@@ -178,6 +184,35 @@ public class InMemoryAccessRepository implements AccessRepository {
             new Tenancy.Role(
                 role.id(), role.tenantId(), role.key(), role.name(), role.note(),
                 role.description(), role.isSystem(), Set.copyOf(permissions)));
+        return;
+      }
+    }
+  }
+
+  @Override
+  public void updateRoleDetails(UUID roleId, String name, String note, String description) {
+    replaceRole(
+        roleId,
+        role ->
+            new Tenancy.Role(
+                role.id(), role.tenantId(), role.key(), name, note, description,
+                role.isSystem(), role.permissions(), role.archivedAt()));
+  }
+
+  @Override
+  public void setRoleArchived(UUID roleId, java.time.Instant archivedAt) {
+    replaceRole(
+        roleId,
+        role ->
+            new Tenancy.Role(
+                role.id(), role.tenantId(), role.key(), role.name(), role.note(),
+                role.description(), role.isSystem(), role.permissions(), archivedAt));
+  }
+
+  private void replaceRole(UUID roleId, java.util.function.UnaryOperator<Tenancy.Role> change) {
+    for (int i = 0; i < db.roles.size(); i++) {
+      if (db.roles.get(i).id().equals(roleId)) {
+        db.roles.set(i, change.apply(db.roles.get(i)));
         return;
       }
     }

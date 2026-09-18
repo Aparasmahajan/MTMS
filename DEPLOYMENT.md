@@ -3,8 +3,60 @@
 Two programs. The **API** is a Spring Boot JAR on port 6011. The **web app** is a Next.js
 server on port 6010. They talk over HTTP, so they can sit on one machine or two.
 
-Both were built and checked together on 14 Sept 2026 — see *What was verified* at the end,
-which is also honest about what was not.
+Built and checked together on 16 Sept 2026. *What was verified* at the end is also honest
+about what was not.
+
+**If you have deployed this before:** §0 is the whole of what changed. **There are now two
+migrations** — read the schema note below before deploying.
+
+---
+
+## 0. What changed in this release
+
+| | |
+|---|---|
+| **Steps** — the reusable checklist | New feature, on tables the schema already had. Routes under `/api/v1/steps` |
+| **Owners** — one overall plus one per team, at every level | New. `/api/v1/owners` |
+| **Roles per project** — an admin adds or hides a role | New. `/api/v1/roles`. **Migration V2** |
+| **Discussions** with @mentions | New. `/api/v1/discussions` |
+| **Notifications** — an in-app inbox, and an optional webhook | New. `/api/v1/notifications`. **Migration V3** |
+| **Per-project wording** | Reads the three `*_label` columns that were already there and unused |
+| **Move a sub-module between modules** | `PATCH /api/v1/sub-modules/{id}` accepts `module_name` |
+| **Parent/child columns**, **bulk-apply a checklist**, **the module screen** | `/api/v1/config/columns/grouped`, `/api/v1/steps/lists/{id}/apply`, `/modules/{id}` |
+| **Per-module "in prod" counts**; **recent-changes panel removed**; **invitation links persist**, and can be reissued | |
+
+**The schema changes, and Flyway handles it.** `V1__initial_schema.sql` is byte-for-byte what
+it has always been — that was the point of writing it in its final shape on 11 Sept, and it is
+why steps, owners and discussions needed no migration at all. Two things genuinely did:
+
+- **`V2__hideable_roles.sql`** — one column, `roles.archived_at`, plus an index. Hiding a role
+  needs somewhere to record that it is hidden.
+- **`V3__notifications.sql`** — the `notifications` table.
+
+Both are additive: a column that defaults to NULL, and a new table. Nothing is dropped, nothing
+is rewritten, and no existing row is touched. Flyway sees V1 already applied and runs V2 and V3
+on the first start. **38 tables** afterwards.
+
+There is nothing to do by hand. If Flyway reports a checksum mismatch on V1, something edited
+that file after your database ran it — this release did not, so find what did before repairing
+anything.
+
+**Verified against a real MySQL 8.0.40 on 17 Sept**, which is new: all three migrations applied
+in order to a database that already held V1, and the full suite ran green against it. See *What
+was verified* at the end, which is also specific about the bug that found.
+
+**No new permission key.** Building the step library and the checklists is gated on
+`project.config`, the same permission that owns columns and stages; owners on `module.edit`;
+discussions and the inbox on `project.view`. Ticking a step is gated by the roles named on the
+step itself, which is data an admin sets. Nothing to grant before any of this works.
+
+**One optional new setting**, and everything works without it — see §3.
+
+**No new permission key.** Building the step library and the checklists is gated on
+`project.config`, the same permission that owns columns and stages. A new key would be held by
+nobody until an administrator granted it to every role by hand, so the feature would have
+shipped switched off. Ticking a step is gated by the roles named on the step itself, which is
+data an admin sets, not a permission. Nothing to grant before this works.
 
 ---
 
@@ -22,7 +74,7 @@ Nothing else. Redis and Kafka are **optional** — see step 3.
 
 ## 2. The database
 
-The schema `mtms` already exists. The application creates its own 36 tables inside it on
+The schema `mtms` already exists. The application creates its own **38 tables** inside it on
 first start, so **do not run the SQL by hand**.
 
 **Creating the schema is not enough — the application also needs a user.** Missing this is
@@ -74,6 +126,18 @@ export MTMS_SECURITY_JWT_SECRET="$(openssl rand -base64 48)"
 export MTMS_CORS_ALLOWED_ORIGINS="http://YOUR-SERVER:6010"
 export MTMS_APP_BASE_URL="http://YOUR-SERVER:6010"
 
+# Optional: a Teams or Slack incoming webhook for notifications.
+#
+# Leave it unset and nothing breaks — every notification is written to the recipient's in-app
+# inbox before any transport is attempted, so unset simply means the inbox is the only channel.
+# It posts to one fixed channel, which is why the inbox is the primary route and this is the
+# broadcast: the inbox tells the person, this tells the room.
+#
+# Email is deliberately not offered. It was the obvious first choice and is not buildable on
+# the machine this was built on — the mail library is not in its offline Maven repository —
+# so it is one class and one dependency away rather than done. See `Notifier`.
+# export MTMS_NOTIFICATIONS_WEBHOOK_URL="https://outlook.office.com/webhook/..."
+
 # See "The four traps" below before changing these.
 export MTMS_SECURITY_SECURE_COOKIES=false
 export MTMS_CACHE_TYPE=memory
@@ -104,7 +168,7 @@ message anywhere**. Set it to `false` until you have HTTPS, then set it back to 
 **2. A fresh database has no way in, and nothing will create one.**
 The seeder that used to create the Flow One demo organisation and its accounts was deleted
 on 16 Sept, once the real database was populated and it had no further purpose. Nothing
-replaces it: point this at an empty schema and Flyway will build thirty-six tables with no
+replaces it: point this at an empty schema and Flyway will build thirty-eight tables with no
 organisation, no roles and no users, the service will start cleanly, and **no password will
 get you in** — there is no self sign-up, and every account is created by an invitation from
 somebody who is already an administrator.
@@ -178,6 +242,40 @@ NEXT_PUBLIC_API_BASE_URL=http://YOUR-SERVER:6011 npm run build
 
 ---
 
+## 4a. One script instead of nine commands
+
+`scripts/release.sh` does all of the above in the right order. It replaces the loose commands
+that used to live in `com.txt`; three of those were destructive and one was silently
+order-dependent, which is a bad shape for something run by hand at the end of a day.
+
+```bash
+./scripts/release.sh build      # compile both, run the tests
+./scripts/release.sh package    # build, then produce the jar and the frontend tarball
+./scripts/release.sh deploy     # package, copy to $MTMS_HOST, restart there
+./scripts/release.sh status     # is it up
+```
+
+On the server, from `~/mtms`:
+
+```bash
+./release.sh restart            # stop, unpack, start, verify — and say which log to read if not
+```
+
+Three things it does that the old commands did not:
+
+- **It runs the tests.** `com.txt` passed `-DskipTests`, which is right when re-packaging
+  something already tested and wrong as a default. `MTMS_SKIP_TESTS=1` gets the old behaviour.
+- **It copies `public/`** into the standalone bundle. Next.js does not, and missing it serves
+  HTML with no assets, which reads as a broken build rather than a missed copy.
+- **It checks afterwards** and, when something is down, says which log holds the reason
+  instead of printing two numbers.
+
+`deploy` refuses unless `MTMS_HOST` is set. Everything else — ports, the remote directory, the
+proxy target — is an environment variable with a sane default; `./scripts/release.sh` with no
+argument lists them.
+
+---
+
 ## 5. First login
 
 > **Historical.** The seeder described here was removed on 16 Sept, after the production
@@ -223,12 +321,33 @@ curl -X POST http://localhost:6011/api/v1/auth/login \
 
 # 3. Web app is serving
 curl -I http://YOUR-SERVER:6010/login
+
+# 4. The new routes exist and are behind the login. 401, never 404 —
+#    404 here means the JAR is the old one.
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://localhost:6011/api/v1/steps/library
+curl -s -o /dev/null -w '%{http_code}\n' -X PATCH http://localhost:6011/api/v1/config/vocabulary
 ```
 
 Then open `http://YOUR-SERVER:6010` in a browser and sign in. You should see **18
 sub-modules across 6 modules** and a matrix of **26 columns**. If the page loads but the
 matrix is empty, it is trap 1 or trap 4 above — open the browser's developer console, which
 will say which.
+
+### Checking this release specifically
+
+Signed in as an admin:
+
+1. **Configure → What this project calls things.** Type `Node` in the first box and click
+   away. Every heading in the app changes word. Nothing underneath is renamed, so this is
+   safe to try and undo.
+2. **Configure → Step library.** Add a step, tick one or two roles under "who may tick it".
+3. **Configure → Checklists.** Pick a sub-module, add a checklist, add the step to it.
+4. **Open that sub-module.** The checklist is above the deliverables. Signed in as somebody
+   who does *not* hold the step's role, the tick is disabled and says which role it needs.
+5. **Block a step.** It asks for a reason and refuses an empty one — and the reason appears
+   in the change feed, not only on the step.
+6. **The landing page** shows `SBC — 12 of 19 in prod` per module, and no longer has a recent
+   changes panel.
 
 ---
 
@@ -243,6 +362,7 @@ Spring explaining which beans it could not build as a consequence.
 | `Access denied for user 'mtms'@'localhost'` | The user does not exist, the password is wrong, or it was created for a different host. **Or** `DATABASE_URL` was left unquoted — see below |
 | `Communications link failure` | MySQL is not listening where the URL says, or is refusing this host |
 | `jwt-secret must be set and at least 32 characters` | The signing key is missing or short |
+| `Validate failed: Migration checksum mismatch for migration version 1` | Something edited `V1__initial_schema.sql` after this database ran it. **This release did not** — if you see this, find what did before repairing anything |
 | `Table 'mtms.flyway_schema_history' doesn't exist` after a partial run | A previous start failed halfway. Drop and recreate the schema; nothing is live yet |
 
 ### The unquoted URL trap
@@ -282,6 +402,13 @@ MTMS_SECURITY_SECURE_COOKIES=true
 **An origin is scheme, host and port — nothing else.** `https://mtms.azalio.io/api/v1/auth/login`
 is a URL, not an origin, and as a value it would never match anything. No trailing slash
 either.
+
+**`MTMS_APP_BASE_URL` is the one that shows up in somebody's inbox.** It is the whole address
+invitation links are built from, and the console sends it on unchanged — prefixing
+`window.location.origin` to it is what produced links with the domain twice, fixed on 16 Sept.
+Get it wrong and every invitation issued until you notice is a dead link, and since the server
+keeps only a hash of each token, the repair is to reissue them (which the console can now do)
+rather than to resend them.
 
 **CORS is very likely irrelevant here.** With the proxy, the browser only ever calls the web
 app's own origin and the forwarding happens server-side, so no preflight is made and the
@@ -348,58 +475,82 @@ and no `export`. Do the same for the web app with `npm start`.
 The API shuts down gracefully: it finishes the requests it is already handling before
 exiting, so a restart during working hours does not fail somebody's click.
 
+### One thing to back up
+
+The database, and nothing else. Both programs are stateless — the JAR and the frontend bundle
+are rebuilt from git in two minutes. What cannot be rebuilt is the ability to sign in: since
+the seeder was removed there is no path that creates a first account, so a lost database is a
+locked door. See trap 2.
+
+The one exception is per-browser: the invitation links the console keeps under "Invitation
+links issued here" live in that browser's `localStorage` and are on nobody's backup. They do
+not need to be — an unaccepted invitation can be reissued from the same screen — but do not
+treat that list as a record of anything.
+
 ---
 
 ## What was verified, and what was not
 
-**Verified on 14 Sept 2026, against a real MySQL 8.0.40:**
+**Verified on 17 Sept 2026, against a real MySQL 8.0.40** — the first time this has been true
+since 11 Sept:
 
-- The JAR builds and all **62 tests pass**, including 16 that run only when a MySQL server
-  is present.
-- Starting against an **empty `mtms` schema** creates all 36 tables and seeds the sample
-  organisation. Verified by dropping and recreating the schema first, so this is the same
-  path your server will take on its first start.
-- Login as `paras.mahajan@azalio.io`, the project snapshot and the super admin console all
-  return correct data read from MySQL — 18 sub-modules, 26 columns, 9 users, 3 projects,
-  with each project's administrators listed.
-- The old `nitin@azalio.io` account is gone and is refused.
-- **Writes persist.** Changing a cell through the running app stores the new status, who
-  changed it and when, and appends the audit row. Confirmed by reading the rows back out
-  of MySQL directly.
-- **Timestamps are stored in UTC**, as the connection settings intend.
-- **Text is stored as UTF-8.** An arrow written into the audit trail comes back as an
-  arrow, not as `?`.
-- The web app builds, runs, and shows that same MySQL data in the browser.
+- **All 155 tests pass**, including **47 integration tests that had never executed before**.
+  They cover the step tables, the owners table, the discussions tables, the notifications table,
+  the per-project wording columns and the sub-module move.
+- **All three migrations applied in order** to a database that already held V1. V1 untouched, V2
+  and V3 additive, 38 tables afterwards.
+- The JAR builds, the frontend type-checks, 31 frontend tests pass, and `next build` produces
+  all 16 routes.
+- `scripts/release.sh package` ran end to end and produced both artefacts.
+- **The service was started from the built JAR** and answered `{"status":"UP"}`. Every new route
+  answers **401 rather than 404**, so the whole Spring context wires and the routes are
+  registered and behind the login.
 
-### Two bugs were found and fixed doing this
+### The bug that run found
 
-**1. The service would not start against MySQL at all.** Seeding inserted memberships
-pointing at a project that did not exist yet, and MySQL rejected the foreign key. The
-in-memory storage does not enforce foreign keys, which is why it had never shown up. It
-would have failed on your server at startup, before serving a single request. Fixed by
-creating the projects before the users in `Seeder.java` — since deleted, so this one is
-history rather than something to maintain.
+One, and it would have taken the steps feature down completely.
 
-**2. The super admin console crashed.** The Java API never sent the list of administrators
-per project — that field was added to the TypeScript back end and never ported, though the
-Java file's comment claimed the two matched "field for field". The page read
-`project.admins.length` on a value that was not there and died with a blank screen. This
-mattered: the console is where you create projects and assign their admins, which is the
-first thing you would have done. Fixed by adding `ProjectAdministrator` to `PlatformView`.
+```java
+             ORDER BY ev.at DESC
+             LIMIT """
+                + EVENT_LIMIT,
+```
 
-**3. An empty API address broke server-side rendering.** Relative paths are right for the
-browser, but Node has no current page to be relative to, so every server-rendered page
-failed with a connection refused that looked exactly like the API being down. Fixed in
-`lib/client/config.ts`: the server half falls back to the proxy target while the browser
-half stays relative.
+A Java text block strips the trailing whitespace off every line, so this concatenated to
+`LIMIT1000`. The query is in `JdbcStepRepository.load`, which **every project read calls** — so
+every page of every project would have answered 500 the moment the service met MySQL. It
+compiled, it type-checked, and it was reviewed twice.
 
-The JAR in `target/` and the build in `mtms-frontend/.next` are the rebuilt ones.
+It is a bind parameter now, which cannot lose a space.
+
+That is the fourth bug of exactly this kind, after the foreign key InnoDB refuses, the driver
+that writes Java serialisation bytes for a `java.util.UUID`, and `LAST_INSERT_ID()` being
+per-connection. All four were invisible to review and to the in-memory store. The lesson is not
+"write better SQL": **a repository nobody has executed is not finished**, whatever the review
+said.
 
 **Still not verified:**
 
+- **Nobody has used the application.** A fresh database has no accounts — see trap 2 — so every
+  screen built in the last three releases is type-checked, built, and has never been clicked.
+  Run `deploy/bootstrap.sql`, sign in, and spend half an hour in it before trusting any of it.
+- **`deploy/bootstrap.sql` itself** has been column-checked against the schema and never
+  executed.
+- **The webhook.** `MTMS_NOTIFICATIONS_WEBHOOK_URL` is unset here, so `LoggingNotifier` is what
+  ran. The in-app inbox is verified; the posting is not.
 - **Redis and Kafka.** The settings in step 3 switch them off.
 - **HTTPS.** Everything above ran over plain HTTP. When you add TLS, set
-  `MTMS_SECURITY_SECURE_COOKIES=true` — and note trap 1 in reverse: with HTTPS in place,
-  leaving it `false` is a real weakness, not just untidy.
+  `MTMS_SECURITY_SECURE_COOKIES=true` — and note trap 1 in reverse: with HTTPS in place, leaving
+  it `false` is a real weakness, not just untidy.
 - **Your actual server.** The MySQL used here was a local throwaway on port 13306. Host,
   credentials and firewall are the remaining unknowns.
+
+### From the previous release, still worth knowing
+
+Three bugs were found and fixed on 14 Sept while verifying against a real MySQL: seeding
+inserted memberships pointing at a project that did not exist yet and MySQL rejected the
+foreign key; the super admin console crashed because the Java API never sent the list of
+administrators per project; and an empty API address broke server-side rendering, because
+Node has no current page for a relative path to be relative to. All three were invisible
+against the in-memory store. That is the reason the "not verified" list above leads with
+MySQL.

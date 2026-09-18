@@ -118,7 +118,371 @@ system nicely. And the demo starts signed in as **Nitin**.
 
 ---
 
-## 3. Steps — the main new feature
+## 2a. Shipped 16 Sept — steps, wording, and the small pile
+
+Everything below was built in the Java service and `mtms-frontend`. `mtms-static` and `mtms/`
+were deliberately not touched, so they are now a release behind and still work on their own.
+
+**The schema did not change.** That is the 11 Sept decision paying off: `V1__initial_schema.sql`
+was written in its final shape, with the nine `step_*` tables and the three `*_label` columns
+already in it and nothing reading them. This release is the code that reads them. There is no
+migration.
+
+### Steps — built
+
+The model in §3a, unchanged, with the three levels kept apart: `Steps.Definition` is the
+library, `Steps.StepList` plus `Steps.Entry` is one named configuration with the order **on
+the entry**, and `Progress` / `Event` / `Comment` are what happened. `Event` is append-only
+and is the truth; `Progress` is a fast lookup.
+
+The rules are one file, `StepGate`, and it is pure. The use case calls it to decide and the
+projection calls the same functions to tell the screen *why* a control is disabled — so the
+two cannot drift into disagreeing, which is how a permission system ends up with a button
+that looks available and then refuses. The answer travels on the wire as `can_tick` and
+`locked_reason`; the client never recomputes either.
+
+What is gated by what, because it is three different things and they were easy to confuse:
+
+| | Gated by |
+|---|---|
+| Building the library and the checklists | `project.config` — the same permission that owns columns and stages |
+| Ticking a step | The roles named on the step. Not a permission: it is the admin's statement about who checks this particular thing |
+| Commenting | Nothing. Anyone who can see the project, stakeholders included |
+
+**No new permission key, on purpose.** A new key would be held by nobody until an
+administrator granted it to every role by hand, so the feature would have shipped switched
+off in the one deployment that exists.
+
+**A `project.config` holder may tick anything, and the event records it as an override** —
+"Anand ticked this on behalf of QA", with a reason. The screen warns before it happens. That
+flag is the difference between an audit trail and a decoration.
+
+Answers to the questions §3 left open, as built:
+
+- **A step naming no role can be ticked by nobody, not by everybody.** The case that decides
+  it is a step whose last allowed role was deleted from the organisation: treating "no roles"
+  as unrestricted would silently turn the most carefully gated step in the project into the
+  only one anyone can tick. The screens say "needs a role" and everything already recorded
+  stands.
+- **Only ticking is ordered.** Un-ticking and blocking are always allowed. A sequence is a
+  claim about the order work is *done* in, never a reason to stop somebody correcting the
+  record.
+- **The refusal names the step in the way**, and names the earliest one rather than the
+  nearest — "step 1 is not done yet" is actionable; "out of order" sends somebody to do step
+  2, which they also cannot do.
+- **Taking a step off a checklist is refused once anything has been recorded against it.**
+  That one delete would take the ticks, the history and the comments with it by cascade. The
+  message points at retiring the step instead, which keeps everything.
+
+**Not built: module-scoped checklists.** The schema, the domain and the repository all carry
+`scope_type = 'module'`, because the rule is "the lowest level that exists" and a module with
+no sub-modules has to hold its own. What is missing is upstream: a module reaches the API as a
+*name* in the project's configuration and has no id on the wire, so there is nothing for a
+caller to attach a list to. Exposing module ids touches the configuration shape, the Configure
+screen and the matrix, so it is its own change. The API refuses `module` with that reason
+rather than guessing.
+
+### Per-project wording — built
+
+The three `*_label` columns are read and written. `PATCH /api/v1/config/vocabulary` sets them,
+one box at a time, from a panel on Configure; they arrive on `snapshot.project` and every
+screen reads them through one helper, `wordingOf`, which derives the plural, the lowercase and
+the mid-sentence form from the single word the admin typed.
+
+Three small decisions in that helper, each with a visible failure behind it: `Activity` →
+`Activities` rather than `Activitys`; `Journey` → `Journeys` rather than `Journeies`; and
+`CFX` stays `CFX` mid-sentence rather than becoming `3 cfx`, which reads as a typo.
+
+**Only the labels move.** Nothing renames a table, a permission key or a route — those are
+written into stored rows and into client code, and following a text box with a migration every
+time somebody edited it would be a bad trade for a heading. Which also means it is safe to try
+a word and change your mind, and the panel says so.
+
+### The small pile — built
+
+- **Move a sub-module between modules from its own screen.** A picker where the breadcrumb
+  used to print the module name. Every cell travels with it: what was loaded is a fact about
+  the work, not about which heading it was filed under. The server checks the module is one
+  the project configures, and that `(module, name)` stays unique.
+- **Counts per module on the landing page** — `SBC — 12 of 19 in prod`, beside the average.
+  "In prod" means readiness 100%, the same definition the matrix and the FNI gate already use,
+  rather than a second definition of finished that could drift away from theirs. The two
+  numbers disagree exactly when it matters: nineteen activities at 95% is an average that
+  reads well and a release with nothing in production.
+- **The "recent changes" panel is gone.** The link to the Audit screen stays, because "where
+  did the feed go" is the obvious next question.
+- **Invitation links stop disappearing.** Issued links are written into the browser's own
+  storage and stay on the console until explicitly cleared, with a copy button each. And
+  **reissue**: `POST /api/v1/platform/organisations/{id}/invitations/{userId}/reissue` mints a
+  fresh token for somebody who has not accepted, which is the only repair there has ever been
+  — the server stores a hash and can never show a link again. The previous link stops working
+  immediately, because two live links into one account would be a second way in that nobody is
+  tracking. Refused for an account that has already accepted: that is a password reset wearing
+  the wrong name.
+
+### What this cost in tests
+
+**75 backend tests**, up from 46. Fourteen pin `StepGate` as functions; fifteen drive
+`StepUseCases` end to end against the in-memory store — who may tick, what an override
+records, what a strict order refuses and names, that un-ticking is never held up by it, that
+retiring keeps history, that removing a ticked entry is refused. **31 frontend tests**, up
+from 22, the nine new ones on the wording.
+
+**Nine more MySQL integration tests were written and have not run.** There is no MySQL on this
+machine, so all 25 integration tests skip. Until they are run, `JdbcStepRepository` is in
+exactly the position the whole JDBC layer was in before 11 Sept: written, type-checked,
+reviewed, never executed. That is precisely where the last three real bugs were found — see
+§4. `mtms-backend/scripts/mysql-dev.sh up` and then `./mvn.sh test`.
+
+**No screen was clicked.** The API cannot be signed into here: an empty in-memory database has
+no accounts and nothing creates one since the seeder was removed. The service was started from
+the built JAR and every new route answers 401 rather than 404, so the wiring is real — but the
+checklist panel, the wording editor and the invitation list are type-checked and built, not
+used.
+
+### And the release itself
+
+`scripts/release.sh` replaces the nine loose commands in `com.txt`: `build`, `package`,
+`deploy`, `restart`, `status`. Three of those commands were destructive and one was silently
+order-dependent, which is a bad shape for something pasted in by hand at the end of a day. It
+also runs the tests, copies `public/` into the standalone bundle (Next.js does not, and
+missing it serves HTML with no assets), and says which log holds the reason when something is
+down.
+
+---
+
+## 2b. Shipped 17 Sept — the rest of section 4
+
+Everything that was still outstanding in §4, built in the Java service and `mtms-frontend`.
+`mtms-static` and `mtms/` were again not touched.
+
+**One migration.** `V2__hideable_roles.sql` adds `roles.archived_at` and an index. It is the
+first migration after V1, and it exists because hiding a role genuinely needed a column that was
+not written on 11 Sept — everything shipped before this was already in V1 waiting for code. V1
+itself is still byte-for-byte unchanged, so Flyway runs V2 and nothing else.
+
+### Modules have ids on the wire
+
+`ProjectConfig` carried `List<String> moduleNames`; it now carries `List<Modules.Module>`, with
+`moduleNames()` derived from it so nothing that only wanted names had to change. That one gap
+was blocking four separate items — module-level owners, module-level discussions, the module
+screen, and module-scoped checklists — and three of those are now built.
+
+A shared `Scope` enum was lifted out of `Steps` while doing it. Checklists, owners and
+discussions all attach at the same three levels by the same rule (the lowest level that exists),
+and three enums that happen to agree today is how they stop agreeing.
+
+### Roles per project
+
+An admin can add a role, rename it, and hide one the project does not use. A new role arrives
+with **no permissions** — the alternative is granting more than you meant to by clicking "add".
+The key is derived from the name and is permanent; a name that would key as `admin` is refused,
+because the platform console looks that one up by key when it assigns an administrator.
+
+**Hide, never delete**, and the refusals are the interesting part:
+
+- **The admin role cannot be hidden.** It is the one the console grants, so hiding it would make
+  an organisation unadministrable from outside itself.
+- **A role somebody still holds cannot be hidden**, and the message counts them. Hiding it would
+  leave access granted through a role no screen shows — the kind of thing found during an audit
+  rather than during a change.
+
+Everything pointing at a hidden role stands: memberships, the steps it gates, the owner rows that
+name it as a team. Only the pickers change, and all five of them now filter on one flag.
+
+### Owners
+
+One overall owner plus one per team, at any of the three levels, several people per row.
+
+**The teams are the roles.** There is deliberately no second list of teams to keep in step — an
+admin who hides QA has removed the QA owner row everywhere in the same action, which is what "a
+project with no SME team simply does not show an SME row" has to mean if it is not to become a
+second thing to maintain.
+
+**An owner is a real account.** Refused for somebody not in the organisation, and for a
+deactivated one. That is the change that makes notifications and @mentions possible at all —
+nothing can be sent to a name. The old `sub_modules.owner` string is left alone and still shown
+on the matrix: converting one to the other is a change to existing data, not a new field.
+
+### Discussions, with @mentions
+
+Threads on a module, sub-module or sub-activity; comments on them; mentions recorded.
+
+**Private to the project**, which was the open question left in §4. One discussion per module
+shared across every project tracking it is powerful, and it would make every thread a thing to be
+careful in — people write freely when they know who is reading, and that is worth more.
+
+**Open to anyone who can see the project**, not gated on `module.edit`. The person who knows why
+something is stuck is very often not the person allowed to change it.
+
+Mentions resolve against the organisation's own accounts, never against whatever was typed —
+otherwise the app would record mentions of people who do not exist, and would let somebody
+discover whether an address belongs here by watching what highlights.
+
+**A test caught a real bug in the matcher.** With both "paras" and "paras.mahajan" in the
+organisation, `@paras.mahajan` matched *both*, because a boundary check treats a full stop as the
+end of a handle. Treating `.` as part of a handle instead would have broken `@Vinayak.` at the end
+of a sentence. Matching now consumes the span it covered, longest handle first, which gets both
+right.
+
+**Not built: file attachments.** They need a decision about where bytes live — the database, a
+disk, an object store — and each is a different operational commitment. Everything else in §4's
+discussion entry is done.
+
+### Parent and child columns on Configure
+
+`POST /api/v1/config/columns/grouped` creates one header with a column under it per environment —
+the `FILECR` / `LAB` / `PRE` / `PROD` shape that existed only because the seed data was written
+that way. Only the prod column counts, for the reason it always has: if lab counted, a release
+that skipped lab could never reach 100% and its FNI could never be signed.
+
+**It also fixed a live bug.** The existing "Add column" form posted `{ name }` while the service
+expected `{ key, label, full, allowed }`, so every use of it was a 400 reading as a validation
+failure on a field the screen does not have. The same class of mismatch as the project switcher
+and the config-list remove, found the same way — by reading both halves of one contract together.
+
+### Bulk-apply a checklist
+
+`POST /api/v1/steps/lists/{id}/apply` copies a checklist onto every other sub-module of a module.
+Without it the feature does not survive a real project: nobody attaches a checklist to two hundred
+things one at a time.
+
+It **copies rather than links**, so ticking one does not tick forty; **adds rather than replaces**,
+because a bulk action that silently overwrote somebody's bespoke list is how a tool gets banned;
+and **skips anything that already has a list by that name**, so running it twice after adding a
+sub-module does the obvious thing.
+
+### The module screen
+
+`/modules/{id}` — the counts the matrix already knows, an editable description, its owners, its
+discussion, and its sub-modules as a way in. Deliberately not a second grid: the matrix is where
+cells get ticked, and two places to do that is how they end up disagreeing.
+
+### Still not done
+
+- **Notifications.** The only §4 item untouched, and it needs something this repository cannot
+  decide: an SMTP host, or a Teams or Slack webhook. `Mailer` is still a port with one logging
+  implementation. Everything it would need is now recorded — mentions, owners who are real
+  accounts, and a strict step order that makes "you are unblocked" a real event.
+- **File attachments** on discussions, as above.
+- **Custom fields** on the module screen. There is no table for them, and inventing one before
+  anybody has named a specific field is how you get a schema nobody uses.
+
+### Tests
+
+**100 backend tests**, up from 75: 15 on roles and owners, 10 on mention matching. **31 frontend
+tests**, unchanged — the new screens are type-checked and built, not exercised.
+
+The integration tests still have not run. There is still no MySQL here, so the 25 that skip now
+skip against more code: `JdbcOwnerRepository` and `JdbcDiscussionRepository` join
+`JdbcStepRepository` in having been written, reviewed, and never executed. **V2 has never been
+applied to a database.**
+
+---
+
+## 2c. Notifications, and the first run against a real database
+
+### The JDBC layer was executed, and it was broken
+
+`scripts/mysql-dev.sh up` works on this machine after all. So for the first time since 11 Sept,
+the integration tests ran: **47 of them**, against MySQL 8.0.40, covering the step tables, the
+owners table, the discussions tables, the notifications table, the wording columns and the
+sub-module move.
+
+**One real bug, and it would have taken the whole steps feature down.**
+
+```java
+             ORDER BY ev.at DESC
+             LIMIT """
+                + EVENT_LIMIT,
+```
+
+A Java text block strips the trailing whitespace off every line, so that concatenated to
+`LIMIT1000`. The query is in `JdbcStepRepository.load`, which every project read calls — so
+every page of every project would have answered 500 the moment the service met MySQL. It
+compiled. It type-checked. It was reviewed twice, including by me, and written up as done.
+
+It is now a bind parameter, which cannot lose a space.
+
+That is the fourth bug of exactly this kind — after the foreign key InnoDB refuses, the driver
+that writes Java serialisation bytes for a UUID, and `LAST_INSERT_ID()` being per-connection.
+All four were invisible to review and to the in-memory store, and all four would have stopped
+the application on its first request. **The lesson is not "write better SQL", it is that a
+repository nobody has executed is not finished**, whatever the review said.
+
+**All three migrations applied in order** to a database that already held V1 — V1 unchanged, V2
+and V3 additive — and the full suite is green against the result. 38 tables.
+
+### Notifications
+
+The last item in §4, and the one that had been "blocked on a decision". It was half blocked: the
+decision is only about the transport, and everything else could be built.
+
+**An in-app inbox is the primary channel, not a fallback.** Every notification is written to the
+recipient's inbox in the same transaction as the thing it is about, before any transport is
+attempted. So a deployment with no webhook is not one with broken notifications — it is one
+where the inbox is the only channel, and the inbox is complete.
+
+**Three events, and only three:**
+
+| | Goes to |
+|---|---|
+| You were mentioned | The person named |
+| A step you own was blocked | The owners of that thing, with the reason |
+| A step you can tick became tickable | Whoever holds a role allowed to tick it |
+
+The third is the one that made this stop being optional. A checklist with `enforce_order` blocks
+the owner of step 2 until step 1 is ticked, and nothing in the application would ever have told
+them it was.
+
+Everything else — every cell change, every tick, every comment on a thread you are in — is
+deliberately silent. Each is defensible alone and together they are how a tool becomes noisy on
+day three, gets muted, and loses the channel permanently. The tests that matter here are the
+negative ones: never the actor, never a deactivated account, never twice for one person, never
+on an unordered list, never on the last step.
+
+**The transport is a webhook, not email**, and that is a constraint rather than a preference.
+Email needs a mail library that is not in this machine's offline Maven repository, and the
+network refuses the registry — so it is one class and one dependency away rather than done. A
+Teams or Slack incoming webhook needs nothing that is not in the JDK. Set
+`mtms.notifications.webhook-url` and it posts; leave it unset and `LoggingNotifier` writes a log
+line and reports honestly that nothing was sent, so `delivered_at` never claims a delivery that
+did not happen.
+
+One limitation worth stating: an incoming webhook posts to **one fixed channel**, so it tells
+the room rather than the person. That is the other reason the inbox is primary.
+
+**The inbox is not cached with the snapshot.** The cache key is (tenant, project, user,
+revision), and a notification arriving does not move the project's revision — it is not a change
+to the project. Caching them together would serve a stale badge until somebody happened to tick
+something, which is precisely the bug that made a new project take ten minutes to appear in the
+switcher. So the expensive half is cached and the inbox is one indexed read every time.
+
+### Where that leaves section 4
+
+Finished. Every item is built.
+
+### Still not done
+
+- **Email**, as above — one class, one dependency, no network here to fetch it.
+- **File attachments** on discussions. Blocked on where the bytes live, which is an operational
+  commitment rather than a coding decision. See `todo-next.md`.
+- **Custom fields** on the module screen. Still deliberately not built: a generic
+  `(entity, key, value)` store invented before anybody has named a specific field is how you get
+  a schema nobody uses.
+- **Nobody has clicked any of it.** A fresh database has no accounts, so every screen built
+  across these three releases is type-checked and built and has never been used. Run
+  `deploy/bootstrap.sql` and spend half an hour in a browser; it is worth more than any further
+  review.
+
+### Tests
+
+**155**, up from 100. 47 of them are integration tests against real MySQL, which is 47 more than
+had ever run before today.
+
+---
+
+## 3. Steps — the main new feature · **built 16 Sept, see §2a**
 
 **In one sentence:** a reusable checklist that the admin builds once and then attaches to
 whichever modules and sub-modules need it, where only the right role can tick each item.
@@ -384,12 +748,11 @@ another's rows. **62 tests pass** (46 domain + 16 integration).
   in a different vocabulary from the service now. `mtms-static` is the one shown to clients,
   so it is worth doing; `mtms/` is the folder already marked for deletion, and renaming it
   before deciding that would be wasted work.
-- **Each project picking its own words** is the other half of section 1 and is not started.
-  The three columns exist in the database (`module_label`, `sub_module_label`,
-  `sub_activity_label`); nothing reads them yet, so every screen still shows the built-in
-  words.
+- **Each project picking its own words** — **done 16 Sept**, see §2a. The three columns
+  (`module_label`, `sub_module_label`, `sub_activity_label`) are read and written, and every
+  screen in `mtms-frontend` prints them. `mtms-static` still shows the built-in words.
 
-### Discussions on modules and sub-modules · medium
+### Discussions on modules and sub-modules · **done 17 Sept, attachments excepted**
 
 A place to raise a topic and talk about it, attached to a module or a sub-module.
 
@@ -404,7 +767,7 @@ discussion shared across every project that uses the same node — so the SBC te
 from another project's SBC work? That is powerful, but it lets information cross between
 projects, which the app deliberately prevents everywhere else.
 
-### Owners · medium
+### Owners · **done 17 Sept**
 
 Today: one optional owner name per module, picked from a list of names.
 
@@ -427,7 +790,7 @@ level, and a different set on the sub-module than on the module.
 them real accounts is the right move — it is what makes notifications and @mentions
 possible — but it is a change to existing data, not just a new field.
 
-### Roles per project · medium
+### Roles per project · **done 17 Sept**
 
 Today: the roles are fixed in the code — admin, release, QA, dev, viewer, DevOps. Every
 project gets the same six whether they fit or not.
@@ -443,7 +806,7 @@ Wanted:
 
 This is the same switch the owner teams read from, so build the two together.
 
-### Change the module from the sub-module screen · small
+### Change the module from the sub-module screen · **done 16 Sept**
 
 Today, if a sub-module is filed under the wrong module, the only way to move it is to go
 back to the matrix and change it there. That is two screens away from where you noticed the
@@ -451,7 +814,7 @@ problem.
 
 Wanted: a module picker on the sub-module screen itself, so it can be moved in place.
 
-### Counts per module on the landing page · small
+### Counts per module on the landing page · **done 16 Sept**
 
 After signing in, the landing page should show, for each module, **how many of its
 sub-modules are live in production.** Something like `SBC — 12 of 19 in prod`.
@@ -459,7 +822,7 @@ sub-modules are live in production.** Something like `SBC — 12 of 19 in prod`.
 The data already exists — production is just a column, and the app already counts ticks per
 column. This is a new panel on a screen that exists, not new machinery.
 
-### Remove the "recent changes" panel · trivial
+### Remove the "recent changes" panel · **done 16 Sept**
 
 Asked for on 15 Sept. It is being dropped from the screen it sits on.
 
@@ -477,7 +840,7 @@ minutes.
 **Fixed by** marking every project in the organisation as changed, not just the new one.
 Creating a project and granting or removing an administrator all do this now.
 
-### Invitation links must stop disappearing · small
+### Invitation links must stop disappearing · **done 16 Sept**
 
 Noticed 16 Sept. When you invite somebody, the single-use link appears in a notice bar that
 you can dismiss — and that vanishes the moment you do anything else on the screen. If you
@@ -524,13 +887,13 @@ did nothing in production. Now:
 This is administrator access — who can configure a project. It is **not** the module owner
 work described under *Owners*, which is still to do.
 
-### Parent and child columns on the Configure screen · small
+### Parent and child columns on the Configure screen · **done 17 Sept**
 
 Left over from earlier. `FILECR` with `LAB` / `PRE` / `PROD` underneath it exists only
 because the starting data creates it that way. The Configure screen cannot make one. Needs
 the screen and the code behind it to support creating a parent and adding children.
 
-### Rebuild the module screen · medium
+### Rebuild the module screen · **done 17 Sept, custom fields excepted**
 
 Shows what the matrix already knows, plus: a description the team can edit, custom fields
 the admin defines, the step configurations, the discussion, and the full list of owners.
@@ -538,6 +901,12 @@ the admin defines, the step configurations, the discussion, and the full list of
 ---
 
 ## 5. Ideas worth considering
+
+> **The short list of what to pick up next is now `todo-next.md`.** It takes the items below,
+> reorders them by what the 16 Sept release changed — three got much cheaper, one stopped being
+> optional, one unblocks four others — and leads with the integration tests, which have still
+> never run. This section stays as the full reasoning behind each idea.
+
 
 You asked what else could make this one of a kind for product management. These are ordered
 by how much I think each one is worth.
@@ -602,13 +971,27 @@ by how much I think each one is worth.
 
 ## 6. What happens next
 
-The model is settled (section 3a). The order agreed on 11 Sept:
+The order agreed on 11 Sept, and where it stands:
 
-1. **Write the MySQL schema in its final shape** — new tables, renamed tables, steps,
-   owners, discussions, per-project wording, all in one file. Nothing to migrate later,
-   because nothing is live yet.
-2. **Port the database code** to MySQL and get the tests green.
-3. **Then build the features** into a database that already fits them.
+1. ~~**Write the MySQL schema in its final shape**~~ — done 11 Sept, and it has not been
+   touched since. Steps and the wording columns landed on 16 Sept with no migration, which is
+   what that decision bought.
+2. ~~**Port the database code** to MySQL and get the tests green.~~ — done 11 Sept.
+3. ~~**Build the features** into a database that already fits them.~~ — done. Steps and
+   per-project wording on 16 Sept (§2a); owners, roles per project, discussions, the module
+   screen, parent/child columns and bulk-apply on 17 Sept (§2b).
+
+**Section 4 is finished.** Notifications landed on 17 Sept with an in-app inbox and an optional
+webhook (§2c); email is one dependency away and the network here refuses it. File attachments
+and module custom fields are outstanding for stated reasons and are written up in
+`todo-next.md`.
+
+**The integration tests have run.** 47 of them, against MySQL 8.0.40, and they found a bug that
+would have taken the whole steps feature down — see §2c. All three migrations applied in order.
+
+What has still never happened is somebody using it: a fresh database has no accounts, so every
+screen built across these three releases is type-checked, built and unclicked. Run
+`deploy/bootstrap.sql` and spend half an hour in a browser.
 
 ### Nothing is blocking
 
