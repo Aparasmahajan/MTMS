@@ -51,6 +51,16 @@ public interface AccessRepository {
 
   void clearInviteToken(UUID userId);
 
+  /**
+   * Issues a fresh invitation token for somebody who has not accepted yet.
+   *
+   * <p>Needed because the token itself is never stored — only its sha256 — so a link that was
+   * lost before it was copied cannot be shown again by any screen or any query. Reissuing
+   * replaces the hash, which invalidates the old link and produces a new one, and it is the only
+   * repair there is short of deleting the account and recreating it.
+   */
+  void setInviteToken(UUID userId, String tokenHash, java.time.Instant expiresAt);
+
   // --- Roles -----------------------------------------------------------------
 
   List<Tenancy.Role> roles(UUID tenantId);
@@ -62,6 +72,18 @@ public interface AccessRepository {
   void insertRole(Tenancy.Role role);
 
   void updateRolePermissions(UUID roleId, java.util.Set<io.mtms.domain.PermissionKey> permissions);
+
+  /** Name, note and description. The key never moves — memberships and step gates point at it. */
+  void updateRoleDetails(UUID roleId, String name, String note, String description);
+
+  /**
+   * Hides a role, or brings it back.
+   *
+   * <p>Never a delete. A role that was ever used is referenced by memberships, by the steps it
+   * gates and by the owner rows that name it as a team; removing it would take those with it and
+   * rewrite history to say the access never existed. {@code null} un-hides.
+   */
+  void setRoleArchived(UUID roleId, java.time.Instant archivedAt);
 
   // --- Memberships -----------------------------------------------------------
 

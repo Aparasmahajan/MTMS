@@ -36,6 +36,13 @@ export interface SubActivityView {
   name: string;
   readiness: number;
   cells: CellView[];
+  /**
+   * Checklists attached to this sub-activity specifically. A list normally sits on the
+   * activity above; these are the ones an admin pushed down because this piece differs.
+   */
+  step_lists: StepListView[];
+  owners: OwnerGroupView[];
+  threads: ThreadView[];
 }
 
 export interface LinkView {
@@ -67,6 +74,19 @@ export interface SubModuleView {
   cells: CellView[];
   sub_activities: SubActivityView[];
   links: LinkView[];
+  /**
+   * The checklists attached to this sub-module. Deliberately not folded into the matrix: the
+   * matrix is the common set of deliverables every sub-module shares, a checklist is the
+   * specific process one use case follows, and neither replaces the other.
+   */
+  step_lists: StepListView[];
+  /**
+   * One overall owner plus one per team. Separate from `owner` above, which is the single
+   * typed-in name the matrix still shows: that one is a string and can never be sent anything,
+   * these are real accounts.
+   */
+  owners: OwnerGroupView[];
+  threads: ThreadView[];
   last_run: RunView | null;
 }
 
@@ -116,6 +136,16 @@ export interface RoleView {
   name: string;
   note: string;
   permissions: PermissionKey[];
+  /** Shipped with the organisation. Marks where it came from; its permissions are still editable. */
+  is_system: boolean;
+  /**
+   * Not offered in any picker — owner teams, "who may tick this step", the member role selector.
+   * Still sent, because rows already pointing at it have to render with a name, and an admin
+   * needs something to click to bring it back. **Every picker must filter on this.**
+   */
+  hidden: boolean;
+  /** How many people hold it. Hiding a role somebody holds is refused; the screen says so first. */
+  member_count: number;
 }
 
 export interface OrgUserView {
@@ -154,6 +184,169 @@ export interface InvitationView {
   role_name: string;
   scope: string;
   state: string;
+}
+
+
+// ---------------------------------------------------------------------------
+// Steps — the reusable checklist
+// ---------------------------------------------------------------------------
+
+/**
+ * One step in the project's library, written once and used on any number of checklists.
+ *
+ * `role_names` empty means the step names no role that still exists — nobody can tick it,
+ * and an admin has to pick one. That is the safe direction: a step whose last allowed role
+ * was deleted quietly becoming one anybody may tick is the opposite of what gating meant.
+ */
+export interface StepDefinitionView {
+  id: string;
+  name: string;
+  description: string;
+  role_ids: string[];
+  role_names: string[];
+  /** How many checklists currently contain it, so retiring one is an informed decision. */
+  used_in: number;
+}
+
+export interface StepEventView {
+  id: string;
+  from: string;
+  to: string;
+  /** "not done → done", already worded by the server. */
+  what: string;
+  is_override: boolean;
+  reason: string | null;
+  by: string;
+  at: string;
+}
+
+export interface StepCommentView {
+  id: string;
+  author: string;
+  body: string;
+  created_at: string;
+  /** Whether the reader wrote it. Removal is still checked server-side. */
+  mine: boolean;
+}
+
+/**
+ * One step on one checklist.
+ *
+ * `can_tick` and `locked_reason` are answers, not raw facts — the server has already applied
+ * the order rule and the role rule and says whether this reader may act. Nothing here
+ * recomputes them. A client that guessed would eventually guess differently from the server,
+ * and produce the worst failure a permission system has: a control that looks available and
+ * then refuses.
+ */
+export interface StepEntryView {
+  id: string;
+  definition_id: string;
+  name: string;
+  description: string;
+  state: 'todo' | 'done' | 'blocked';
+  blocked_reason: string | null;
+  changed_by: string | null;
+  changed_at: string | null;
+  allowed_roles: string[];
+  can_tick: boolean;
+  /** True when this reader can only act by overriding the role gate — warn before they do. */
+  is_override_for_me: boolean;
+  locked_reason: string;
+  history: StepEventView[];
+  comments: StepCommentView[];
+}
+
+export interface StepListView {
+  id: string;
+  name: string;
+  /** Whether the order is a real sequence. The server refuses an out-of-turn tick. */
+  enforce_order: boolean;
+  readiness: number;
+  done_count: number;
+  blocked_count: number;
+  entries: StepEntryView[];
+}
+
+
+// ---------------------------------------------------------------------------
+// Owners and discussions
+// ---------------------------------------------------------------------------
+
+/** One person owning one thing, in one capacity. */
+/**
+ * One message in the reader's inbox.
+ *
+ * `link` is a path, not a URL: the service does not know its own public address, and the client
+ * reading this is already at the right origin.
+ */
+export interface NotificationView {
+  id: string;
+  kind: 'mention' | 'step.blocked' | 'step.ready';
+  title: string;
+  body: string;
+  link: string;
+  at: string;
+  unread: boolean;
+}
+
+export interface OwnerView {
+  /** The row, which is what gets removed — not the user id: one person can own for two teams. */
+  owner_id: string;
+  user_id: string;
+  display_name: string;
+  email: string;
+}
+
+/**
+ * The owners of one thing, grouped by team.
+ *
+ * Only groups with somebody in them are sent, which is what makes "a project with no SME team
+ * simply does not show an SME row" true without anything deciding it. `role_id` is null for the
+ * overall owner — the one name to ask when you do not know whose problem it is.
+ */
+export interface OwnerGroupView {
+  role_id: string | null;
+  label: string;
+  people: OwnerView[];
+}
+
+export interface ThreadCommentView {
+  id: string;
+  author: string;
+  body: string;
+  created_at: string;
+  mine: boolean;
+  /** The reader was named in it. Until there is a mail transport, showing it is all we can do. */
+  mentions_me: boolean;
+}
+
+export interface ThreadView {
+  id: string;
+  topic: string;
+  opened_by: string;
+  opened_at: string;
+  mine: boolean;
+  mentions_me: boolean;
+  comments: ThreadCommentView[];
+}
+
+/**
+ * A module, with the counts the landing page and the module screen read.
+ *
+ * It has an id now, which is what lets a checklist, a set of owners and a discussion attach to
+ * it — none of which could attach to the name it used to be.
+ */
+export interface ModuleView {
+  id: string;
+  name: string;
+  description: string;
+  order_index: number;
+  sub_module_count: number;
+  /** Sub-modules with every counted deliverable done — the matrix's own definition of finished. */
+  in_prod: number;
+  readiness: number;
+  owners: OwnerGroupView[];
+  threads: ThreadView[];
 }
 
 export interface DriftRowView {
@@ -231,6 +424,8 @@ export interface ColumnView extends DeliverableColumn {
 
 export interface ConfigView {
   columns: ColumnView[];
+  /** The modules as records, with ids. `module_names` stays for everything that only wants names. */
+  modules: ModuleView[];
   module_names: string[];
   stages: { id: string; label: string }[];
   owners: string[];
@@ -282,7 +477,19 @@ export interface Snapshot {
     is_super_admin: boolean;
   };
   org: { id: string; name: string };
-  project: { id: string; key: string; name: string };
+  /**
+   * `module_label`, `sub_module_label` and `sub_activity_label` are what *this* project calls
+   * its three levels — "Node" and "Activity" for CR_AUTOMATION. Read them through
+   * `useVocabulary()` rather than reaching in here, so every screen words it the same way.
+   */
+  project: {
+    id: string;
+    key: string;
+    name: string;
+    module_label: string;
+    sub_module_label: string;
+    sub_activity_label: string;
+  };
   projects: { id: string; key: string; name: string; configured: boolean; sub_module_count: number }[];
   config: ConfigView;
   sub_modules: SubModuleView[];
@@ -293,6 +500,15 @@ export interface Snapshot {
   users: OrgUserView[];
   members: MemberView[];
   invitations: InvitationView[];
+  /** The step library, for the Configure screen and the "add a step" pickers. */
+  step_library: StepDefinitionView[];
+  /**
+   * The reader's own inbox, unread first. It rides on the snapshot so a tick that unblocks
+   * somebody updates their badge in the same round trip — and so no second request fires on
+   * every page.
+   */
+  notifications: NotificationView[];
+  unread_notifications: number;
   drift: {
     rows: DriftRowView[];
     warnings: DriftWarningView[];

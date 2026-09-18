@@ -28,6 +28,21 @@ public record Snapshot(
     List<Views.OrgUserView> users,
     List<Views.MemberView> members,
     List<Views.InvitationView> invitations,
+    /**
+     * The step library, for the Configure screen and for the "add a step" pickers. The
+     * checklists themselves hang off the sub-modules and sub-activities they are attached to,
+     * because that is where they are read.
+     */
+    List<StepViews.StepDefinitionView> stepLibrary,
+    /**
+     * The reader's own inbox, newest unread first.
+     *
+     * <p>Carried on the snapshot rather than fetched separately so that a tick which unblocks
+     * somebody updates their badge in the same round trip that updates the checklist — and so
+     * there is no second request firing on every page.
+     */
+    List<Views.NotificationView> notifications,
+    int unreadNotifications,
     DriftViews.DriftView drift) {
 
   /**
@@ -46,7 +61,18 @@ public record Snapshot(
 
   public record Org(String id, String name) {}
 
-  public record ProjectRef(String id, String key, String name) {}
+  /**
+   * @param moduleLabel what this project calls a module — "Node" for CR_AUTOMATION. The three
+   *     labels travel with the project rather than in the config view because every screen
+   *     reads them, including the ones that never look at a column.
+   */
+  public record ProjectRef(
+      String id,
+      String key,
+      String name,
+      String moduleLabel,
+      String subModuleLabel,
+      String subActivityLabel) {}
 
   public record ProjectSummary(
       String id, String key, String name, boolean configured, int subModuleCount) {}

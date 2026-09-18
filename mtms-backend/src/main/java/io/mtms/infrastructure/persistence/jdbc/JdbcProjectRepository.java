@@ -3,6 +3,9 @@ package io.mtms.infrastructure.persistence.jdbc;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.mtms.application.port.ProjectData;
 import io.mtms.application.port.ProjectRepository;
+import io.mtms.application.port.DiscussionRepository;
+import io.mtms.application.port.OwnerRepository;
+import io.mtms.application.port.StepRepository;
 import io.mtms.domain.model.Projects;
 import io.mtms.domain.model.Tenancy;
 import java.util.HashMap;
@@ -27,10 +30,17 @@ public class JdbcProjectRepository implements ProjectRepository {
 
   private final Db jdbc;
   private final ObjectMapper mapper;
+  private final StepRepository steps;
+  private final OwnerRepository owners;
+  private final DiscussionRepository discussions;
 
-  public JdbcProjectRepository(JdbcTemplate jdbc, ObjectMapper mapper) {
+  public JdbcProjectRepository(
+      JdbcTemplate jdbc, ObjectMapper mapper, StepRepository steps, OwnerRepository owners, DiscussionRepository discussions) {
     this.jdbc = new Db(jdbc);
     this.mapper = mapper;
+    this.steps = steps;
+    this.owners = owners;
+    this.discussions = discussions;
   }
 
   /**
@@ -131,7 +141,13 @@ public class JdbcProjectRepository implements ProjectRepository {
             jdbc.query(
                 "SELECT * FROM drift_promotions WHERE project_id = ? ORDER BY at DESC",
                 Rows.driftPromotion(mapper),
-                projectId)));
+                projectId),
+            // Six more indexed reads, in the same round as the rest. The alternative is a query
+            // per sub-module behind the checklist panel, which is the N+1 this record exists to
+            // make impossible.
+            steps.load(projectId),
+            owners.load(projectId),
+            discussions.load(projectId)));
   }
 
   @Override
@@ -184,11 +200,33 @@ public class JdbcProjectRepository implements ProjectRepository {
   public void insert(Projects.Project project) {
     jdbc.update(
         """
-        INSERT INTO projects (id, tenant_id, `key`, name, description, configured, archived, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO projects (id, tenant_id, `key`, name, description, configured, archived,
+                              module_label, sub_module_label, sub_activity_label, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         project.id(), project.tenantId(), project.key(), project.name(), project.description(),
-        project.configured(), project.archived(), Sql.timestamp(project.createdAt()));
+        project.configured(), project.archived(),
+        project.vocabulary().module(), project.vocabulary().subModule(),
+        project.vocabulary().subActivity(), Sql.timestamp(project.createdAt()));
+  }
+
+  /**
+   * The three label columns, and only those.
+   *
+   * <p>Deliberately not folded into {@link #update}: that statement is written by the rename and
+   * archive paths, which have no opinion about the vocabulary, and passing it through them would
+   * mean any caller that built a {@code Project} without reading the current labels would quietly
+   * reset them to the defaults.
+   */
+  @Override
+  public void updateVocabulary(UUID projectId, Projects.Vocabulary vocabulary) {
+    jdbc.update(
+        """
+        UPDATE projects
+           SET module_label = ?, sub_module_label = ?, sub_activity_label = ?
+         WHERE id = ?
+        """,
+        vocabulary.module(), vocabulary.subModule(), vocabulary.subActivity(), projectId);
   }
 
   @Override
@@ -248,6 +286,11 @@ public class JdbcProjectRepository implements ProjectRepository {
     Long revision =
         jdbc.queryForObject("SELECT revision FROM projects WHERE id = ?", Long.class, projectId);
     return revision == null ? 0L : revision;
+  }
+
+  @Override
+  public void updateModuleDescription(UUID moduleId, String description) {
+    jdbc.update("UPDATE modules SET description = ? WHERE id = ?", description, moduleId);
   }
 
   // --- Columns ---------------------------------------------------------------
@@ -387,14 +430,14 @@ public class JdbcProjectRepository implements ProjectRepository {
 
     return new Projects.ProjectConfig(
         projectId,
-        // Modules are rows in their own table now, not a list of strings, because a checklist,
-        // owners and a discussion all have to hang off one. Read back as the names the config
-        // screen edits. Archived ones are left out — hidden, but their sub-modules keep their
+        // Modules are rows in their own table, and they arrive as records rather than names:
+        // a checklist, owners and a discussion all hang off one, and none of those can hang off
+        // a piece of text. Archived ones are left out — hidden, but their sub-modules keep their
         // work, and switching the name back on finds it again.
         jdbc.query(
-            "SELECT name FROM modules WHERE project_id = ? AND archived_at IS NULL"
+            "SELECT * FROM modules WHERE project_id = ? AND archived_at IS NULL"
                 + " ORDER BY order_index, name",
-            (rs, n) -> rs.getString("name"),
+            Rows.MODULE,
             projectId),
         stageLabels.stream().map(label -> new Projects.Stage(stageId(label), label)).toList(),
         List.copyOf(lists.getOrDefault("owners", List.of())),

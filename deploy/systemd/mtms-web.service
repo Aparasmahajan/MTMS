@@ -1,0 +1,54 @@
+# MTMS web app.
+#
+#   sudo cp deploy/systemd/mtms-web.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now mtms-web
+#   journalctl -u mtms-web -f
+#
+# Assumes: the unpacked bundle at /opt/mtms/frontend/dist-frontend (what
+# `tar -xzf mtms-frontend.tar.gz` produces), and /etc/mtms/web.env from
+# deploy/web.env.example.
+
+[Unit]
+Description=MTMS web app
+Documentation=file:/opt/mtms/DEPLOYMENT.md
+
+# After, not Requires, and deliberately not Requires=mtms-api.service. The two are independent
+# processes: the web app starts fine with the API down and serves the login page, which fails
+# with a message a person can read. Coupling them would mean an API restart takes the web app
+# with it, and turns a partial outage into a total one.
+After=network-online.target mtms-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mtms
+Group=mtms
+
+# server.js resolves .next/static and the public assets relative to its own directory, so the
+# working directory is not cosmetic — start it from anywhere else and the page renders with no
+# CSS and no JS, which reads as a broken build.
+WorkingDirectory=/opt/mtms/frontend/dist-frontend
+
+EnvironmentFile=/etc/mtms/web.env
+ExecStart=/usr/bin/node server.js
+
+Restart=on-failure
+RestartSec=5
+StartLimitBurst=5
+StartLimitIntervalSec=300
+
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mtms-web
+
+[Install]
+WantedBy=multi-user.target

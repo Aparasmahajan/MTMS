@@ -1,0 +1,62 @@
+# MTMS API.
+#
+#   sudo cp deploy/systemd/mtms-api.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now mtms-api
+#   sudo systemctl status mtms-api
+#   journalctl -u mtms-api -f
+#
+# Assumes: the JAR at /opt/mtms, the environment at /etc/mtms/api.env (from
+# deploy/api.env.example), and a service account `mtms` that owns neither.
+
+[Unit]
+Description=MTMS API
+Documentation=file:/opt/mtms/DEPLOYMENT.md
+
+# After, not Requires. The API retries its connection, so a MySQL that is slow to come up
+# delays the first request rather than failing the unit — and on a database that lives on
+# another host, Requires would be a promise systemd cannot keep anyway.
+After=network-online.target mysql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mtms
+Group=mtms
+WorkingDirectory=/opt/mtms
+
+EnvironmentFile=/etc/mtms/api.env
+ExecStart=/usr/bin/java -jar /opt/mtms/mtms-api-1.0.0-SNAPSHOT.jar
+
+# The API finishes the requests it is already handling before exiting — see
+# `server.shutdown: graceful` and `timeout-per-shutdown-phase: 20s` in application.yml. TERM
+# is what starts that; the 30s gives it room to finish, and only then does systemd use KILL.
+# Restarting during working hours therefore does not fail somebody's click.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+Restart=on-failure
+RestartSec=10
+
+# Do not restart-loop forever on a fault that will never fix itself — a bad DATABASE_URL, a
+# short JWT secret, a schema that does not match. Five tries in five minutes, then stop and
+# stay stopped, so `systemctl status` shows the failure instead of hiding it in a log that
+# rotates every ten seconds.
+StartLimitBurst=5
+StartLimitIntervalSec=300
+
+# Hardening. None of it is exotic and all of it is true of this process: it opens a socket,
+# reads one env file, and talks to MySQL.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# The only thing it writes is its own log, if you are not using journald for that.
+ReadWritePaths=/var/log/mtms
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mtms-api
+
+[Install]
+WantedBy=multi-user.target
