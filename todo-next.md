@@ -16,7 +16,7 @@ for two releases.
 
 ---
 
-## 0. Sign in and use it
+## 0. Sign in and use it · **started 18 Sept, and it paid for itself immediately**
 
 **The integration tests have run** — `scripts/mysql-dev.sh up` works on this machine after all.
 47 of them, against MySQL 8.0.40, and they found exactly the class of bug they were written for:
@@ -24,10 +24,27 @@ a `LIMIT` built by string concatenation came out as `LIMIT1000`, and every read 
 steps would have failed. Fourth bug of that kind; all four invisible to review. See `todo.md`
 §2c.
 
-So the thing that has still never happened is **somebody using the application**. A fresh
-database has no accounts — the seeder went on 16 Sept — so every screen built across three
-releases is type-checked, built, and unclicked: the checklist panel, the wording editor, the
-owners panel, the discussion panel, the roles panel, the module screen, the inbox.
+**Somebody has now used it**, on the real deployment, and half an hour in a browser found five
+bugs that three releases of review and a green test suite did not:
+
+- An administrator of a **newly created** project could not sign in at all — the landing project
+  was chosen without reference to whether that person was a member of it.
+- The project switcher listed every project in the organisation, including ones the reader
+  could not open.
+- Switching project returned *"Expected a valid JSON body"* — the route took a query parameter
+  and the client had always sent a body.
+- Removing a value from a configuration list silently **added it back** and reported success.
+- Inviting somebody from inside the app appeared to do nothing, and the links it did produce
+  carried the domain twice.
+
+All five are fixed and deployed. None of them were findable by reading the code, and four were
+in the seam between two implementations that were assumed to match. That is the argument for
+this section, made better than it was made in the abstract.
+
+**What still has not been clicked** is everything built on 16 and 17 Sept: the checklist panel,
+the wording editor, the owners panel, the discussion panel, the roles panel, the module screen
+and the inbox. The five above were all found in onboarding and project set-up, because that is
+as far as anybody has got. Keep going.
 
 ```bash
 # the throwaway server, if it is not already up
@@ -42,7 +59,7 @@ remaining way to find what is left.
 
 ---
 
-## 1. Measure where the time actually goes · medium · **the one that makes this different**
+## 1. Measure where the time actually goes · **built 18 Sept**
 
 Say, per module and per step: *"CIQ sat waiting eleven days on average. Testing took two.
 Prod loading took four hours."*
@@ -58,34 +75,69 @@ the more the tool is used rather than less.
 That is the property worth building on. It is also the argument that sells the tool to a
 second team.
 
-**What it takes.** Mostly a read. The events are stored; what is missing is the query that
-pairs "entered this state" with "left it", and a screen. No new writes, no schema change.
+**What was built.** `io.mtms.domain.Timing` — pure, like `StepGate` and `PromotionGate` — and a
+*Where the time goes* panel on the dashboard. Per column: median days from a sub-module being
+created to that column being done, the mean beside it, how much the column adds on the one
+before it, and the count it was computed from. No new writes, no schema change.
 
-Two things to get right, because they are the difference between a number and a true number:
+**Median leads, the mean sits beside it**, exactly as this section asked: one activity that sat
+for four months drags an average until it describes nothing, and when the two disagree sharply
+the spread is itself the finding.
 
-- **A step that was ticked, un-ticked and ticked again** has two durations, not one. The
-  events say so; a naive first-to-last would report the whole calendar span and be wildly
-  wrong exactly on the work that went badly — which is the work anybody is asking about.
-- **Median, not mean.** One activity that sat for four months will drag an average until it
-  describes nothing. Show both if you like, but lead with the median.
+**Three limitations, stated on the screen rather than buried.** They are the difference between
+a number and a true number:
+
+- **A cell keeps only its last change.** This was built from the *cells*, which are a
+  current-state table, so a step ticked, un-ticked and re-ticked reads as one long span. The
+  section below anticipated exactly this. `step_events` is append-only and does not have the
+  problem — **a second pass over the step events is the obvious next improvement**, and it is
+  what would let this say "CIQ sat waiting eleven days" per step rather than per column.
+- **Creation is not the same as starting.** A sub-module added in January and genuinely begun in
+  March reads as five months. Honest about the tracker, misleading about the team — and the
+  reason the median is reported next to the mean.
+- **Unfinished work is excluded, never counted as instant.** A column where everything is stuck
+  reports nothing rather than zero, and every row carries "from 2 of 60" so a confident number
+  computed from almost nothing cannot be quoted without its denominator.
+
+Seven tests, written from the angle of what somebody would wrongly believe: that a mean of
+2/4/300 days describes the work, that a column nobody has finished takes no time, that a
+sub-activity's cells belong to its sub-module, or that "done" means the same word in every
+project.
 
 ---
 
-## 2. Email, when there is a network that allows it
+## 2. Email · **built 18 Sept** — needs a host in `mtms.env` to switch on
 
 Notifications are built and working: an in-app inbox, three events, and an optional Teams or
 Slack webhook. What is not built is email, and the reason is narrow and worth recording so
 nobody re-litigates it.
 
-The mail library is not in this machine's offline Maven repository, and the build runs with
-`-o` because the network refuses the registry. So `SmtpNotifier` is one class implementing an
-interface that already exists, plus `spring-boot-starter-mail` in the pom, on any machine that
-can fetch it.
+The reason it was blocked stopped being true: the mail library was not in the offline Maven
+repository and the build ran with `-o`, but the build moved to `~/.m2p` and online on 15 Sept,
+and `spring-boot-starter-mail` resolves. Built on 18 Sept.
 
-**Decide the cadence at the same time.** Immediate is simpler, and it is how people discover on
-day three that a tool is noisy — at which point they mute it and the channel is gone for good. A
-daily digest, with immediate only for a block, is the safer default. The three events are
-already distinguished by `kind`, so this is a policy decision rather than a schema one.
+**What was built.** `SmtpMailer` — `@Primary`, and `@ConditionalOnProperty("mtms.mail.host")`,
+so it exists only when a host is configured and `LoggingMailer` is the only candidate otherwise.
+Same arrangement as `WebhookNotifier`, for the same reason. It sends invitations and password
+resets, plain text on purpose: the message is one sentence and one URL, and a second copy of the
+link in an HTML part is a phishing heuristic on an email whose whole job is asking somebody to
+click a link and type a password.
+
+`Mailer` now returns a `Delivery` rather than void, so the screens say what actually happened
+instead of asserting "there is no mail transport yet" — which had been wrong since the moment
+this shipped. Verified both ways against a throwaway SMTP server: a working relay reports *"Sent
+to tester@azalio.io"*, and a dead one reports *"The mail server refused it (failed to connect),
+so it was not sent — send them the link instead"* while still showing the link.
+
+**To switch it on:** six lines in `mtms.env` on the server (see `deploy/api.env.example`), then
+`pm2 start ecosystem.config.js --update-env` — a plain `pm2 restart` does not re-read the file.
+
+**Still to decide: notification cadence.** This covers invitations and resets, which are
+one-off and obviously immediate. The three *notification* kinds are a different question.
+Immediate is simpler, and it is how people discover on day three that a tool is noisy — at which
+point they mute it and the channel is gone for good. A daily digest, with immediate only for a
+block, is the safer default. They are already distinguished by `kind`, so this is a policy
+decision rather than a schema one.
 
 ---
 

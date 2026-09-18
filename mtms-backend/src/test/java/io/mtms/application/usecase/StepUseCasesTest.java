@@ -78,6 +78,7 @@ class StepUseCasesTest {
     useCases =
         new StepUseCases(
             steps,
+            projects,
             subModules,
             access,
             ownerRows,
