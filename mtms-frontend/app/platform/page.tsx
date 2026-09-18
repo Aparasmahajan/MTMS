@@ -92,7 +92,7 @@ export default function PlatformPage() {
         url: String(meta.accept_url),
       });
       setNotice(
-        `${meta.admin_email} is invited as the administrator. There is no mail transport yet, so send them this single-use link — it is also kept under "Invitation links issued here" until you clear it: ${meta.accept_url}`,
+        `${meta.admin_email} is invited as the administrator. ${meta.delivery_detail ?? ''} The single-use link, kept under "Invitation links issued here" until you clear it: ${meta.accept_url}`,
       );
     }
   }
@@ -115,8 +115,9 @@ export default function PlatformPage() {
    * Assigns an administrator, to one project or to a whole organisation.
    *
    * Somebody already in the organisation is simply granted the access. Somebody new is
-   * invited, and the single-use link comes back in `meta` — there is no mail transport
-   * yet, so it has to be handed over rather than sent.
+   * invited, and the single-use link comes back in `meta`. It is shown whatever the transport
+   * did — `delivery_detail` says whether anything was actually sent, and the link is the only
+   * copy that will ever exist, because the server keeps nothing but its hash.
    *
    * `accept_url` is absolute already: the server builds it from `MTMS_APP_BASE_URL`, which
    * exists precisely because the service cannot see its own public address behind a proxy.
@@ -154,7 +155,7 @@ export default function PlatformPage() {
     }
     setNotice(
       meta.invited
-        ? `${meta.admin_email} is invited as an administrator of ${where}. There is no mail transport yet, so send them this single-use link — it is also kept under "Invitation links issued here" until you clear it: ${meta.accept_url}`
+        ? `${meta.admin_email} is invited as an administrator of ${where}. ${meta.delivery_detail ?? ''} The single-use link, kept under "Invitation links issued here" until you clear it: ${meta.accept_url}`
         : `${meta.admin_email} now administers ${where}. They already had an account in this organisation, so there is nothing to send.`,
     );
   }

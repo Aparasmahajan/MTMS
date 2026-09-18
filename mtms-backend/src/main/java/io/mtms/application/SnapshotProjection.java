@@ -6,6 +6,7 @@ import io.mtms.domain.DriftAnalysis;
 import io.mtms.domain.PermissionKey;
 import io.mtms.domain.PromotionGate;
 import io.mtms.domain.StepGate;
+import io.mtms.domain.Timing;
 import io.mtms.domain.StatusVocabulary;
 import io.mtms.domain.model.Audit;
 import io.mtms.domain.model.Defects;
@@ -136,7 +137,8 @@ public final class SnapshotProjection {
                         notification.isUnread()))
             .toList(),
         (int) inbox.stream().filter(Notifications.Notification::isUnread).count(),
-        driftView(data, columns, subModules, now));
+        driftView(data, columns, subModules, now),
+        timingViews(data, activeColumns));
   }
 
   // ---------------------------------------------------------------------------
@@ -338,6 +340,39 @@ public final class SnapshotProjection {
                     project.name(),
                     project.configured(),
                     subModuleCounts.getOrDefault(project.id(), 0)))
+        .toList();
+  }
+
+  /**
+   * How long each column takes, from the ticks.
+   *
+   * <p>Active columns only. A switched-off environment is not part of the process any more, and
+   * reporting how long its columns used to take would describe a process nobody follows.
+   *
+   * <p>"Done" is read from the project's own vocabulary rather than assumed: a project defines
+   * which statuses mean finished, and a hard-coded "done" here would silently report nothing for
+   * a team whose column says "Loaded in prod".
+   */
+  private List<Views.ColumnTimingView> timingViews(
+      ProjectData data, List<Projects.DeliverableColumn> activeColumns) {
+
+    Set<String> done =
+        activeColumns.stream()
+            .flatMap(column -> column.allowed().stream())
+            .filter(status -> StatusVocabulary.toneOf(status) == StatusVocabulary.Tone.DONE)
+            .collect(java.util.stream.Collectors.toSet());
+
+    return Timing.perColumn(activeColumns, data.subModules(), data.cells(), done).stream()
+        .map(
+            timing ->
+                new Views.ColumnTimingView(
+                    timing.columnKey(),
+                    timing.label(),
+                    timing.medianDays(),
+                    timing.meanDays(),
+                    timing.addedDays(),
+                    timing.measured(),
+                    timing.outstanding()))
         .toList();
   }
 

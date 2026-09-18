@@ -301,4 +301,25 @@ public final class Views {
       List<String> linkTypes,
       List<Projects.Environment> environments,
       List<String> phases) {}
+
+  /**
+   * How long one column takes, measured from the ticks rather than from anybody's estimate.
+   *
+   * <p>Nulls are meaningful and must not be rendered as zero: a column nobody has finished yet
+   * has no median and no mean, and "no answer yet" is a different statement from "takes no time".
+   * See {@code io.mtms.domain.Timing} for exactly what is and is not being measured.
+   *
+   * @param addedDays how much longer this takes than the column before it — the closest thing to
+   *     time spent at this stage. Null on the first column, which has nothing to compare against.
+   * @param outstanding how many sub-modules are not finished here, and so are not in the figures.
+   *     Carried because "4 days, from 2 of 60" means something very different from "4 days".
+   */
+  public record ColumnTimingView(
+      String columnKey,
+      String label,
+      Double medianDays,
+      Double meanDays,
+      Double addedDays,
+      int measured,
+      int outstanding) {}
 }

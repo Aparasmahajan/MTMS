@@ -18,8 +18,13 @@ Ports: **API 6011**, **web app 6010**. JAR: `mtms-api-1.0.0-SNAPSHOT.jar`.
 **Deployed to HRMSPRODUCTION on 18 Sept and verified live** — both checksums matched on the
 server and pm2 restarted from them.
 
-Both halves changed. **No migration and no new setting**: the schema is untouched and
-`mtms.env` needs nothing added, so a plain deploy is the whole job.
+Both halves changed. **No migration** — the schema is untouched.
+
+**One optional new setting, and it is the only reason this deploy is not a plain one.** Email
+now works. Leave `MTMS_MAIL_HOST` unset and nothing changes: invitation and reset links stay on
+screen for an administrator to pass on, exactly as before. Set it and the service emails them
+instead — see `deploy/api.env.example` for the six lines, and note that adding them needs
+`pm2 start ecosystem.config.js --update-env`, not a plain restart (§0a).
 
 What is in it:
 
@@ -27,9 +32,16 @@ What is in it:
   see todo.md for why an already-configured project worked and a new one did not.
 - The project switcher now lists only the projects that person can actually open.
 - **"Their name"** beside each assign box in the console — people onboarded there were being
-  recorded under their email address.
+  recorded under their email address — and an `edit` control on the Access screen to correct
+  the ones already recorded that way.
 - **Password reset**: a Reset button per active person on the Access screen, issuing a
   single-use link. Nobody ever sets anybody else's password.
+- **Email.** Invitations and reset links are now sent, if a mail host is configured. See below:
+  this is the one part of the release that needs anything added to `mtms.env`.
+- **A module's checklist is now a template** — it is copied onto every sub-module created on
+  that module from then on. Bulk-apply already covered the ones that exist.
+- **"Where the time goes"** on the dashboard: how long each column actually takes, computed
+  from the ticks. Nobody fills anything in for it.
 - Inviting from inside the app used to appear to do nothing — the link is now returned and
   displayed.
 - Invitation links no longer carry the domain twice.
@@ -38,9 +50,9 @@ The artefacts currently built in the repo:
 
 | | Bytes | md5 |
 |---|---|---|
-| `mtms-api-1.0.0-SNAPSHOT.jar` | 79,829,070 | `e490cb83283b8ee5e02c46731c1fedc8` |
-| `mtms-frontend.tar.gz` | 4,605,596 | `087bd4d410927c735a0693a51e93aab0` |
-| `.next/BUILD_ID` | | `eXy8UOfJN1kCtJQc9ekmo` |
+| `mtms-api-1.0.0-SNAPSHOT.jar` | 80,594,869 | `6d2d92da579a7e1a96fc98957149e0d5` |
+| `mtms-frontend.tar.gz` | 4,606,885 | `fb82cbff1bd3d0281f1dfb81c6983b69` |
+| `.next/BUILD_ID` | | `dCVWaGHB85IWicxw5p1BP` |
 
 **One command** [local] — builds, tests, copies, checksums both ends, refuses on a mismatch,
 restarts and verifies:
@@ -78,39 +90,31 @@ pm2 restart mtms-api mtms-web --update-env && pm2 save
 > commands are still further down this file for a machine without pm2 — see
 > `DEPLOYMENT.md` section 7 before using them.
 
-**Watch the first start.** This is the one where the migrations run:
-
-```bash
-sleep 15
-grep -E "Migrating schema|Successfully applied" $API_DIR/api.log
-```
-
-Expect V2 and V3. Then confirm it is genuinely the new build:
+**No migration this time** — the schema is untouched, so there is nothing to watch for in the
+log beyond a clean start. Confirm it is genuinely the new build:
 
 ```bash
 curl -s -o /dev/null -w 'api %{http_code}
 ' http://localhost:$API_PORT/actuator/health
 curl -s -o /dev/null -w 'web %{http_code}
 ' http://localhost:$WEB_PORT/login
-cat $WEB_DIR/dist-frontend/.next/BUILD_ID                      # rIfMheShkn90rlQSoQvAw
-grep -rl "Step library" $WEB_DIR/dist-frontend/.next/server    # should print a page.js
-curl -s -o /dev/null -w 'owners %{http_code}
-' -X POST http://localhost:$API_PORT/api/v1/owners
+cat $WEB_DIR/dist-frontend/.next/BUILD_ID                      # dCVWaGHB85IWicxw5p1BP
+grep -rl "Where the time goes" $WEB_DIR/dist-frontend/.next/server   # should print a page.js
+curl -s -o /dev/null -w 'reset %{http_code}
+' -X POST http://localhost:$API_PORT/api/v1/users/00000000-0000-0000-0000-000000000000/reset-password
 ```
 
 The last line must be **401, not 404**. 404 means the old JAR is still running.
 
-**In the browser:** Configure has *What this project calls things*, *Step library* and
-*Checklists*; Access has *Roles in this organisation*; a sub-module has owners, a checklist and
-a discussion; the header has an *Inbox*; and a module name on the landing page opens a screen of
-its own.
+**In the browser:** the dashboard has a *Where the time goes* panel; Access has an `edit` beside
+each name and a *Reset* button per active person; and the platform console's assign boxes have a
+*Their name* field.
 
-> **This release was verified against a real MySQL 8.0.40** — the first one that has been. All
-> 155 tests pass, including 47 integration tests that had never executed before today, and all
-> three migrations applied in order. That run found one real bug: a `LIMIT` built by string
-> concatenation came out as `LIMIT1000`, and **every read of a project's steps would have
-> failed**. Still not done: nobody has clicked the screens, because a fresh database has no
-> accounts — see §9.
+> **Five real bugs were found on 18 Sept in half an hour of actually using the deployment** —
+> none of them findable by reading the code, and four in the seam between the Java service and a
+> frontend that was assumed to match it. All are fixed and in this build. What still has not been
+> clicked is everything built on 16 and 17 Sept: checklists, the wording editor, owners,
+> discussions, the roles panel, the module screen and the inbox. See `todo-next.md` §0.
 
 ---
 
@@ -220,7 +224,7 @@ bundle instead:
 
 ```bash
 # [server] the build identity — changes on every build
-cat $WEB_DIR/dist-frontend/.next/BUILD_ID     # 18 Sept release: eXy8UOfJN1kCtJQc9ekmo
+cat $WEB_DIR/dist-frontend/.next/BUILD_ID     # 18 Sept release: dCVWaGHB85IWicxw5p1BP
 
 # [server] does the bundle contain something only THIS release has?
 grep -rl "Their name" $WEB_DIR/dist-frontend/.next/server 2>/dev/null

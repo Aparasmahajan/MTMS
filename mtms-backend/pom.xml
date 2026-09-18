@@ -55,6 +55,23 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-security</artifactId>
     </dependency>
+
+    <!--
+      Mail. Invitations and password resets are single-use links, and until this was added the
+      only way to deliver one was to read it off the screen and send it by hand — which meant
+      every new account depended on an administrator being at a keyboard.
+
+      It stays inert until mtms.mail.host is set, so a deployment without a relay behaves exactly
+      as before rather than failing to start. See SmtpMailer.
+
+      Noted because an older comment in WebhookNotifier says this dependency could not be
+      fetched: that was true while the build ran with -o against Nokia's repository. It builds
+      against ~/.m2p now, online, and the artifact resolves.
+    -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-mail</artifactId>
+    </dependency>
     <!--
       Spring Security's SCryptPasswordEncoder delegates to BouncyCastle. It is here so the
       Java service hashes passwords the same way lib/server/auth.ts does, rather than
