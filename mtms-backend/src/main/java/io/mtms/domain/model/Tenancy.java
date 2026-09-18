@@ -67,6 +67,15 @@ public final class Tenancy {
    * @param isSystem seeded roles are marked so the Access screen can refuse to delete the last
    *     admin role. It does not make them read-only.
    */
+  /**
+   * @param isSystem the role shipped with the organisation. It marks where the role came from
+   *     and nothing else — an admin may still edit its permissions, because a permission an
+   *     organisation's own admin can grant is one they can grant themselves anyway.
+   * @param archivedAt hidden from every picker: owner lists, the "who may tick this step"
+   *     dropdown, the member role selector. Never deleted, because memberships, step gates and
+   *     owner rows point at it, and removing it would rewrite history to say the access never
+   *     existed.
+   */
   public record Role(
       UUID id,
       UUID tenantId,
@@ -75,7 +84,26 @@ public final class Tenancy {
       String note,
       String description,
       boolean isSystem,
-      Set<PermissionKey> permissions) {}
+      Set<PermissionKey> permissions,
+      Instant archivedAt) {
+
+    /** A live role — what everything before hideable roles constructed. */
+    public Role(
+        UUID id,
+        UUID tenantId,
+        String key,
+        String name,
+        String note,
+        String description,
+        boolean isSystem,
+        Set<PermissionKey> permissions) {
+      this(id, tenantId, key, name, note, description, isSystem, permissions, null);
+    }
+
+    public boolean isHidden() {
+      return archivedAt != null;
+    }
+  }
 
   /**
    * One person's access, either to a single project or to the whole organisation.
