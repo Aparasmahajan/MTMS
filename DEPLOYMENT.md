@@ -452,25 +452,225 @@ your HTTPS.
 
 ## 7. Keeping it running
 
-The JAR is an ordinary process. Run it under `systemd` or NSSM so it restarts on reboot:
+### The server this actually deploys to
 
-```ini
-[Unit]
-Description=MTMS API
-After=network.target mysql.service
+Verified on the box on **17 Sept 2026**, not copied from a template. If you are reading this
+because something is down, start here — every value below has been the cause of a confusing
+hour at least once.
 
-[Service]
-EnvironmentFile=/etc/mtms/api.env
-ExecStart=/usr/bin/java -jar /opt/mtms/mtms-api-1.0.0-SNAPSHOT.jar
-Restart=always
-User=mtms
+| | |
+|---|---|
+| **Host** | `HRMSPRODUCTION`, Ubuntu with systemd |
+| **Login** | `devteamjava` — **not** a dedicated service account, and not root |
+| **Shared with** | at least one other app (`orbit`), behind the **same nginx**. This box is not yours alone; do not restart nginx casually |
+| **Java** | 21.0.11 |
+| **Node** | runs the Next.js 14.2.35 standalone bundle |
+| **Database** | MySQL 8.0 at `jdbc:mysql://localhost:3306/mtms`, Flyway schema **v3** |
+| **Process manager** | **pm2**, as `devteamjava`. Both apps. Was `nohup`, which is what caused the 502s |
+| **Public address** | `https://mtms.azalio.io` |
 
-[Install]
-WantedBy=multi-user.target
+Where things live — note that **none** of it is under `/opt`, which is what the generic
+examples further down this file assume:
+
+| Path | What |
+|---|---|
+| `~/mtms/backend/mtms-api-1.0.0-SNAPSHOT.jar` | the API |
+| `~/mtms/backend/mtms.env` | its environment. Called `mtms.env`, **not** `api.env` |
+| `~/mtms/frontend/mtms-frontend.tar.gz` | the web bundle as shipped |
+| `~/mtms/frontend/dist-frontend/server.js` | the web bundle unpacked — what actually runs |
+| `~/mtms/ecosystem.config.js` | the pm2 definition of both apps |
+| `~/.pm2/logs/` | the logs. These append and survive restarts |
+
+Ports, and which of them is reachable:
+
+| Port | Process | Exposure |
+|---|---|---|
+| 6011 | API (Spring Boot / Tomcat) | **loopback only** — `127.0.0.1`. Never reachable from outside |
+| 6010 | web app (Next.js) | bound `0.0.0.0`, and the **only** thing nginx proxies to |
+| 443 | nginx | the public address |
+
+The consequence of that table is the single most useful fact for diagnosing an outage:
+**nginx forwards to 6010 and nothing else, so a `502 Bad Gateway` means the Next.js process is
+gone.** Not the API, not the database, not nginx. Check `pm2 list` first, always.
+
+Two things about this server that are *not* what the rest of this file describes, and cost an
+afternoon each when you assume otherwise:
+
+- **nginx does not log where `deploy/nginx/mtms.conf` says it does.** That file specifies
+  `mtms.access.log` and `mtms.error.log`; neither exists on the box. The deployed vhost is a
+  different file and logs to the shared default `/var/log/nginx/error.log`, mixed in with the
+  other app's traffic. Find the real one with
+  `sudo grep -rn mtms /etc/nginx/sites-enabled/`.
+- **`devteamjava` is not in `adm` or `systemd-journal`.** So `journalctl` shows you your own
+  units and nothing else, and every nginx log needs `sudo`. A `journalctl` command that
+  returns nothing here has usually returned nothing *because of this*, not because there was
+  nothing to report.
+
+### Why pm2, and never `nohup`
+
+**Do not run either program with `nohup ... &`.** It is the single thing most likely to take
+this application down, and the way it fails is why it went unnoticed for weeks: nginx answers
+`502 Bad Gateway`, the log ends mid-sentence with nothing wrong in it, and it happens a day or
+two *after* a release rather than during one — so it never looks connected to anything you did.
+
+`nohup` is not a process manager. It makes the process ignore `SIGHUP` and then walks away.
+Nothing watches it, so it does not survive:
+
+- **a crash**, or anything that sends it a signal — including a stray
+  `pkill -f "node.*server.js"`, which is a line in both `com.txt` and `release.sh`
+- **a reboot**. Nothing starts it again
+- **the OOM killer**, which picks the largest process on the box — usually the JVM
+- **`systemd-logind` reaping the user slice** at logout, if `KillUserProcesses=yes`. It is
+  `no` on this box, so this one is *not* the cause here — but the default is
+  distribution-dependent, so check with `grep -i killuserprocesses /etc/systemd/logind.conf`
+  before assuming the same on another machine
+
+### Putting it under pm2
+
+On the server, once:
+
+```bash
+bash ~/mtms/install-pm2.sh
 ```
 
-Put the environment variables from step 3 in `/etc/mtms/api.env`, one `KEY=value` per line
-and no `export`. Do the same for the web app with `npm start`.
+It checks the paths, hands the ports over from whatever `nohup` left running, starts both apps
+from `ecosystem.config.js`, and tells you whether pm2 is set to come back after a reboot.
+After this, `release.sh restart` drives pm2 instead of `nohup`.
+
+**The reboot step is two commands and both are required:**
+
+```bash
+pm2 startup      # prints a sudo command — run it. It installs a systemd unit for pm2 itself
+pm2 save         # writes the process list that unit replays on boot
+```
+
+Skip either and pm2 comes back **empty** after a reboot, which looks identical to the problem
+you were fixing. `systemctl list-unit-files | grep pm2` tells you whether the first one took.
+
+Day to day:
+
+```bash
+pm2 list                            # up? and how many times has it restarted?
+pm2 logs mtms-web                   # these append and survive restarts, unlike web.log did
+pm2 logs mtms-api --lines 50 --nostream
+pm2 restart mtms-api
+pm2 monit                           # live CPU and memory — how you catch an OOM loop
+```
+
+**A climbing restart count in `pm2 list` is not pm2 working.** It means something is still
+killing the process and pm2 is now hiding it from you. Read the logs when you see it.
+
+Two details in `ecosystem.config.js` worth knowing before you edit it:
+
+- **It parses `mtms.env` as `KEY=value` and nothing else.** `set -a && . ./mtms.env` was a
+  shell and tolerated more — a value containing `$OTHER` was expanded there and stays literal
+  text here. That is the safe direction to be wrong in, but it is a difference.
+- **The API has no `max_memory_restart`, on purpose.** pm2 measures RSS, and a healthy JVM's
+  RSS is far larger than its heap, so a threshold that looks generous restarts a perfectly
+  well application every few hours. Cap the heap instead — `JAVA_OPTS="-Xmx512m"` in
+  `mtms.env`, which the config picks up.
+
+### Where the logs are
+
+Under pm2, and these are the ones to read:
+
+| Path | What |
+|---|---|
+| `~/.pm2/logs/mtms-web-out.log` | the web app's stdout — the Next.js banner, request errors |
+| `~/.pm2/logs/mtms-web-error.log` | the web app's stderr |
+| `~/.pm2/logs/mtms-api-out.log` | the API's stdout — Spring, Flyway, Hikari |
+| `~/.pm2/logs/mtms-api-error.log` | the API's stderr |
+| `~/.pm2/pm2.log` | pm2's own daemon log — **why** it restarted something |
+| `~/.pm2/dump.pm2` | the saved process list that `pm2 startup` replays on boot |
+
+Reach them by name rather than by path, which also merges the two streams in order:
+
+```bash
+pm2 logs mtms-web                          # live
+pm2 logs mtms-api --lines 200 --nostream   # the last 200, then exit
+pm2 logs --err                             # only stderr, both apps
+pm2 flush                                  # empty them all
+```
+
+Every line is timestamped — `time: true` in `ecosystem.config.js`. That is not cosmetic: the
+first outage could not be dated at all, because the old logs had no timestamps and were
+truncated by the restart that was meant to fix it.
+
+**Two paths that will mislead you.** These are the `nohup` logs, and they are now frozen at
+whatever was in them the last time the old commands ran. They are not being written any more,
+so a stale error in either is not a current error:
+
+```
+~/mtms/backend/api.log        <- dead. Was `> api.log`, truncated on every restart
+~/mtms/frontend/web.log       <- dead. Same
+```
+
+Delete them once you trust pm2, so nobody reads a fossil during an incident.
+
+**nginx is elsewhere, shared, and needs `sudo`** — `devteamjava` is not in `adm`:
+
+```bash
+sudo tail -f /var/log/nginx/error.log      # 502s and upstream failures live here
+sudo tail -f /var/log/nginx/access.log     # mixed with the other app on this box
+```
+
+Note these are the *default* log files, not the `mtms.access.log` / `mtms.error.log` that
+`deploy/nginx/mtms.conf` specifies. That config is not the one deployed.
+
+**pm2's logs grow without limit.** Unlike the truncating `nohup` ones, nothing rotates them —
+which is the right trade for an incident and the wrong one for a year. Install the rotator once:
+
+```bash
+pm2 install pm2-logrotate
+pm2 set pm2-logrotate:max_size 50M
+pm2 set pm2-logrotate:retain 14
+```
+
+### The Server Action probes
+
+`mtms-web-out.log` fills with these, in bursts:
+
+```
+Error: Failed to find Server Action "x". This request might be from an older or newer deployment.
+Error: Failed to find Server Action "0". ...
+Error: Failed to find Server Action "action". ...
+```
+
+**This is not your traffic and not a bug in the app.** Two facts settle it:
+
+- A real Server Action ID is a 40-character hex hash. `x`, `0`, `1` and `action` are none of
+  them — they are the values a scanner tries.
+- **This application defines no Server Actions at all.** There is not one `'use server'` in the
+  frontend. So no legitimate request can ever carry a `Next-Action` header, and every one of
+  these is somebody probing.
+
+They arrive as POSTs with a `Next-Action:` header. Find out who:
+
+```bash
+sudo grep -c 'Next-Action' /var/log/nginx/access.log
+sudo awk '$9 ~ /^(4|5)/ {print $1}' /var/log/nginx/access.log | sort | uniq -c | sort -rn | head
+```
+
+Because the app has no Server Actions, refusing the header outright cannot break anything.
+In the `location / {}` block of the deployed vhost:
+
+```nginx
+# This app defines no Server Actions, so a request carrying this header is a probe by
+# definition. 444 closes the connection without a response — cheaper than 403, and it
+# does not write a response line for a scanner to measure.
+if ($http_next_action) { return 444; }
+```
+
+Whether these probes are also what *killed* the process is not yet established — the app
+logged them and kept serving. Watch the restart counter in `pm2 list`: if it climbs in step
+with a burst in `mtms-web-out.log`, they are the cause, and the nginx rule above fixes the
+outage as well as the noise.
+
+### If you would rather use systemd
+
+`deploy/systemd/` holds units for the same two processes. They assume a `/opt/mtms` install
+owned by a dedicated `mtms` account, so on this server's home-directory layout they need their
+paths changed and `ProtectHome=true` removed — with it, the service cannot see its own JAR.
 
 The API shuts down gracefully: it finishes the requests it is already handling before
 exiting, so a restart during working hours does not fail somebody's click.
