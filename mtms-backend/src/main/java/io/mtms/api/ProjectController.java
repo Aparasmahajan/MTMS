@@ -102,6 +102,47 @@ public class ProjectController {
     return ApiResponse.ok(snapshots.of(actor));
   }
 
+  /**
+   * @param note the one-line hint shown beside the role on the Access screen.
+   */
+  public record RoleRequest(String name, String note) {}
+
+  /**
+   * Adds a role.
+   *
+   * <p>It arrives with no permissions. Granting them is a separate call to {@code
+   * /roles/{id}/grants}, on a screen that shows what is being granted — rather than a role that
+   * quietly inherits its creator's rights the moment they click "add".
+   */
+  @PostMapping("/roles")
+  public ApiResponse.Success<Snapshot> createRole(@RequestBody RoleRequest request, Actor actor) {
+    access.createRole(actor, request.name(), request.note());
+    return ApiResponse.ok(snapshots.of(actor));
+  }
+
+  @PatchMapping("/roles/{id}")
+  public ApiResponse.Success<Snapshot> renameRole(
+      @PathVariable("id") UUID roleId, @RequestBody RoleRequest request, Actor actor) {
+    access.renameRole(actor, roleId, request.name(), request.note());
+    return ApiResponse.ok(snapshots.of(actor));
+  }
+
+  public record RoleVisibilityRequest(Boolean hidden) {}
+
+  /**
+   * Hides a role, or brings it back.
+   *
+   * <p>PATCH rather than DELETE, and that is the honest verb: nothing is removed. Every
+   * membership, step gate and owner row pointing at the role stays exactly where it is — the
+   * role simply stops being offered in the pickers.
+   */
+  @PatchMapping("/roles/{id}/visibility")
+  public ApiResponse.Success<Snapshot> setRoleHidden(
+      @PathVariable("id") UUID roleId, @RequestBody RoleVisibilityRequest request, Actor actor) {
+    access.setRoleHidden(actor, roleId, Boolean.TRUE.equals(request.hidden()));
+    return ApiResponse.ok(snapshots.of(actor));
+  }
+
   // --- Library ---------------------------------------------------------------
 
   @PostMapping("/library/{id}/clone")

@@ -3,12 +3,15 @@
 import { useState } from 'react';
 import { useTracker } from '@/components/TrackerProvider';
 import { Blueprint, PageTitle } from '@/components/primitives';
+import { StepsPanel } from '@/components/config/StepsPanel';
+import { WordingPanel } from '@/components/config/WordingPanel';
 import { send } from '@/lib/client/api';
 import type { ConfigList, Environment } from '@/lib/shared/domain';
 import { PROD_ENVIRONMENT } from '@/lib/shared/domain';
 import {
   isStatusKey,
   statusEntry,
+  STATUS_SETS,
   STATUS_VOCABULARY,
   TONE_DESCRIPTION,
   TONE_STYLE,
@@ -369,9 +372,10 @@ function Environments({
 }
 
 export default function ConfigurePage() {
-  const { snapshot, apply, can, reasonFor } = useTracker();
+  const { snapshot, apply, can, reasonFor, words } = useTracker();
   const { config, project } = snapshot;
   const [newColumn, setNewColumn] = useState('');
+  const [perEnvironment, setPerEnvironment] = useState(false);
   const canConfig = can('project.config');
 
   return (
@@ -541,12 +545,44 @@ export default function ConfigurePage() {
           </table>
         </div>
 
+        {/*
+          This form used to POST { name } while the service expected { key, label, full,
+          allowed } — so every "Add column" was a 400 that read as a validation failure on a
+          field the screen does not have. The same class of mismatch as the project switcher and
+          the config-list remove: two halves of one contract, written apart.
+
+          It also now offers the shape the seed data had and no screen could make: one
+          deliverable tracked separately on every environment, as a header with a column under
+          it per environment.
+        */}
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (!newColumn.trim()) return;
-            void apply(null, () =>
-              send<Snapshot>('/api/v1/config/columns', 'POST', { name: newColumn.trim() }),
+            const typed = newColumn.trim();
+            if (!typed) return;
+
+            // The key is derived, never typed. It ends up in every cell row and in the drift
+            // table, so letting somebody type "FILE CR " would be a spelling to live with.
+            const key = typed.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+            if (!key) return;
+
+            void apply(
+              null,
+              () =>
+                perEnvironment
+                  ? send<Snapshot>('/api/v1/config/columns/grouped', 'POST', {
+                      groupKey: key,
+                      groupLabel: typed.slice(0, 12).toUpperCase(),
+                      full: typed,
+                      allowed: [...STATUS_SETS.load],
+                    })
+                  : send<Snapshot>('/api/v1/config/columns', 'POST', {
+                      key,
+                      label: typed.slice(0, 12).toUpperCase(),
+                      full: typed,
+                      allowed: [...STATUS_SETS.simple],
+                      counts: true,
+                    }),
             ).then((result) => {
               if (result) setNewColumn('');
             });
@@ -556,6 +592,7 @@ export default function ConfigurePage() {
             gap: 'var(--space-2)',
             marginTop: 'var(--space-4)',
             flexWrap: 'wrap',
+            alignItems: 'center',
           }}
         >
           <input
@@ -566,24 +603,41 @@ export default function ConfigurePage() {
             placeholder="New column, e.g. SMOKE TEST"
             aria-label="New column name"
           />
+          <label
+            style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
+            title="Lab, preprod and prod are not a sequence — prod can be loaded while lab never was, because lab was down when the window opened. One status per deliverable cannot say that."
+          >
+            <input
+              type="checkbox"
+              checked={perEnvironment}
+              onChange={(event) => setPerEnvironment(event.target.checked)}
+              disabled={config.environments.length === 0}
+            />
+            track it per environment
+          </label>
           <button
             type="submit"
             className="btn btn-secondary"
             disabled={!canConfig}
             title={canConfig ? undefined : reasonFor('project.config')}
           >
-            Add column
+            {perEnvironment ? 'Add deliverable' : 'Add column'}
           </button>
           <span
             style={{
               fontSize: 12,
               color: 'var(--color-neutral-600)',
-              alignSelf: 'center',
+              flexBasis: '100%',
               textWrap: 'pretty',
             }}
           >
-            A new column starts blank on every subModule, taking Not Loaded / Loaded and counting toward
-            prod. Change any of that here — cells already filled in keep what they hold.
+            {config.environments.length === 0
+              ? 'This project has no environments configured, so a deliverable cannot be spread across them yet.'
+              : perEnvironment
+                ? `One header with ${config.environments.length} columns under it — ${config.environments
+                    .map((environment) => environment.short)
+                    .join(', ')} — and only prod counts toward readiness. A lab tick records where something has been; it is not part of the definition of done.`
+                : 'One column, counting toward readiness. Adjust its statuses in the table above once it exists.'}
           </span>
         </form>
       </Blueprint>
@@ -598,7 +652,7 @@ export default function ConfigurePage() {
         }}
       >
         <ConfigSet
-          title="Modules"
+          title={words.module.many}
           hint="more will come"
           list="modules"
           placeholder="e.g. HSS"
@@ -620,13 +674,17 @@ export default function ConfigurePage() {
         />
         <ConfigSet
           title="Link types"
-          hint="attachable to a module"
+          hint={`attachable to a ${words.subModule.lower}`}
           list="link_types"
           placeholder="e.g. Test report"
           values={config.link_types.map((type) => ({ key: type, label: type }))}
         />
 
         <Environments environments={config.environments} columns={config.columns} />
+
+        <WordingPanel />
+
+        <StepsPanel />
 
         <div style={{ gridColumn: '1 / -1' }}>
           <Blueprint>

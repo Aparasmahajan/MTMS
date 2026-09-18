@@ -61,11 +61,20 @@ public class SubModuleUseCases {
    */
   @Transactional
   public void setFields(Actor actor, UUID subModuleId, String owner, boolean ownerPresent,
-      String fniTargetDate, boolean datePresent) {
+      String fniTargetDate, boolean datePresent, String moduleName, boolean modulePresent) {
 
     UUID projectId = actor.projectId();
     Modules.SubModule module = requireSubModule(projectId, subModuleId);
     Modules.SubModule updated = module;
+
+    if (modulePresent) {
+      updated = withModule(actor, updated, moduleName);
+      if (!updated.moduleName().equals(module.moduleName())) {
+        support.record(
+            actor, projectId, Audit.Scope.MODULE, "MODULE",
+            "moved — " + module.moduleName() + " → " + updated.moduleName(), module.id(), null);
+      }
+    }
 
     if (ownerPresent) {
       actor.require(PermissionKey.MODULE_EDIT);
@@ -88,10 +97,47 @@ public class SubModuleUseCases {
           module.id(), null);
     }
 
-    if (ownerPresent || datePresent) {
+    if (ownerPresent || datePresent || modulePresent) {
       modules.update(updated);
       support.bump(projectId);
     }
+  }
+
+  /**
+   * Refiles a sub-module under a different module.
+   *
+   * <p>Two things are checked, and both are the kind that only bite later. The module has to be
+   * one the project actually configures — otherwise a typo silently creates a module nobody
+   * meant, and it appears on the matrix as a heading with one row under it. And the identity
+   * {@code (module, name)} has to stay unique, because two rows tracking the same thing on the
+   * same module is precisely the confusion the matrix exists to remove.
+   *
+   * <p>Nothing about the cells moves. A sub-module carries its deliverable row with it: what was
+   * loaded is a fact about the work, not about which heading it was filed under.
+   */
+  private Modules.SubModule withModule(Actor actor, Modules.SubModule module, String moduleName) {
+    actor.require(PermissionKey.MODULE_EDIT);
+    String next = moduleName == null ? "" : moduleName.trim();
+
+    if (next.isEmpty()) {
+      throw ServiceException.validation("A sub-module has to sit on a module.");
+    }
+    if (next.equals(module.moduleName())) {
+      return module;
+    }
+    if (!projects.config(module.projectId()).moduleNames().contains(next)) {
+      throw ServiceException.validation(
+          next + " is not a module in this project. Add it on the Configure screen first.");
+    }
+    if (modules.existsByIdentity(module.projectId(), next, module.name())) {
+      throw ServiceException.conflict(
+          "This project already tracks " + next + " · " + module.name() + ".");
+    }
+
+    return new Modules.SubModule(
+        module.id(), module.projectId(), next, module.name(), module.libraryEntryId(),
+        module.owner(), module.fniTargetDate(), module.fniClosedAt(), module.fniClosedBy(),
+        module.createdAt());
   }
 
   @Transactional

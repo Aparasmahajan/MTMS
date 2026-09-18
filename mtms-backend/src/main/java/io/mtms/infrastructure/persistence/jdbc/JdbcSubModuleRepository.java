@@ -116,14 +116,23 @@ public class JdbcSubModuleRepository implements SubModuleRepository {
         .get(0);
   }
 
+  /**
+   * Writes the whole editable row, module included.
+   *
+   * <p>{@code module_id} is in here because a sub-module can be filed under the wrong module and
+   * has to be movable from its own screen. The domain carries the module as a name, so every
+   * update resolves it the same way an insert does — one path rather than a second "move" method
+   * that a future field would have to be added to twice.
+   */
   @Override
   public void update(Modules.SubModule module) {
     jdbc.update(
         """
         UPDATE sub_modules
-           SET owner = ?, fni_target_date = ?, fni_closed_at = ?, fni_closed_by = ?
+           SET module_id = ?, owner = ?, fni_target_date = ?, fni_closed_at = ?, fni_closed_by = ?
          WHERE id = ?
         """,
+        moduleIdFor(module.projectId(), module.moduleName()),
         module.owner(), Sql.date(module.fniTargetDate()), Sql.timestamp(module.fniClosedAt()),
         module.fniClosedBy(), module.id());
   }

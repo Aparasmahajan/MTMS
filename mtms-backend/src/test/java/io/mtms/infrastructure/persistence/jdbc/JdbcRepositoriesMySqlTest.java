@@ -2,14 +2,22 @@ package io.mtms.infrastructure.persistence.jdbc;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.mtms.application.port.ProjectData;
+import io.mtms.application.port.DiscussionData;
+import io.mtms.application.port.StepData;
 import io.mtms.domain.PermissionKey;
 import io.mtms.domain.model.Audit;
+import io.mtms.domain.model.Discussions;
 import io.mtms.domain.model.Modules;
+import io.mtms.domain.model.Notifications;
+import io.mtms.domain.model.Owners;
 import io.mtms.domain.model.Projects;
+import io.mtms.domain.model.Scope;
+import io.mtms.domain.model.Steps;
 import io.mtms.domain.model.Tenancy;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -56,6 +64,10 @@ class JdbcRepositoriesMySqlTest {
   private static JdbcAccessRepository access;
   private static JdbcProjectRepository projects;
   private static JdbcSubModuleRepository subModules;
+  private static JdbcStepRepository steps;
+  private static JdbcOwnerRepository ownerRows;
+  private static JdbcDiscussionRepository discussionRows;
+  private static JdbcNotificationRepository notificationRows;
 
   @BeforeAll
   static void migrate() {
@@ -75,7 +87,11 @@ class JdbcRepositoriesMySqlTest {
     jdbc = new JdbcTemplate(ds);
     ObjectMapper mapper = new ObjectMapper();
     access = new JdbcAccessRepository(jdbc);
-    projects = new JdbcProjectRepository(jdbc, mapper);
+    steps = new JdbcStepRepository(jdbc);
+    ownerRows = new JdbcOwnerRepository(jdbc);
+    discussionRows = new JdbcDiscussionRepository(jdbc);
+    notificationRows = new JdbcNotificationRepository(jdbc);
+    projects = new JdbcProjectRepository(jdbc, mapper, steps, ownerRows, discussionRows);
     subModules = new JdbcSubModuleRepository(jdbc, mapper);
 
     access.insertTenant(
@@ -403,6 +419,625 @@ class JdbcRepositoriesMySqlTest {
       assertEquals("FILECR·PROD", read.get(0).label());
       assertEquals(subModuleId, read.get(0).subModuleId());
       assertEquals(NOW, read.get(0).at());
+    }
+  }
+
+  /**
+   * Steps, against the real server.
+   *
+   * <p>Five of these exist because of things only InnoDB says out loud: a CHECK constraint that
+   * refuses a blocked row with no reason, a cascade that takes a step's history with its entry,
+   * and a join table that empties itself when a role is deleted. None of that is true of the
+   * in-memory repository, so none of it would ever have been noticed there.
+   */
+  @Nested
+  @DisplayName("steps")
+  class StepStorage {
+
+    private UUID role(String key) {
+      UUID id = UUID.randomUUID();
+      access.insertRole(
+          new Tenancy.Role(id, TENANT, key, key.toUpperCase(), "", "", false, Set.of(PermissionKey.PROJECT_VIEW)));
+      return id;
+    }
+
+    private UUID subModule(UUID projectId, String name) {
+      UUID id = UUID.randomUUID();
+      subModules.insert(
+          new Modules.SubModule(id, projectId, "SBC", name, null, null, null, null, null, NOW));
+      return id;
+    }
+
+    @Test
+    @DisplayName("a definition round-trips with the roles allowed to tick it")
+    void definitionRoles() {
+      UUID project = newProject();
+      UUID qa = role("qa" + UUID.randomUUID().toString().substring(0, 6));
+      UUID sme = role("sme" + UUID.randomUUID().toString().substring(0, 6));
+
+      UUID id = UUID.randomUUID();
+      steps.insertDefinition(
+          new Steps.Definition(id, project, "Received CIQ", "from the customer", Set.of(qa, sme), null, NOW));
+
+      Steps.Definition read = steps.definition(project, id).orElseThrow();
+      assertEquals(Set.of(qa, sme), read.roleIds());
+      assertEquals("from the customer", read.description());
+      assertEquals(NOW, read.createdAt());
+    }
+
+    @Test
+    @DisplayName("the order lives on the entry, so one step is first here and third there")
+    void orderIsPerList() {
+      UUID project = newProject();
+      UUID one = subModule(project, "ACTIVITY_ONE");
+      UUID two = subModule(project, "ACTIVITY_TWO");
+
+      UUID ciq = UUID.randomUUID();
+      UUID test = UUID.randomUUID();
+      steps.insertDefinition(new Steps.Definition(ciq, project, "CIQ", "", Set.of(), null, NOW));
+      steps.insertDefinition(new Steps.Definition(test, project, "Testing", "", Set.of(), null, NOW));
+
+      UUID listA = UUID.randomUUID();
+      UUID listB = UUID.randomUUID();
+      steps.insertList(
+          new Steps.StepList(listA, project, "config1", Scope.SUB_MODULE, one, true, null, NOW));
+      steps.insertList(
+          new Steps.StepList(listB, project, "config2", Scope.SUB_MODULE, two, false, null, NOW));
+
+      steps.insertEntry(new Steps.Entry(UUID.randomUUID(), listA, ciq, 0));
+      steps.insertEntry(new Steps.Entry(UUID.randomUUID(), listA, test, 1));
+      // The same two steps, the other way round.
+      steps.insertEntry(new Steps.Entry(UUID.randomUUID(), listB, test, 0));
+      steps.insertEntry(new Steps.Entry(UUID.randomUUID(), listB, ciq, 1));
+
+      StepData data = steps.load(project);
+      assertEquals("CIQ", data.resolve(Scope.SUB_MODULE, one).get(0).entries().get(0).definition().name());
+      assertEquals("Testing", data.resolve(Scope.SUB_MODULE, two).get(0).entries().get(0).definition().name());
+    }
+
+    @Test
+    @DisplayName("a tick round-trips, and the event that made it stays")
+    void tickAndEvent() {
+      UUID project = newProject();
+      UUID subModuleId = subModule(project, "ACTIVITY_TICK");
+      UUID userId = UUID.randomUUID();
+      access.insertUser(
+          new Tenancy.UserWithSecret(
+              new Tenancy.User(userId, TENANT, userId + "@azalio.io", "Vinayak", false,
+                  Tenancy.UserStatus.ACTIVE, null, NOW),
+              "hash", null, null));
+
+      UUID definition = UUID.randomUUID();
+      steps.insertDefinition(new Steps.Definition(definition, project, "Testing done", "", Set.of(), null, NOW));
+
+      UUID listId = UUID.randomUUID();
+      steps.insertList(
+          new Steps.StepList(listId, project, "config1", Scope.SUB_MODULE, subModuleId, false, null, NOW));
+      UUID entryId = UUID.randomUUID();
+      steps.insertEntry(new Steps.Entry(entryId, listId, definition, 0));
+
+      steps.upsertProgress(new Steps.Progress(entryId, Steps.State.DONE, null, userId, NOW));
+      steps.appendEvent(
+          new Steps.Event(UUID.randomUUID(), entryId, Steps.State.TODO, Steps.State.DONE, false, null, userId, "Vinayak", NOW));
+
+      StepData data = steps.load(project);
+      assertEquals(Steps.State.DONE, data.resolveOne(steps.list(project, listId).orElseThrow())
+          .entries().get(0).progress().state());
+      assertEquals(NOW, data.eventsOf(entryId).get(0).at());
+      // The display name comes from the LEFT JOIN, not from the event row.
+      assertEquals("Vinayak", data.eventsOf(entryId).get(0).byName());
+    }
+
+    /** The CHECK constraint. MySQL below 8.0.16 parses this and ignores it — hence the minimum. */
+    @Test
+    @DisplayName("MySQL refuses a blocked step with no reason")
+    void blockedNeedsAReason() {
+      UUID project = newProject();
+      UUID subModuleId = subModule(project, "ACTIVITY_BLOCK");
+      UUID definition = UUID.randomUUID();
+      steps.insertDefinition(new Steps.Definition(definition, project, "Prod load", "", Set.of(), null, NOW));
+
+      UUID listId = UUID.randomUUID();
+      steps.insertList(
+          new Steps.StepList(listId, project, "config1", Scope.SUB_MODULE, subModuleId, false, null, NOW));
+      UUID entryId = UUID.randomUUID();
+      steps.insertEntry(new Steps.Entry(entryId, listId, definition, 0));
+
+      assertThrows(
+          Exception.class,
+          () -> steps.upsertProgress(new Steps.Progress(entryId, Steps.State.BLOCKED, null, null, NOW)));
+    }
+
+    @Test
+    @DisplayName("archiving a step hides it from the checklists and keeps its history")
+    void archivingKeepsHistory() {
+      UUID project = newProject();
+      UUID subModuleId = subModule(project, "ACTIVITY_ARCHIVE");
+      UUID definition = UUID.randomUUID();
+      steps.insertDefinition(new Steps.Definition(definition, project, "Old step", "", Set.of(), null, NOW));
+
+      UUID listId = UUID.randomUUID();
+      steps.insertList(
+          new Steps.StepList(listId, project, "config1", Scope.SUB_MODULE, subModuleId, false, null, NOW));
+      UUID entryId = UUID.randomUUID();
+      steps.insertEntry(new Steps.Entry(entryId, listId, definition, 0));
+      steps.appendEvent(
+          new Steps.Event(UUID.randomUUID(), entryId, Steps.State.TODO, Steps.State.DONE, false, null, null, null, NOW));
+
+      steps.archiveDefinition(definition, NOW);
+
+      StepData data = steps.load(project);
+      assertTrue(data.resolve(Scope.SUB_MODULE, subModuleId).get(0).entries().isEmpty());
+      // Gone from the screen, still in the record. That is the whole point of archiving.
+      assertEquals(1, data.eventsOf(entryId).size());
+    }
+
+    @Test
+    @DisplayName("one project cannot see another's checklists")
+    void isolatesProjects() {
+      UUID mine = newProject();
+      UUID theirs = newProject();
+      UUID subModuleId = subModule(theirs, "ACTIVITY_THEIRS");
+
+      UUID definition = UUID.randomUUID();
+      steps.insertDefinition(new Steps.Definition(definition, theirs, "Theirs", "", Set.of(), null, NOW));
+      UUID listId = UUID.randomUUID();
+      steps.insertList(
+          new Steps.StepList(listId, theirs, "config1", Scope.SUB_MODULE, subModuleId, false, null, NOW));
+      steps.insertEntry(new Steps.Entry(UUID.randomUUID(), listId, definition, 0));
+
+      assertTrue(steps.load(mine).lists().isEmpty());
+      assertTrue(steps.load(mine).definitions().isEmpty());
+      assertEquals(1, steps.load(theirs).lists().size());
+    }
+  }
+
+  @Nested
+  @DisplayName("per-project wording")
+  class Vocabulary {
+
+    @Test
+    @DisplayName("the three labels round-trip, and a new project starts on the defaults")
+    void roundTrip() {
+      UUID project = newProject();
+      assertEquals("Module", projects.findById(TENANT, project).orElseThrow().vocabulary().module());
+
+      projects.updateVocabulary(project, new Projects.Vocabulary("Node", "Activity", "Sub-activity"));
+
+      Projects.Vocabulary read = projects.findById(TENANT, project).orElseThrow().vocabulary();
+      assertEquals("Node", read.module());
+      assertEquals("Activity", read.subModule());
+      assertEquals("Sub-activity", read.subActivity());
+    }
+
+    /** Renaming or archiving a project must not quietly reset the words it chose. */
+    @Test
+    @DisplayName("an ordinary project update leaves the wording alone")
+    void updateDoesNotResetWording() {
+      UUID project = newProject();
+      projects.updateVocabulary(project, new Projects.Vocabulary("Node", "Activity", "Piece"));
+
+      Projects.Project current = projects.findById(TENANT, project).orElseThrow();
+      projects.update(
+          new Projects.Project(
+              current.id(), current.tenantId(), current.key(), "Renamed", current.description(),
+              current.configured(), current.archived(), current.createdAt()));
+
+      assertEquals("Node", projects.findById(TENANT, project).orElseThrow().vocabulary().module());
+    }
+  }
+
+  @Nested
+  @DisplayName("moving a sub-module between modules")
+  class MoveModule {
+
+    @Test
+    @DisplayName("it changes the module and keeps every cell")
+    void keepsCells() {
+      UUID project = newProject();
+      UUID id = UUID.randomUUID();
+      subModules.insert(
+          new Modules.SubModule(id, project, "SBC", "ACTIVITY_MOVE", null, "Paras", null, null, null, NOW));
+      subModules.upsertCell(new Modules.Cell(id, null, "filecr_prod", "prod", "Narayana", NOW));
+
+      Modules.SubModule current = subModules.find(project, id).orElseThrow();
+      subModules.update(
+          new Modules.SubModule(
+              current.id(), current.projectId(), "CFX", current.name(), current.libraryEntryId(),
+              current.owner(), current.fniTargetDate(), current.fniClosedAt(), current.fniClosedBy(),
+              current.createdAt()));
+
+      assertEquals("CFX", subModules.find(project, id).orElseThrow().moduleName());
+      // The deliverable row travels with it: what was loaded is a fact about the work, not
+      // about which heading it was filed under.
+      assertEquals("prod", subModules.cells(id).get(0).status());
+    }
+  }
+
+  /**
+   * Owners, against the real server.
+   *
+   * <p>These exist for one reason: the uniqueness rule is enforced by an index over a GENERATED
+   * column that folds a null {@code role_id} to the sentinel {@code '~any'}. In SQL
+   * {@code NULL <> NULL}, so a plain UNIQUE would happily record the same person as the overall
+   * owner of one thing five times — and the in-memory repository, which has no indexes at all,
+   * cannot tell you whether the real one works.
+   */
+  @Nested
+  @DisplayName("owners")
+  class OwnerStorage {
+
+    private UUID person(String name) {
+      UUID id = UUID.randomUUID();
+      access.insertUser(
+          new Tenancy.UserWithSecret(
+              new Tenancy.User(
+                  id, TENANT, id + "@azalio.io", name, false,
+                  Tenancy.UserStatus.ACTIVE, null, NOW),
+              "hash", null, null));
+      return id;
+    }
+
+    private UUID roleNamed(String key) {
+      UUID id = UUID.randomUUID();
+      access.insertRole(
+          new Tenancy.Role(
+              id, TENANT, key + UUID.randomUUID().toString().substring(0, 6), key, "", "", false,
+              Set.of(PermissionKey.PROJECT_VIEW)));
+      return id;
+    }
+
+    @Test
+    @DisplayName("an overall owner and a team owner sit side by side on one thing")
+    void overallAndTeam() {
+      UUID project = newProject();
+      UUID scope = UUID.randomUUID();
+      UUID qa = roleNamed("QA");
+
+      ownerRows.insert(
+          new Owners.Owner(UUID.randomUUID(), project, Scope.SUB_MODULE, scope, null, person("Paras"), NOW));
+      ownerRows.insert(
+          new Owners.Owner(UUID.randomUUID(), project, Scope.SUB_MODULE, scope, qa, person("Vinayak"), NOW));
+
+      List<Owners.Owner> rows = ownerRows.findByScope(project, Scope.SUB_MODULE, scope);
+      assertEquals(2, rows.size());
+      assertEquals(1, rows.stream().filter(Owners.Owner::isOverall).count());
+    }
+
+    /** The sentinel. Without it this would insert twice and the screen would print them twice. */
+    @Test
+    @DisplayName("the same overall owner twice is one row, because NULL folds to a sentinel")
+    void nullRoleIsStillUnique() {
+      UUID project = newProject();
+      UUID scope = UUID.randomUUID();
+      UUID paras = person("Paras");
+
+      ownerRows.insert(
+          new Owners.Owner(UUID.randomUUID(), project, Scope.SUB_MODULE, scope, null, paras, NOW));
+      ownerRows.insert(
+          new Owners.Owner(UUID.randomUUID(), project, Scope.SUB_MODULE, scope, null, paras, NOW));
+
+      assertEquals(1, ownerRows.findByScope(project, Scope.SUB_MODULE, scope).size());
+    }
+
+    @Test
+    @DisplayName("one person can own the same thing for two different teams")
+    void samePersonTwoTeams() {
+      UUID project = newProject();
+      UUID scope = UUID.randomUUID();
+      UUID paras = person("Paras");
+
+      ownerRows.insert(
+          new Owners.Owner(UUID.randomUUID(), project, Scope.SUB_MODULE, scope, roleNamed("QA"), paras, NOW));
+      ownerRows.insert(
+          new Owners.Owner(UUID.randomUUID(), project, Scope.SUB_MODULE, scope, roleNamed("Dev"), paras, NOW));
+
+      assertEquals(2, ownerRows.findByScope(project, Scope.SUB_MODULE, scope).size());
+    }
+
+    @Test
+    @DisplayName("levels do not inherit — the same id at two scopes is two different things")
+    void scopesAreIndependent() {
+      UUID project = newProject();
+      UUID scope = UUID.randomUUID();
+
+      ownerRows.insert(
+          new Owners.Owner(UUID.randomUUID(), project, Scope.MODULE, scope, null, person("Paras"), NOW));
+
+      assertEquals(1, ownerRows.findByScope(project, Scope.MODULE, scope).size());
+      assertTrue(ownerRows.findByScope(project, Scope.SUB_MODULE, scope).isEmpty());
+    }
+
+    @Test
+    @DisplayName("one project cannot see another's owners")
+    void isolatesProjects() {
+      UUID mine = newProject();
+      UUID theirs = newProject();
+      UUID scope = UUID.randomUUID();
+
+      ownerRows.insert(
+          new Owners.Owner(UUID.randomUUID(), theirs, Scope.SUB_MODULE, scope, null, person("Paras"), NOW));
+
+      assertTrue(ownerRows.load(mine).isEmpty());
+      assertEquals(1, ownerRows.load(theirs).size());
+    }
+  }
+
+  /**
+   * Discussions, against the real server.
+   *
+   * <p>The one worth having is {@code authorSurvivesTheAccount}: {@code ON DELETE SET NULL} on
+   * the author is what keeps a comment when somebody leaves, and it is a promise only the
+   * database makes. The in-memory repository has no foreign keys, so it would pass either way.
+   */
+  @Nested
+  @DisplayName("discussions")
+  class DiscussionStorage {
+
+    private UUID author(String name) {
+      UUID id = UUID.randomUUID();
+      access.insertUser(
+          new Tenancy.UserWithSecret(
+              new Tenancy.User(
+                  id, TENANT, id + "@azalio.io", name, false,
+                  Tenancy.UserStatus.ACTIVE, null, NOW),
+              "hash", null, null));
+      return id;
+    }
+
+    private UUID threadOn(UUID project, UUID scope, UUID by, String topic) {
+      UUID id = UUID.randomUUID();
+      discussionRows.insertThread(
+          new Discussions.Thread(id, project, Scope.SUB_MODULE, scope, topic, by, "", NOW, null));
+      return id;
+    }
+
+    @Test
+    @DisplayName("a thread and its comments round-trip, with the author's name joined on")
+    void roundTrip() {
+      UUID project = newProject();
+      UUID scope = UUID.randomUUID();
+      UUID paras = author("Paras");
+      UUID thread = threadOn(project, scope, paras, "Vendor has not answered");
+
+      discussionRows.insertComment(
+          new Discussions.Comment(
+              UUID.randomUUID(), thread, paras, "", "Chased them again today.", NOW, null, null));
+
+      DiscussionData data = discussionRows.load(project);
+      assertEquals(1, data.threadsOn(Scope.SUB_MODULE, scope).size());
+      assertEquals("Paras", data.threadsOn(Scope.SUB_MODULE, scope).get(0).createdByName());
+      assertEquals("Paras", data.commentsOn(thread).get(0).authorName());
+      assertEquals(NOW, data.commentsOn(thread).get(0).createdAt());
+    }
+
+    /** ON DELETE SET NULL. What was said outlives who said it — a promise only InnoDB keeps. */
+    @Test
+    @DisplayName("a comment survives its author's account being removed")
+    void authorSurvivesTheAccount() {
+      UUID project = newProject();
+      UUID scope = UUID.randomUUID();
+      UUID leaver = author("Leaver");
+      UUID thread = threadOn(project, scope, leaver, "Why we skipped lab");
+
+      discussionRows.insertComment(
+          new Discussions.Comment(
+              UUID.randomUUID(), thread, leaver, "", "Lab was down for the window.", NOW, null, null));
+
+      jdbc.update("DELETE FROM users WHERE id = ?", leaver.toString());
+
+      DiscussionData data = discussionRows.load(project);
+      assertEquals(1, data.commentsOn(thread).size(), "the comment must not go with the account");
+      // The LEFT JOIN finds nobody, and the mapper says so rather than printing a bare uuid.
+      assertEquals("a removed account", data.commentsOn(thread).get(0).authorName());
+    }
+
+    @Test
+    @DisplayName("naming somebody twice in one comment is one mention, not two")
+    void mentionsAreUnique() {
+      UUID project = newProject();
+      UUID scope = UUID.randomUUID();
+      UUID paras = author("Paras");
+      UUID vinayak = author("Vinayak");
+      UUID thread = threadOn(project, scope, paras, "Testing");
+
+      UUID commentId = UUID.randomUUID();
+      discussionRows.insertComment(
+          new Discussions.Comment(commentId, thread, paras, "", "@Vinayak @Vinayak", NOW, null, null));
+
+      discussionRows.insertMentions(commentId, Discussions.Mention.THREAD, List.of(vinayak));
+      discussionRows.insertMentions(commentId, Discussions.Mention.THREAD, List.of(vinayak));
+
+      assertEquals(1, discussionRows.load(project).mentionedIn(commentId).size());
+    }
+
+    @Test
+    @DisplayName("archiving a thread hides it and keeps every comment on it")
+    void archivingKeepsComments() {
+      UUID project = newProject();
+      UUID scope = UUID.randomUUID();
+      UUID paras = author("Paras");
+      UUID thread = threadOn(project, scope, paras, "Settled");
+
+      discussionRows.insertComment(
+          new Discussions.Comment(
+              UUID.randomUUID(), thread, paras, "", "Agreed, prod only.", NOW, null, null));
+      discussionRows.archiveThread(thread, NOW);
+
+      DiscussionData data = discussionRows.load(project);
+      assertTrue(data.threadsOn(Scope.SUB_MODULE, scope).isEmpty(), "hidden from the screen");
+      assertEquals(1, data.commentsOn(thread).size(), "and still readable underneath");
+    }
+
+    @Test
+    @DisplayName("one project cannot see another's discussion")
+    void isolatesProjects() {
+      UUID mine = newProject();
+      UUID theirs = newProject();
+      UUID paras = author("Paras");
+      threadOn(theirs, UUID.randomUUID(), paras, "Theirs");
+
+      assertTrue(discussionRows.load(mine).threads().isEmpty());
+      assertEquals(1, discussionRows.load(theirs).threads().size());
+    }
+  }
+
+  @Nested
+  @DisplayName("hideable roles")
+  class RoleVisibility {
+
+    /** V2 added this column. Reading it back is what proves the migration ran. */
+    @Test
+    @DisplayName("a role hides and comes back, and nothing else about it moves")
+    void hideAndShow() {
+      UUID roleId = UUID.randomUUID();
+      access.insertRole(
+          new Tenancy.Role(
+              roleId, TENANT, "fe" + UUID.randomUUID().toString().substring(0, 6),
+              "Field Engineer", "hardware", "", false, Set.of(PermissionKey.PROJECT_VIEW)));
+
+      assertFalse(access.role(TENANT, roleId).orElseThrow().isHidden());
+
+      access.setRoleArchived(roleId, NOW);
+      Tenancy.Role hidden = access.role(TENANT, roleId).orElseThrow();
+      assertTrue(hidden.isHidden());
+      assertEquals(NOW, hidden.archivedAt());
+      assertEquals("Field Engineer", hidden.name(), "hiding is not an edit");
+      assertEquals(Set.of(PermissionKey.PROJECT_VIEW), hidden.permissions());
+
+      access.setRoleArchived(roleId, null);
+      assertFalse(access.role(TENANT, roleId).orElseThrow().isHidden());
+    }
+  }
+
+  /**
+   * Inboxes, against the real server.
+   *
+   * <p>The one that could not be checked any other way is {@code goesWithTheAccount}: the
+   * foreign key on notifications is {@code ON DELETE CASCADE}, and it is the opposite choice
+   * from comments and step events on purpose — those are a record of what happened and outlive
+   * the person, a notification is a message addressed to one, and a message to nobody is not
+   * worth keeping.
+   */
+  @Nested
+  @DisplayName("notifications")
+  class NotificationStorage {
+
+    private UUID recipient(String name) {
+      UUID id = UUID.randomUUID();
+      access.insertUser(
+          new Tenancy.UserWithSecret(
+              new Tenancy.User(
+                  id, TENANT, id + "@azalio.io", name, false,
+                  Tenancy.UserStatus.ACTIVE, null, NOW),
+              "hash", null, null));
+      return id;
+    }
+
+    private Notifications.Notification to(UUID project, UUID user, String title, Instant at) {
+      return Notifications.Notification.of(
+          TENANT, project, user, Notifications.Kind.MENTION, title, "", "/matrix", at);
+    }
+
+    @Test
+    @DisplayName("a notification round-trips, unread, with nothing delivered")
+    void roundTrip() {
+      UUID project = newProject();
+      UUID vinayak = recipient("Vinayak");
+
+      notificationRows.insert(List.of(to(project, vinayak, "Anand mentioned you", NOW)));
+
+      List<Notifications.Notification> inbox = notificationRows.inbox(TENANT, vinayak, 10);
+      assertEquals(1, inbox.size());
+      assertEquals("Anand mentioned you", inbox.get(0).title());
+      assertTrue(inbox.get(0).isUnread());
+      // Null, and that is the honest record: nothing sent it anywhere.
+      assertTrue(inbox.get(0).deliveredAt() == null);
+      assertEquals(NOW, inbox.get(0).createdAt());
+      assertEquals(1, notificationRows.unreadCount(TENANT, vinayak));
+    }
+
+    @Test
+    @DisplayName("unread comes first, then newest — not simply newest")
+    void unreadFirst() {
+      UUID project = newProject();
+      UUID vinayak = recipient("Vinayak");
+
+      Notifications.Notification older = to(project, vinayak, "older, unread", NOW.minusSeconds(600));
+      Notifications.Notification newer = to(project, vinayak, "newer", NOW);
+      notificationRows.insert(List.of(older, newer));
+      notificationRows.markRead(TENANT, vinayak, newer.id(), NOW);
+
+      // Reading down an inbox should not mean scrolling past this morning's read item to find
+      // last week's unread one.
+      assertEquals("older, unread", notificationRows.inbox(TENANT, vinayak, 10).get(0).title());
+    }
+
+    @Test
+    @DisplayName("somebody else cannot mark yours read")
+    void markReadIsScopedToTheOwner() {
+      UUID project = newProject();
+      UUID vinayak = recipient("Vinayak");
+      UUID bhavnish = recipient("Bhavnish");
+
+      Notifications.Notification mine = to(project, vinayak, "for Vinayak", NOW);
+      notificationRows.insert(List.of(mine));
+
+      notificationRows.markRead(TENANT, bhavnish, mine.id(), NOW);
+
+      assertEquals(1, notificationRows.unreadCount(TENANT, vinayak));
+    }
+
+    @Test
+    @DisplayName("marking all read clears the count and leaves the rows")
+    void markAllRead() {
+      UUID project = newProject();
+      UUID vinayak = recipient("Vinayak");
+      notificationRows.insert(
+          List.of(to(project, vinayak, "one", NOW), to(project, vinayak, "two", NOW)));
+
+      notificationRows.markAllRead(TENANT, vinayak, NOW);
+
+      assertEquals(0, notificationRows.unreadCount(TENANT, vinayak));
+      assertEquals(2, notificationRows.inbox(TENANT, vinayak, 10).size());
+    }
+
+    @Test
+    @DisplayName("delivery is recorded when a transport accepts it")
+    void markDelivered() {
+      UUID project = newProject();
+      UUID vinayak = recipient("Vinayak");
+      Notifications.Notification one = to(project, vinayak, "sent", NOW);
+      notificationRows.insert(List.of(one));
+
+      notificationRows.markDelivered(List.of(one.id()), NOW);
+
+      assertEquals(NOW, notificationRows.inbox(TENANT, vinayak, 10).get(0).deliveredAt());
+    }
+
+    /** ON DELETE CASCADE. A message to nobody is not worth keeping — unlike what was said. */
+    @Test
+    @DisplayName("a notification goes with the account it was addressed to")
+    void goesWithTheAccount() {
+      UUID project = newProject();
+      UUID leaver = recipient("Leaver");
+      notificationRows.insert(List.of(to(project, leaver, "for the leaver", NOW)));
+
+      jdbc.update("DELETE FROM users WHERE id = ?", leaver.toString());
+
+      assertTrue(notificationRows.inbox(TENANT, leaver, 10).isEmpty());
+    }
+
+    @Test
+    @DisplayName("one person cannot see another's inbox")
+    void isolatesPeople() {
+      UUID project = newProject();
+      UUID vinayak = recipient("Vinayak");
+      UUID bhavnish = recipient("Bhavnish");
+      notificationRows.insert(List.of(to(project, vinayak, "for Vinayak", NOW)));
+
+      assertTrue(notificationRows.inbox(TENANT, bhavnish, 10).isEmpty());
+      assertEquals(1, notificationRows.inbox(TENANT, vinayak, 10).size());
     }
   }
 }

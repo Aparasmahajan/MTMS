@@ -500,6 +500,63 @@ public class PlatformUseCases {
     revoke(actor, tenant, membership, "organisation.admin.removed", tenant.name());
   }
 
+  /**
+   * Issues a fresh invitation link for somebody who has not accepted yet.
+   *
+   * <p>This exists because of a property of the design that is right and unhelpful at the same
+   * time: the token is never stored, only its sha256, so a link that was lost before anybody
+   * copied it cannot be shown again by any screen or any query. Before this, the only repair was
+   * to delete the pending account and create it over.
+   *
+   * <p>Reissuing replaces the hash. The previous link stops working immediately — two live links
+   * to one account would be a second way in that nobody is tracking — and the validity starts
+   * again from now, because a reissue is somebody saying "they still have not received it".
+   *
+   * <p>Refused for an account that has already been accepted. That is not an invitation any
+   * more, it is a person with a password, and issuing a single-use link into a live account is
+   * a password reset wearing the wrong name.
+   */
+  @Transactional
+  public AssignedAdministrator reissueInvitation(Actor actor, UUID tenantId, UUID userId) {
+    requireSuperAdmin(actor);
+
+    Tenancy.Tenant tenant = tenant(tenantId);
+    Tenancy.User user =
+        access
+            .findUser(tenantId, userId)
+            .orElseThrow(() -> ServiceException.notFound("That person is not in this organisation."));
+
+    if (user.status() != Tenancy.UserStatus.INVITED) {
+      throw ServiceException.validation(
+          user.email()
+              + " has already accepted their invitation and has an account. There is no link to"
+              + " reissue — if they cannot sign in, that is a password reset, not an invitation.");
+    }
+
+    String token = SecureTokens.random();
+    Instant now = Instant.now();
+    access.setInviteToken(userId, passwords.sha256(token), now.plus(INVITE_VALIDITY));
+
+    String acceptUrl = properties.appBaseUrl() + "/accept-invite?token=" + token;
+
+    recordPlatform(
+        actor,
+        "invitation.reissued",
+        tenantId,
+        "reissued the invitation link for " + user.email() + " in " + tenant.name());
+
+    try {
+      mailer.sendInvitation(
+          new Mailer.Invitation(user.email(), user.displayName(), tenant.name(), acceptUrl));
+    } catch (RuntimeException failure) {
+      // Same reasoning as the first invitation: the token is already real, and a mail outage
+      // must not undo it. The caller surfaces the link so an operator can pass it on.
+    }
+
+    return new AssignedAdministrator(
+        user.email(), user.displayName(), tenant.name(), true, acceptUrl);
+  }
+
   // ---------------------------------------------------------------------------
 
   /**

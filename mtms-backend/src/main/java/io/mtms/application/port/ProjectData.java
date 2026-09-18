@@ -43,7 +43,58 @@ public record ProjectData(
     List<Drift.Deliverable> driftDeliverables,
     List<Drift.Observation> driftObservations,
     List<Drift.Report> driftReports,
-    List<Drift.Promotion> driftPromotions) {
+    List<Drift.Promotion> driftPromotions,
+    StepData steps,
+    List<io.mtms.domain.model.Owners.Owner> owners,
+    DiscussionData discussions) {
+
+  /**
+   * A project read before steps existed, or one being built in a test that does not care about
+   * them. Kept so adding the seventh list to this record did not become an edit to every call
+   * site that only ever wanted a matrix.
+   */
+  public ProjectData(
+      Tenancy.Tenant tenant,
+      Projects.Project project,
+      long revision,
+      List<Projects.DeliverableColumn> columns,
+      Projects.ProjectConfig config,
+      List<Modules.SubModule> subModules,
+      List<Modules.SubActivity> subActivities,
+      List<Modules.Cell> cells,
+      List<Modules.Link> links,
+      List<Modules.Run> runs,
+      List<Modules.LibraryEntry> library,
+      List<Defects.Defect> defects,
+      List<Audit.AuditEntry> audit,
+      List<Drift.Deliverable> driftDeliverables,
+      List<Drift.Observation> driftObservations,
+      List<Drift.Report> driftReports,
+      List<Drift.Promotion> driftPromotions) {
+    this(
+        tenant, project, revision, columns, config, subModules, subActivities, cells, links, runs,
+        library, defects, audit, driftDeliverables, driftObservations, driftReports,
+        driftPromotions, StepData.empty(), List.of(), DiscussionData.empty());
+  }
+
+  public ProjectData {
+    steps = steps == null ? StepData.empty() : steps;
+    owners = owners == null ? List.of() : owners;
+    discussions = discussions == null ? DiscussionData.empty() : discussions;
+  }
+
+  /** The owner rows on one thing — the overall owner and every team's, unsorted. */
+  public List<io.mtms.domain.model.Owners.Owner> ownersOf(
+      io.mtms.domain.model.Scope scopeType, UUID scopeId) {
+    return owners.stream()
+        .filter(owner -> owner.scopeType() == scopeType && owner.scopeId().equals(scopeId))
+        .toList();
+  }
+
+  /** What this project calls its three levels. Every screen reads these. */
+  public Projects.Vocabulary vocabulary() {
+    return project.vocabulary();
+  }
 
   /** Cells belonging to one module, keyed by (subActivityId, columnKey). */
   public List<Modules.Cell> cellsOf(UUID subModuleId) {
