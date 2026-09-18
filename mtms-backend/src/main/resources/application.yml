@@ -1,14 +1,18 @@
 # MTMS API — default configuration.
 #
-# The defaults here run the service with no Postgres, no Redis and no Kafka: storage is
-# in-memory and seeded, the cache is a local map, and events are logged. That is deliberate,
-# and it is the same choice lib/server/store.ts makes with its file driver — a developer
-# should be able to clone this and see the matrix without installing three daemons first.
+# The defaults here run the service with no MySQL, no Redis and no Kafka: storage is
+# in-memory, the cache is a local map, and events are logged. That is deliberate, and it is
+# the same choice lib/server/store.ts makes with its file driver — a developer should be able
+# to clone this and start the service without installing three daemons first.
+#
+# It starts empty. The demo seeder was removed once the real database was populated, so there
+# is no longer anything that creates an organisation or a first account on start-up — see the
+# note in DEPLOYMENT.md before pointing this at a fresh database.
 #
 # Everything real is one profile away. See application-mysql.yml.
 
 server:
-  port: 8080
+  port: ${SERVER_PORT:6011}
   shutdown: graceful
   # Behind a load balancer the client address and scheme arrive in headers; without this,
   # generated links and rate-limit keys would all refer to the proxy.
@@ -55,7 +59,6 @@ mtms:
 
   ticket-base-url: https://tms.internal/browse
   app-base-url: http://localhost:3000
-  seed-on-empty-database: true
 
   cors:
     allowed-origins:

@@ -7,6 +7,7 @@ import io.mtms.domain.view.PlatformView;
 import jakarta.validation.constraints.NotBlank;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -90,6 +91,93 @@ public class PlatformController {
     return ApiResponse.ok(
         platform.view(actor),
         Map.of("project_id", projectId.toString(), "key", request.key().trim().toUpperCase()));
+  }
+
+  public record AdministratorRequest(@NotBlank String email, String displayName) {}
+
+  /**
+   * Makes somebody an administrator of one project.
+   *
+   * <p>Somebody already in the organisation is simply granted it. Somebody new is invited, and
+   * the single-use link comes back in {@code meta} for an operator to pass on.
+   */
+  @PostMapping("/projects/{id}/admins")
+  public ApiResponse.Success<PlatformView> addProjectAdministrator(
+      @PathVariable("id") UUID projectId,
+      @RequestBody AdministratorRequest request,
+      Actor actor) {
+
+    // The grant first, on its own line. Java evaluates arguments left to right, so building
+    // the view inside the same call would project the state as it was before the grant and
+    // answer with a screen that does not show what just happened.
+    PlatformUseCases.AssignedAdministrator assigned =
+        platform.assignProjectAdministrator(
+            actor, projectId, request.email(), request.displayName());
+
+    return ApiResponse.ok(platform.view(actor), assignedMeta(assigned));
+  }
+
+  /** Removes one project's administrator. Organisation-wide access is refused here — see below. */
+  @DeleteMapping("/projects/{id}/admins/{membershipId}")
+  public ApiResponse.Success<PlatformView> removeProjectAdministrator(
+      @PathVariable("id") UUID projectId,
+      @PathVariable("membershipId") UUID membershipId,
+      Actor actor) {
+
+    platform.removeProjectAdministrator(actor, projectId, membershipId);
+    return ApiResponse.ok(platform.view(actor));
+  }
+
+  /**
+   * Makes somebody an administrator of every project in an organisation, present and future.
+   *
+   * <p>Separate from the project route because the scope is different and the screen says so.
+   * This is the grant that puts one name on every project row.
+   */
+  @PostMapping("/organisations/{id}/admins")
+  public ApiResponse.Success<PlatformView> addOrganisationAdministrator(
+      @PathVariable("id") UUID tenantId,
+      @RequestBody AdministratorRequest request,
+      Actor actor) {
+
+    PlatformUseCases.AssignedAdministrator assigned =
+        platform.assignOrganisationAdministrator(
+            actor, tenantId, request.email(), request.displayName());
+
+    return ApiResponse.ok(platform.view(actor), assignedMeta(assigned));
+  }
+
+  /**
+   * Removes an organisation-wide administrator.
+   *
+   * <p>The only route that will do it. A project's own route refuses, because taking away every
+   * project is not what the row an operator clicked appeared to offer.
+   */
+  @DeleteMapping("/organisations/{id}/admins/{membershipId}")
+  public ApiResponse.Success<PlatformView> removeOrganisationAdministrator(
+      @PathVariable("id") UUID tenantId,
+      @PathVariable("membershipId") UUID membershipId,
+      Actor actor) {
+
+    platform.removeOrganisationAdministrator(actor, tenantId, membershipId);
+    return ApiResponse.ok(platform.view(actor));
+  }
+
+  /**
+   * Map keys again, written as the frontend reads them.
+   *
+   * <p>A {@link java.util.HashMap} rather than {@code Map.of}, which rejects a null value:
+   * {@code accept_url} is absent for somebody who already had an account, and absent is the
+   * honest answer — there is no link, because nothing was sent.
+   */
+  private static Map<String, Object> assignedMeta(PlatformUseCases.AssignedAdministrator assigned) {
+    Map<String, Object> meta = new java.util.HashMap<>();
+    meta.put("admin_email", assigned.email());
+    meta.put("display_name", assigned.displayName());
+    meta.put("where", assigned.where());
+    meta.put("invited", assigned.invited());
+    meta.put("accept_url", assigned.acceptUrl());
+    return meta;
   }
 
   public record StatusRequest(@NotBlank String status) {}

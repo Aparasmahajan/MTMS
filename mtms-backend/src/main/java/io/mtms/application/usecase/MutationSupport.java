@@ -109,4 +109,21 @@ public class MutationSupport {
   public long bump(UUID projectId) {
     return projects.bumpRevision(projectId);
   }
+
+  /**
+   * Moves the revision of every project in one organisation.
+   *
+   * <p>For the changes that are not about a project's contents but about the <em>set</em> of
+   * projects, or about who may see them: creating, renaming or archiving a project, and granting
+   * or revoking a membership. A snapshot carries the whole project list and the reader's own
+   * permissions, so a user sitting in project A holds a cached answer that a change to project B
+   * has just invalidated — and {@link #bump(UUID)} on B alone would leave them looking at a stale
+   * switcher until they happened to edit something.
+   *
+   * <p>One statement per project rather than one for the organisation, because the revision lives
+   * on the project row and is what the cache key is built from.
+   */
+  public void bumpEveryProjectIn(UUID tenantId) {
+    projects.findAllByTenant(tenantId).forEach(project -> projects.bumpRevision(project.id()));
+  }
 }

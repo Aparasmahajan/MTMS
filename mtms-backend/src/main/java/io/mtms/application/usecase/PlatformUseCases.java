@@ -44,6 +44,11 @@ import org.springframework.transaction.annotation.Transactional;
  * entry is touched. It creates the shell — organisation, roles, first admin, empty project —
  * and stops. What goes inside belongs to that organisation's admin; being able to create a
  * thing is not a reason to be able to read inside it.
+ *
+ * <p>The one exception is the revision counter, which is cache bookkeeping rather than data: a
+ * project appearing, or an administrator gaining or losing access, changes what people already
+ * inside the organisation should see, so {@link MutationSupport#bumpEveryProjectIn} is called
+ * after those. Without it the change is real in the database and invisible on the screen.
  */
 @Service
 public class PlatformUseCases {
@@ -61,6 +66,7 @@ public class PlatformUseCases {
   private final PasswordHasher passwords;
   private final Mailer mailer;
   private final MtmsProperties properties;
+  private final MutationSupport support;
 
   public PlatformUseCases(
       AccessRepository access,
@@ -68,13 +74,15 @@ public class PlatformUseCases {
       AuditRepository audit,
       PasswordHasher passwords,
       Mailer mailer,
-      MtmsProperties properties) {
+      MtmsProperties properties,
+      MutationSupport support) {
     this.access = access;
     this.projects = projects;
     this.audit = audit;
     this.passwords = passwords;
     this.mailer = mailer;
     this.properties = properties;
+    this.support = support;
   }
 
   /**
@@ -117,13 +125,7 @@ public class PlatformUseCases {
       List<Tenancy.User> users = access.findUsers(tenant.id());
       List<Tenancy.Membership> memberships = access.memberships(tenant.id());
 
-      // "Administrator" means whoever can actually manage the organisation, read off the
-      // stored role rather than a name — a renamed or re-scoped role stays correct.
-      List<UUID> adminRoleIds =
-          access.roles(tenant.id()).stream()
-              .filter(role -> role.permissions().contains(io.mtms.domain.PermissionKey.ADMIN_USERS_MANAGE))
-              .map(Tenancy.Role::id)
-              .toList();
+      List<UUID> adminRoleIds = adminRoleIds(tenant.id());
 
       List<PlatformView.Administrator> admins =
           users.stream()
@@ -150,6 +152,9 @@ public class PlatformUseCases {
               users.size(),
               tenantProjects.stream().mapToInt(p -> subModuleCounts.getOrDefault(p.id(), 0)).sum(),
               admins,
+              // Passing null as the project id means "organisation-wide only": the same
+              // assembly as a project row, filtered to the grants that are not tied to one.
+              projectAdministrators(null, memberships, users, adminRoleIds),
               tenantProjects.stream()
                   .map(
                       project ->
@@ -158,7 +163,8 @@ public class PlatformUseCases {
                               project.key(),
                               project.name(),
                               project.configured(),
-                              subModuleCounts.getOrDefault(project.id(), 0)))
+                              subModuleCounts.getOrDefault(project.id(), 0),
+                              projectAdministrators(project.id(), memberships, users, adminRoleIds)))
                   .toList()));
     }
 
@@ -166,6 +172,44 @@ public class PlatformUseCases {
         new PlatformView.Me(actor.displayName(), actor.email()),
         organisations,
         audit.recentPlatform(20));
+  }
+
+  /**
+   * Who administers one project.
+   *
+   * <p>An organisation-wide membership is included deliberately: it grants every project in
+   * the organisation, so leaving it out would report a project as having no owner when it
+   * has one. The flag lets the console say which kind it is.
+   *
+   * @param projectId {@code null} asks for the organisation-wide grants on their own, which is
+   *     what the organisation header lists.
+   */
+  private static List<PlatformView.ProjectAdministrator> projectAdministrators(
+      UUID projectId,
+      List<Tenancy.Membership> memberships,
+      List<Tenancy.User> users,
+      List<UUID> adminRoleIds) {
+
+    return memberships.stream()
+        .filter(
+            membership ->
+                adminRoleIds.contains(membership.roleId())
+                    && (membership.projectId() == null
+                        || (projectId != null && projectId.equals(membership.projectId()))))
+        .flatMap(
+            membership ->
+                users.stream()
+                    .filter(user -> user.id().equals(membership.userId()))
+                    .map(
+                        user ->
+                            new PlatformView.ProjectAdministrator(
+                                user.id(),
+                                membership.id(),
+                                user.displayName(),
+                                user.email(),
+                                user.status().name().toLowerCase(Locale.ROOT),
+                                membership.projectId() == null)))
+        .toList();
   }
 
   // ---------------------------------------------------------------------------
@@ -356,7 +400,320 @@ public class PlatformUseCases {
         tenantId,
         "created the project " + projectKey + " in " + tenant.name());
 
+    // Every project in the organisation, not only the new one. The project switcher inside the
+    // app is part of each project's cached snapshot, so people looking at a different project
+    // would keep the list as it was before this one existed.
+    support.bumpEveryProjectIn(tenantId);
+
     return project.id();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Administrators
+  // ---------------------------------------------------------------------------
+
+  /**
+   * What the caller needs after a grant: who it was, and — for somebody new — the link.
+   *
+   * @param invited false when the person already had an account here, in which case there is
+   *     nothing to send and {@code acceptUrl} is null.
+   */
+  public record AssignedAdministrator(
+      String email, String displayName, String where, boolean invited, String acceptUrl) {}
+
+  /**
+   * Makes somebody an administrator of one project.
+   *
+   * <p>Somebody already in the organisation is granted the project. Somebody new is created as
+   * an invited user with a single-use link, exactly as an organisation's first administrator is
+   * — the platform never sets anybody's password.
+   */
+  @Transactional
+  public AssignedAdministrator assignProjectAdministrator(
+      Actor actor, UUID projectId, String email, String displayName) {
+
+    requireSuperAdmin(actor);
+    Located located = locate(projectId);
+    return grant(actor, located.tenant(), located.project(), email, displayName);
+  }
+
+  /**
+   * Makes somebody an administrator of every project in an organisation, including the ones
+   * that do not exist yet.
+   *
+   * <p>This is the grant that puts the same name on every project row in the console. It is
+   * offered here, on the organisation, rather than on a project, because that is where its
+   * scope is honestly described.
+   */
+  @Transactional
+  public AssignedAdministrator assignOrganisationAdministrator(
+      Actor actor, UUID tenantId, String email, String displayName) {
+
+    requireSuperAdmin(actor);
+    return grant(actor, tenant(tenantId), null, email, displayName);
+  }
+
+  /**
+   * Takes away one project's administrator.
+   *
+   * <p>Refuses an organisation-wide grant. Removing it here would silently take away every
+   * other project too, and the row the operator clicked names one — the console sends them to
+   * the organisation's own list instead, where the scope is what they are looking at.
+   */
+  @Transactional
+  public void removeProjectAdministrator(Actor actor, UUID projectId, UUID membershipId) {
+    requireSuperAdmin(actor);
+
+    Located located = locate(projectId);
+    Tenancy.Membership membership = membership(located.tenant().id(), membershipId);
+
+    if (membership.projectId() == null) {
+      throw ServiceException.validation(
+          "That access covers every project in "
+              + located.tenant().name()
+              + ", not just "
+              + located.project().key()
+              + ". Remove it from the organisation's administrators instead.");
+    }
+    if (!projectId.equals(membership.projectId())) {
+      // A membership of this organisation but of another project. Same answer as one that does
+      // not exist: an operator should not learn what is in a project by probing ids.
+      throw ServiceException.notFound("That access does not exist.");
+    }
+
+    revoke(actor, located.tenant(), membership, "project.admin.removed", located.project().key());
+  }
+
+  /** Takes away an organisation-wide grant — the only place one can be removed. */
+  @Transactional
+  public void removeOrganisationAdministrator(Actor actor, UUID tenantId, UUID membershipId) {
+    requireSuperAdmin(actor);
+
+    Tenancy.Tenant tenant = tenant(tenantId);
+    Tenancy.Membership membership = membership(tenantId, membershipId);
+
+    if (membership.projectId() != null) {
+      throw ServiceException.validation(
+          "That access is for one project only. Remove it from that project's row.");
+    }
+
+    revoke(actor, tenant, membership, "organisation.admin.removed", tenant.name());
+  }
+
+  // ---------------------------------------------------------------------------
+
+  /**
+   * The grant itself, for both scopes.
+   *
+   * @param project null for organisation-wide.
+   */
+  private AssignedAdministrator grant(
+      Actor actor,
+      Tenancy.Tenant tenant,
+      Projects.Project project,
+      String rawEmail,
+      String rawName) {
+
+    String email = rawEmail == null ? "" : rawEmail.trim().toLowerCase(Locale.ROOT);
+    if (!email.contains("@")) {
+      throw ServiceException.validation("That does not look like an email address.");
+    }
+
+    Tenancy.Role adminRole =
+        access
+            .roleByKey(tenant.id(), "admin")
+            .orElseThrow(
+                () ->
+                    ServiceException.validation(
+                        tenant.name() + " has no admin role, so nobody can be made one."));
+
+    String where = project == null ? tenant.name() : project.key();
+    List<Tenancy.Membership> memberships = access.memberships(tenant.id());
+    // Read once. Inside the predicates below it would be a repository call per membership row.
+    List<UUID> adminRoleIds = adminRoleIds(tenant.id());
+
+    Optional<Tenancy.User> known =
+        access.findUsers(tenant.id()).stream()
+            .filter(user -> user.email().equalsIgnoreCase(email))
+            .findFirst();
+
+    Instant now = Instant.now();
+    UUID userId;
+    String displayName;
+    String acceptUrl = null;
+
+    if (known.isPresent()) {
+      userId = known.get().id();
+      displayName = known.get().displayName();
+
+      // An organisation-wide grant already covers this project, so a second row scoped to it
+      // would grant nothing and show as the same person twice.
+      boolean redundant =
+          memberships.stream()
+              .anyMatch(
+                  m ->
+                      m.userId().equals(userId)
+                          && adminRoleIds.contains(m.roleId())
+                          && (m.projectId() == null
+                              || (project != null && project.id().equals(m.projectId()))));
+      if (redundant) {
+        throw ServiceException.conflict(email + " already administers " + where + ".");
+      }
+    } else {
+      String token = SecureTokens.random();
+      userId = UUID.randomUUID();
+      displayName = rawName == null || rawName.isBlank() ? email : rawName.trim();
+      acceptUrl = properties.appBaseUrl() + "/accept-invite?token=" + token;
+
+      access.insertUser(
+          new Tenancy.UserWithSecret(
+              new Tenancy.User(
+                  userId,
+                  tenant.id(),
+                  email,
+                  displayName,
+                  // Never from here. A platform operator onboards an administrator, not a peer.
+                  false,
+                  Tenancy.UserStatus.INVITED,
+                  null,
+                  now),
+              "",
+              passwords.sha256(token),
+              now.plus(INVITE_VALIDITY)));
+
+      access.insertInvitation(
+          new Tenancy.Invitation(
+              UUID.randomUUID(),
+              tenant.id(),
+              email,
+              displayName,
+              adminRole.id(),
+              project == null ? null : project.id(),
+              actor.who(),
+              now,
+              null));
+    }
+
+    // Widening to organisation-wide makes any project-scoped grant this person holds redundant.
+    // Leaving them in place would show the same name twice on those rows and, worse, leave a
+    // grant behind when the organisation-wide one is later revoked.
+    if (project == null) {
+      memberships.stream()
+          .filter(
+              m ->
+                  m.userId().equals(userId)
+                      && m.projectId() != null
+                      && adminRoleIds.contains(m.roleId()))
+          .forEach(m -> access.deleteMembership(m.id()));
+    }
+
+    access.insertMembership(
+        new Tenancy.Membership(
+            UUID.randomUUID(),
+            tenant.id(),
+            userId,
+            project == null ? null : project.id(),
+            adminRole.id(),
+            now));
+
+    recordPlatform(
+        actor,
+        project == null ? "organisation.admin.added" : "project.admin.added",
+        tenant.id(),
+        "made " + email + " an administrator of " + where);
+
+    // The new administrator's own permissions changed, and so did the administrator list every
+    // other member of the organisation can see.
+    support.bumpEveryProjectIn(tenant.id());
+
+    if (acceptUrl != null) {
+      // After the record exists, and never allowed to fail the request: the account and its
+      // single-use link are already real, and a mail outage should not undo them.
+      try {
+        mailer.sendInvitation(
+            new Mailer.Invitation(email, displayName, tenant.name(), acceptUrl));
+      } catch (RuntimeException failure) {
+        // Swallowed deliberately — the caller surfaces the link so an operator can pass it on.
+      }
+    }
+
+    return new AssignedAdministrator(email, displayName, where, acceptUrl != null, acceptUrl);
+  }
+
+  /** The revoke itself, for both scopes. */
+  private void revoke(
+      Actor actor,
+      Tenancy.Tenant tenant,
+      Tenancy.Membership membership,
+      String action,
+      String where) {
+
+    List<UUID> adminRoleIds = adminRoleIds(tenant.id());
+
+    // An organisation with no administrator cannot be repaired from inside the product — its
+    // own Access screen is the thing that has just become unreachable. Refusing here costs one
+    // extra click when replacing somebody: assign the successor, then remove the predecessor.
+    boolean lastAdministrator =
+        adminRoleIds.contains(membership.roleId())
+            && access.memberships(tenant.id()).stream()
+                .noneMatch(
+                    m -> !m.id().equals(membership.id()) && adminRoleIds.contains(m.roleId()));
+    if (lastAdministrator) {
+      throw ServiceException.validation(
+          "That is the last administrator of "
+              + tenant.name()
+              + ". Assign the replacement first, then remove this one.");
+    }
+
+    String who =
+        access
+            .findUser(tenant.id(), membership.userId())
+            .map(Tenancy.User::email)
+            .orElse("that account");
+
+    access.deleteMembership(membership.id());
+    recordPlatform(actor, action, tenant.id(), "removed " + who + " from " + where);
+    support.bumpEveryProjectIn(tenant.id());
+  }
+
+  /** Which roles count as administering an organisation, read off permissions, not names. */
+  private List<UUID> adminRoleIds(UUID tenantId) {
+    return access.roles(tenantId).stream()
+        .filter(role -> role.permissions().contains(io.mtms.domain.PermissionKey.ADMIN_USERS_MANAGE))
+        .map(Tenancy.Role::id)
+        .toList();
+  }
+
+  /** A project and the organisation that owns it. */
+  private record Located(Tenancy.Tenant tenant, Projects.Project project) {}
+
+  /**
+   * Finds a project from its id alone.
+   *
+   * <p>Every repository method is tenant-scoped on purpose, so there is no "find this project
+   * anywhere" — and there should not be. The platform is the one caller entitled to ask, and it
+   * pays for that by looking through the organisations it is already allowed to see.
+   */
+  private Located locate(UUID projectId) {
+    for (Tenancy.Tenant candidate : access.findAllTenants()) {
+      Optional<Projects.Project> found = projects.findById(candidate.id(), projectId);
+      if (found.isPresent()) {
+        return new Located(candidate, found.get());
+      }
+    }
+    throw ServiceException.notFound("That project does not exist.");
+  }
+
+  private Tenancy.Tenant tenant(UUID tenantId) {
+    return access
+        .findTenant(tenantId)
+        .orElseThrow(() -> ServiceException.notFound("That organisation does not exist."));
+  }
+
+  private Tenancy.Membership membership(UUID tenantId, UUID membershipId) {
+    return access
+        .membership(tenantId, membershipId)
+        .orElseThrow(() -> ServiceException.notFound("That access does not exist."));
   }
 
   // ---------------------------------------------------------------------------
