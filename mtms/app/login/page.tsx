@@ -68,7 +68,7 @@ function SignInCard() {
         <div className="kicker">MTMS · Flow One</div>
         <h2 style={{ margin: '0 0 var(--space-2)' }}>Sign in</h2>
         <div className="lede" style={{ marginBottom: 'var(--space-6)' }}>
-          Mahajan Ticket Management System
+          Project Management
         </div>
 
         <form

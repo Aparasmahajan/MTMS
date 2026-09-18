@@ -31,6 +31,8 @@ export default function PlatformPage() {
   const [projectDrafts, setProjectDrafts] = useState<Record<string, string>>({});
   const [adminDrafts, setAdminDrafts] = useState<Record<string, string>>({});
   const [orgAdminDrafts, setOrgAdminDrafts] = useState<Record<string, string>>({});
+  const [adminNameDrafts, setAdminNameDrafts] = useState<Record<string, string>>({});
+  const [orgAdminNameDrafts, setOrgAdminNameDrafts] = useState<Record<string, string>>({});
 
   // Issued links are written down rather than only announced. The notice bar they used to live
   // in is dismissible and clears on the next action, and the server keeps only a hash of each
@@ -126,16 +128,27 @@ export default function PlatformPage() {
   async function addAdmin(scope: 'projects' | 'organisations', id: string, where: string) {
     const drafts = scope === 'projects' ? adminDrafts : orgAdminDrafts;
     const setDrafts = scope === 'projects' ? setAdminDrafts : setOrgAdminDrafts;
+    const nameDrafts = scope === 'projects' ? adminNameDrafts : orgAdminNameDrafts;
+    const setNameDrafts = scope === 'projects' ? setAdminNameDrafts : setOrgAdminNameDrafts;
 
     const email = (drafts[id] ?? '').trim();
     if (!email) return;
 
+    // Optional, and only used for somebody who has no account yet — an existing person keeps
+    // the name they already have. Left blank, the server falls back to the email address,
+    // which is why people were appearing in the user list as "ritu.agnihotri@azalio.io".
+    const displayName = (nameDrafts[id] ?? '').trim();
+
     const meta = await run(() =>
-      send<PlatformView>(`/api/v1/platform/${scope}/${id}/admins`, 'POST', { email }),
+      send<PlatformView>(`/api/v1/platform/${scope}/${id}/admins`, 'POST', {
+        email,
+        ...(displayName ? { display_name: displayName } : {}),
+      }),
     );
     if (!meta) return;
 
     setDrafts((current) => ({ ...current, [id]: '' }));
+    setNameDrafts((current) => ({ ...current, [id]: '' }));
     if (meta.invited && meta.accept_url) {
       issued.record({ email: String(meta.admin_email), where, url: String(meta.accept_url) });
     }
@@ -498,6 +511,19 @@ Any link sent to them before this stops ` +
                 placeholder="name@company.com"
                 aria-label={`Assign an administrator to every project in ${organisation.name}`}
               />
+              <input
+                className="input"
+                style={{ width: 150, height: 28, fontSize: 12 }}
+                value={orgAdminNameDrafts[organisation.id] ?? ''}
+                onChange={(event) =>
+                  setOrgAdminNameDrafts((current) => ({
+                    ...current,
+                    [organisation.id]: event.target.value,
+                  }))
+                }
+                placeholder="Their name"
+                aria-label={`Name for the new administrator of ${organisation.name}`}
+              />
               <button type="submit" className="btn btn-secondary" disabled={busy}>
                 Assign
               </button>
@@ -673,6 +699,19 @@ Any link sent to them before this stops ` +
                       }
                       placeholder="name@company.com"
                       aria-label={`Assign an administrator to ${project.key}`}
+                    />
+                    <input
+                      className="input"
+                      style={{ width: 150, height: 28, fontSize: 12 }}
+                      value={adminNameDrafts[project.id] ?? ''}
+                      onChange={(event) =>
+                        setAdminNameDrafts((current) => ({
+                          ...current,
+                          [project.id]: event.target.value,
+                        }))
+                      }
+                      placeholder="Their name"
+                      aria-label={`Name for the new administrator of ${project.key}`}
                     />
                     <button type="submit" className="btn btn-secondary" disabled={busy}>
                       Assign
