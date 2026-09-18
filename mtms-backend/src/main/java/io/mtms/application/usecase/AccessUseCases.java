@@ -314,7 +314,18 @@ public class AccessUseCases {
    * sha256 is stored. The link goes out through {@link Mailer}; nothing here can read it back.
    */
   @Transactional
-  public UUID invite(
+  /**
+   * What an invitation produces.
+   *
+   * <p>The link is returned rather than only mailed, and that is not belt-and-braces: there is no
+   * mail transport in this deployment, so an invitation whose link is not shown to the person who
+   * created it is an invitation nobody can act on. The Access screen was already written to
+   * display it; the service simply never sent it back, so inviting somebody from inside the app
+   * appeared to do nothing at all.
+   */
+  public record Invited(UUID invitationId, String email, String displayName, String acceptUrl) {}
+
+  public Invited invite(
       Actor actor, String email, String displayName, UUID roleId, boolean orgWide) {
 
     actor.require(PermissionKey.ADMIN_USERS_MANAGE);
@@ -351,16 +362,21 @@ public class AccessUseCases {
             actor.who(), now, null);
     access.insertInvitation(invitation);
 
+    String acceptUrl = properties.appBaseUrl() + "/accept-invite?token=" + token;
+
     access
         .findTenant(actor.tenantId())
         .ifPresent(
-            tenant ->
+            tenant -> {
+              // Attempted, never allowed to fail the request: the account and its single-use
+              // link already exist by this point, and a mail outage must not undo them.
+              try {
                 mailer.sendInvitation(
-                    new Mailer.Invitation(
-                        email,
-                        displayName,
-                        tenant.name(),
-                        properties.appBaseUrl() + "/accept-invite?token=" + token)));
+                    new Mailer.Invitation(email, displayName, tenant.name(), acceptUrl));
+              } catch (RuntimeException ignored) {
+                // Deliberate. The caller surfaces the link either way.
+              }
+            });
 
     support.emit(
         actor, projectId, Audit.DomainEventName.USER_INVITED, actor.tenantId().toString(),
@@ -370,7 +386,89 @@ public class AccessUseCases {
         actor, actor.projectId(), "ACCESS", displayName + " invited as " + role.name());
     support.bump(actor.projectId());
 
-    return invitation.id();
+    return new Invited(invitation.id(), email, displayName, acceptUrl);
+  }
+
+  /**
+   * What a reset produces: who it was for, and the link to hand them.
+   *
+   * @param resetUrl the single-use link. Shown once and never recoverable — the token is not
+   *     stored, only its sha256 — so the caller has to surface it rather than log it and move on.
+   */
+  public record PasswordReset(String email, String displayName, String resetUrl) {}
+
+  /**
+   * Starts a password reset for somebody else.
+   *
+   * <p>Deliberately does <em>not</em> set a password. An administrator who types a new password
+   * for somebody knows that password, has to transmit it somehow, and it is usually still valid
+   * a year later. Instead this issues a single-use link on the same mechanism as an invitation:
+   * the person follows it, chooses their own password, and the link dies on use. Nobody but them
+   * ever knows it.
+   *
+   * <p>The account is not touched otherwise. Their current password keeps working until the link
+   * is used, which is what you want when the reset was requested by somebody who then finds their
+   * password in a browser's password manager after all.
+   *
+   * <p>A super admin may do this to anybody in their organisation; everyone else needs the same
+   * permission that lets them invite and remove people. Both are deliberate: the ability to reset
+   * a password is the ability to become that person, so it belongs with managing people, not with
+   * configuring a project.
+   */
+  @Transactional
+  public PasswordReset resetPassword(Actor actor, UUID userId) {
+    if (!actor.isSuperAdmin()) {
+      actor.require(PermissionKey.ADMIN_USERS_MANAGE);
+    }
+
+    Tenancy.User user =
+        access
+            .findUser(actor.tenantId(), userId)
+            .orElseThrow(
+                () -> ServiceException.notFound("That person is not in this organisation."));
+
+    if (user.status() == Tenancy.UserStatus.INVITED) {
+      throw ServiceException.validation(
+          user.email()
+              + " has not accepted their invitation yet, so there is no password to reset."
+              + " Reissue the invitation instead.");
+    }
+    if (user.status() == Tenancy.UserStatus.DEACTIVATED) {
+      throw ServiceException.validation(
+          user.email()
+              + " is deactivated. Reactivate the account first — a reset link into a disabled"
+              + " account would be a way back in that nothing on screen accounts for.");
+    }
+
+    String token = SecureTokens.random();
+    Instant now = Instant.now();
+
+    // Replaces any outstanding link, so two live links to one account never exist. Same validity
+    // as an invitation, which is the same promise: a week to act on it.
+    access.setInviteToken(userId, passwords.sha256(token), now.plus(INVITE_VALIDITY));
+
+    String resetUrl = properties.appBaseUrl() + "/accept-invite?token=" + token;
+
+    access
+        .findTenant(actor.tenantId())
+        .ifPresent(
+            tenant -> {
+              // Attempted, never allowed to fail the request: the token is already real and a
+              // mail outage must not undo it. The caller surfaces the link regardless.
+              try {
+                mailer.sendInvitation(
+                    new Mailer.Invitation(
+                        user.email(), user.displayName(), tenant.name(), resetUrl));
+              } catch (RuntimeException ignored) {
+                // Deliberate.
+              }
+            });
+
+    support.recordProjectChange(
+        actor, actor.projectId(), "ACCESS", "password reset link issued for " + user.email());
+    support.bump(actor.projectId());
+
+    return new PasswordReset(user.email(), user.displayName(), resetUrl);
   }
 
   // --- Roles -----------------------------------------------------------------
