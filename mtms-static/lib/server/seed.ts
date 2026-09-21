@@ -12,18 +12,29 @@ import type {
   Invitation,
   Link,
   Membership,
-  Module,
-  ModuleLibraryEntry,
+  SubModule,
+  LibraryEntry,
   Project,
   ProjectConfig,
   Role,
   Run,
-  Subactivity,
+  SubActivity,
   UserWithSecret,
+  Module,
+  Notification,
+  Owner,
+  StepComment,
+  StepDefinition,
+  StepEntry,
+  StepEvent,
+  StepList,
+  StepProgress,
+  Thread,
+  ThreadComment,
 } from '../shared/domain';
 import { DRIFT_ENVIRONMENTS, PROD_ENVIRONMENT } from '../shared/domain';
 import { SEEDED_ROLES } from '../shared/permissions';
-import { STATUS_SETS } from '../shared/vocabulary';
+import { STATUS_SETS, toneOf } from '../shared/vocabulary';
 import { columnDisplayLabel } from '../shared/views';
 import { hashPassword } from './auth';
 import { STORE_VERSION, type StoreData } from './store';
@@ -205,22 +216,22 @@ interface ModuleSeed {
   nodeType: string;
   name: string;
   values: Row;
-  subactivities?: string[];
+  sub_activities?: string[];
 }
 
 const MODULE_SEED: ModuleSeed[] = [
   {
     ref: 'a1', nodeType: 'MRF', name: 'Announcement Loading', values: FULL,
-    subactivities: ['Load announcement set', 'Verify playback on node'],
+    sub_activities: ['Load announcement set', 'Verify playback on node'],
   },
   { ref: 'a2', nodeType: 'DLU', name: 'DLU update', values: FULL },
   {
     ref: 'a3', nodeType: 'SBC', name: '5_ADDITION_DELETION_MODIFICATION_OF_SIP_FILTER_MM_IN_SBC',
-    values: FULL, subactivities: ['Addition', 'Deletion', 'Modification'],
+    values: FULL, sub_activities: ['Addition', 'Deletion', 'Modification'],
   },
   {
     ref: 'a4', nodeType: 'SBC', name: '2_ADDITION/DELETION_IN_EMERGENCY_URI_IN_ASBC',
-    values: FULL_NO_NEMO, subactivities: ['Addition', 'Deletion'],
+    values: FULL_NO_NEMO, sub_activities: ['Addition', 'Deletion'],
   },
   { ref: 'a5', nodeType: 'SBC', name: '37_DRA_LINK_SHIFTING_GUI', values: FULL_NO_NEMO },
   {
@@ -248,13 +259,13 @@ const MODULE_SEED: ModuleSeed[] = [
       oh: C, filecr: B, clicr: B, nemo: NC, html: L, json: L, valid: L, exec: L,
       bst: LD, lookup: LD, email: B, fni: PD, access: PD, ritm: B,
     },
-    subactivities: ['Create TGRP', 'Modify TGRP', 'Delete TGRP'],
+    sub_activities: ['Create TGRP', 'Modify TGRP', 'Delete TGRP'],
   },
   {
     ref: 'a17', nodeType: 'DSR',
     name: '10006_HOST_NAME_REALM_ROUTING_CREATION_MODIFICATION_DELETION_DSR',
     values: { ...NOT_STARTED, oh: NC, nemo: NC },
-    subactivities: ['Creation', 'Modification', 'Deletion'],
+    sub_activities: ['Creation', 'Modification', 'Deletion'],
   },
   {
     ref: 'a18', nodeType: 'DSR', name: '10005_SAPC_CCPC_PREFERENCE_CHANGE_IN_DSR',
@@ -262,15 +273,15 @@ const MODULE_SEED: ModuleSeed[] = [
   },
 ];
 
-const LIBRARY_SEED: Omit<ModuleLibraryEntry, 'id' | 'tenant_id'>[] = [
-  { node_type: 'MRF', name: 'Announcement Loading', version: 'v3', used_in_projects: 2, subactivity_names: ['Load announcement set', 'Verify playback on node'] },
-  { node_type: 'SBC', name: '5_ADDITION_DELETION_MODIFICATION_OF_SIP_FILTER_MM_IN_SBC', version: 'v2', used_in_projects: 1, subactivity_names: ['Addition', 'Deletion', 'Modification'] },
-  { node_type: 'CFX', name: '128_TGRP_CONFIGURATION_IN_CFX', version: 'v4', used_in_projects: 3, subactivity_names: ['Create TGRP', 'Modify TGRP', 'Delete TGRP'] },
-  { node_type: 'DSR', name: '10006_HOST_NAME_REALM_ROUTING_CREATION_MODIFICATION_DELETION_DSR', version: 'v1', used_in_projects: 1, subactivity_names: ['Creation', 'Modification', 'Deletion'] },
-  { node_type: 'CFX', name: '131_CODEC_PROFILE_MODIFICATION_IN_CFX', version: 'v2', used_in_projects: 1, subactivity_names: ['Create', 'Modify'] },
-  { node_type: 'SBC', name: '88_TLS_CERT_RENEWAL_IN_SBC', version: 'v1', used_in_projects: 2, subactivity_names: [] },
-  { node_type: 'DLU', name: 'DLU bulk subscriber move', version: 'v1', used_in_projects: 1, subactivity_names: [] },
-  { node_type: 'EIR', name: '1030_IMEI_BLACKLIST_LOADING_EIR', version: 'v1', used_in_projects: 1, subactivity_names: [] },
+const LIBRARY_SEED: Omit<LibraryEntry, 'id' | 'tenant_id'>[] = [
+  { module_name: 'MRF', name: 'Announcement Loading', version: 'v3', used_in_projects: 2, sub_activity_names: ['Load announcement set', 'Verify playback on node'] },
+  { module_name: 'SBC', name: '5_ADDITION_DELETION_MODIFICATION_OF_SIP_FILTER_MM_IN_SBC', version: 'v2', used_in_projects: 1, sub_activity_names: ['Addition', 'Deletion', 'Modification'] },
+  { module_name: 'CFX', name: '128_TGRP_CONFIGURATION_IN_CFX', version: 'v4', used_in_projects: 3, sub_activity_names: ['Create TGRP', 'Modify TGRP', 'Delete TGRP'] },
+  { module_name: 'DSR', name: '10006_HOST_NAME_REALM_ROUTING_CREATION_MODIFICATION_DELETION_DSR', version: 'v1', used_in_projects: 1, sub_activity_names: ['Creation', 'Modification', 'Deletion'] },
+  { module_name: 'CFX', name: '131_CODEC_PROFILE_MODIFICATION_IN_CFX', version: 'v2', used_in_projects: 1, sub_activity_names: ['Create', 'Modify'] },
+  { module_name: 'SBC', name: '88_TLS_CERT_RENEWAL_IN_SBC', version: 'v1', used_in_projects: 2, sub_activity_names: [] },
+  { module_name: 'DLU', name: 'DLU bulk subscriber move', version: 'v1', used_in_projects: 1, sub_activity_names: [] },
+  { module_name: 'EIR', name: '1030_IMEI_BLACKLIST_LOADING_EIR', version: 'v1', used_in_projects: 1, sub_activity_names: [] },
 ];
 
 /**
@@ -322,6 +333,7 @@ export async function buildSeed(): Promise<StoreData> {
     note: role.note,
     description: role.description,
     is_system: true,
+    hidden: false,
     permissions: [...role.permissions],
   }));
 
@@ -360,6 +372,11 @@ export async function buildSeed(): Promise<StoreData> {
       configured: true,
       archived: false,
       created_at: createdAt,
+      // What CR_AUTOMATION actually calls its three levels. The generic words are the
+      // default; this project overrides them, which is the feature.
+      module_label: 'Node',
+      sub_module_label: 'Activity',
+      sub_activity_label: 'Sub-activity',
     },
     {
       id: id('project:CMDB'),
@@ -370,6 +387,9 @@ export async function buildSeed(): Promise<StoreData> {
       configured: false,
       archived: false,
       created_at: createdAt,
+      module_label: 'Module',
+      sub_module_label: 'Sub-module',
+      sub_activity_label: 'Sub-activity',
     },
     {
       id: id('project:INVENTORY_SYNC'),
@@ -380,13 +400,16 @@ export async function buildSeed(): Promise<StoreData> {
       configured: false,
       archived: false,
       created_at: createdAt,
+      module_label: 'Module',
+      sub_module_label: 'Sub-module',
+      sub_activity_label: 'Sub-activity',
     },
   ];
 
   const project_config: ProjectConfig[] = [
     {
       project_id: PROJECT_ID,
-      node_types: ['MRF', 'DLU', 'SBC', 'EIR', 'CFX', 'DSR'],
+      module_names: ['MRF', 'DLU', 'SBC', 'EIR', 'CFX', 'DSR'],
       stages: [
         { id: id('stage:s1'), label: 'Not started' },
         { id: id('stage:s2'), label: 'Code created' },
@@ -401,7 +424,7 @@ export async function buildSeed(): Promise<StoreData> {
     },
     {
       project_id: id('project:CMDB'),
-      node_types: [],
+      module_names: [],
       stages: [],
       owners: [],
       link_types: [],
@@ -409,7 +432,7 @@ export async function buildSeed(): Promise<StoreData> {
     },
     {
       project_id: id('project:INVENTORY_SYNC'),
-      node_types: [],
+      module_names: [],
       stages: [],
       owners: [],
       link_types: [],
@@ -468,55 +491,66 @@ export async function buildSeed(): Promise<StoreData> {
 
   const columns: DeliverableColumn[] = columnPlan.map((entry) => entry.column);
 
-  const modules: Module[] = [];
-  const subactivities: Subactivity[] = [];
+  const modules: SubModule[] = [];
+  const sub_activities: SubActivity[] = [];
   const cells: Cell[] = [];
 
   const fniDates: Record<string, string> = { a12: '2026-09-10', a16: '2026-09-08' };
-  const owners: Record<string, string> = { a16: 'Paras', a12: 'Sanjay' };
+  const ownerNames: Record<string, string> = { a16: 'Paras', a12: 'Sanjay' };
 
   for (const seed of MODULE_SEED) {
     const moduleId = id(`module:${seed.ref}`);
     modules.push({
       id: moduleId,
       project_id: PROJECT_ID,
-      node_type: seed.nodeType,
+      module_name: seed.nodeType,
       name: seed.name,
       library_entry_id: null,
-      owner: owners[seed.ref] ?? null,
+      owner: ownerNames[seed.ref] ?? null,
       fni_target_date: fniDates[seed.ref] ?? null,
       fni_closed_at: null,
       fni_closed_by: null,
       created_at: createdAt,
     });
 
-    const subs = seed.subactivities ?? [];
+    const subs = seed.sub_activities ?? [];
     subs.forEach((name, index) => {
-      subactivities.push({
+      sub_activities.push({
         id: id(`sub:${seed.ref}:${index}`),
-        module_id: moduleId,
+        sub_module_id: moduleId,
         name,
         order_index: index,
       });
     });
 
-    // A module with subactivities has no row of its own — its cells are a roll-up, so
+    // A module with sub_activities has no row of its own — its cells are a roll-up, so
     // the sheet's row is what each subactivity starts from.
     const targets: (string | null)[] = subs.length
       ? subs.map((_, index) => id(`sub:${seed.ref}:${index}`))
       : [null];
 
     for (const target of targets) {
-      for (const { column, sheetKey, environmentIndex } of columnPlan) {
+      for (const [columnIndex, { column, sheetKey, environmentIndex }] of columnPlan.entries()) {
         const sheetValue = seed.values[sheetKey] ?? '';
+        const status =
+          environmentIndex < 0 ? sheetValue : perEnvironmentStatus(sheetValue, environmentIndex);
+
+        // A finished cell carries when it was finished, and the seed spreads those out along
+        // the column order so the timing panel has something true to report: work moves left
+        // to right, and each column lands a little after the one before it.
+        //
+        // Blank and unfinished cells keep a null timestamp, which is the honest value — they
+        // were never changed, and the timing figures exclude them rather than counting them
+        // as instant.
+        const finished = toneOf(status) === 'done';
+
         cells.push({
-          module_id: moduleId,
-          subactivity_id: target,
+          sub_module_id: moduleId,
+          sub_activity_id: target,
           column_key: column.key,
-          status:
-            environmentIndex < 0 ? sheetValue : perEnvironmentStatus(sheetValue, environmentIndex),
-          changed_by: null,
-          changed_at: null,
+          status,
+          changed_by: finished ? (ownerNames[seed.ref] ?? 'Sanjay') : null,
+          changed_at: finished ? daysAgo(Math.max(1, 30 - columnIndex)) : null,
         });
       }
     }
@@ -538,8 +572,8 @@ export async function buildSeed(): Promise<StoreData> {
   const audit: AuditEntry[] = auditSeed.map((entry, index) => ({
     id: id(`audit:${index}`),
     project_id: PROJECT_ID,
-    module_id: id(`module:${entry.ref}`),
-    subactivity_id: null,
+    sub_module_id: id(`module:${entry.ref}`),
+    sub_activity_id: null,
     scope: 'cell' as const,
     label: columnLabel(entry.column),
     what: entry.what,
@@ -547,9 +581,9 @@ export async function buildSeed(): Promise<StoreData> {
     at: daysAgo(entry.days),
   }));
 
-  const library: ModuleLibraryEntry[] = LIBRARY_SEED.map((entry) => ({
+  const library: LibraryEntry[] = LIBRARY_SEED.map((entry) => ({
     ...entry,
-    id: id(`library:${entry.node_type}:${entry.name}`),
+    id: id(`library:${entry.module_name}:${entry.name}`),
     tenant_id: TENANT_ID,
   }));
 
@@ -584,7 +618,7 @@ export async function buildSeed(): Promise<StoreData> {
   const defects: Defect[] = defectSeed.map((defect, index) => ({
     id: id(`defect:${index}`),
     project_id: PROJECT_ID,
-    module_id: id(`module:${defect.ref}`),
+    sub_module_id: id(`module:${defect.ref}`),
     phase: defect.phase,
     ticket_key: defect.ticket,
     child_req_id: defect.run,
@@ -600,12 +634,12 @@ export async function buildSeed(): Promise<StoreData> {
     { type: 'RITM', label: 'RITM0184221', url: 'https://snow.internal/RITM0184221' },
     { type: 'Repo', label: 'clicr/templates/yaml', url: 'https://git.internal/nei/clicr/tree/main/templates/yaml' },
     { type: 'Run log', label: '751 execution log', url: '/mnt/shared_data/751/LOGS/execution.log' },
-  ].map((link, index) => ({ ...link, id: id(`link:${index}`), module_id: id('module:a16') }));
+  ].map((link, index) => ({ ...link, id: id(`link:${index}`), sub_module_id: id('module:a16') }));
 
   const runs: Run[] = [
     {
       id: id('run:751'),
-      module_id: id('module:a16'),
+      sub_module_id: id('module:a16'),
       child_req_id: '751',
       at: daysAgo(2),
       phases: [
@@ -788,6 +822,395 @@ export async function buildSeed(): Promise<StoreData> {
     },
   ];
 
+
+  // -------------------------------------------------------------------------
+  // Modules as records, checklists, owners, discussions and the inbox
+  // -------------------------------------------------------------------------
+  //
+  // Seeded with real shape rather than one example of each, because the point of the demo is
+  // that somebody can follow a piece of work through: a checklist with a step already ticked
+  // and one blocked, an owner per team, a discussion with a mention, and an inbox row that
+  // came from that mention. One of everything demonstrates the screens; this demonstrates the
+  // product.
+
+  const moduleRecords: Module[] = (project_config[0]?.module_names ?? []).map((name, index) => ({
+    id: id(`module:${name}`),
+    project_id: PROJECT_ID,
+    name,
+    description:
+      name === 'SBC'
+        ? 'Session Border Controller. The busiest node in the programme and the one most CRs touch.'
+        : '',
+    order_index: index,
+    archived_at: null,
+  }));
+
+  /**
+   * The step library — written once, reused on any checklist.
+   *
+   * Each names the role allowed to tick it, which is the whole point: "testing done" ticked by
+   * the person who wrote the code is not evidence that testing was done.
+   */
+  const step_definitions: StepDefinition[] = [
+    {
+      id: id('step:ciq'),
+      project_id: PROJECT_ID,
+      name: 'CIQ received',
+      description: 'The customer implementation questionnaire is in, and complete enough to build from.',
+      role_ids: [id('role:subadmin'), id('role:release')],
+      archived_at: null,
+      created_at: daysAgo(30),
+    },
+    {
+      id: id('step:ut'),
+      project_id: PROJECT_ID,
+      name: 'Unit tested',
+      description: 'The developer has run the change against the unit suite.',
+      role_ids: [id('role:dev')],
+      archived_at: null,
+      created_at: daysAgo(30),
+    },
+    {
+      id: id('step:qa'),
+      project_id: PROJECT_ID,
+      name: 'Testing done by QA',
+      description: 'Independently tested. Not the same person who wrote it.',
+      role_ids: [id('role:qa')],
+      archived_at: null,
+      created_at: daysAgo(30),
+    },
+    {
+      id: id('step:prod'),
+      project_id: PROJECT_ID,
+      name: 'Loaded in prod',
+      description: 'DevOps confirms what is actually running, from the machine rather than the plan.',
+      role_ids: [id('role:devops')],
+      archived_at: null,
+      created_at: daysAgo(30),
+    },
+  ];
+
+  /**
+   * One checklist on the SBC module — its **template** — and two on sub-modules.
+   *
+   * The module-scoped one is what gets copied onto each sub-module created on SBC from now
+   * on, which is the answer to "setting up two hundred of these by hand will not happen".
+   */
+  const sbcModuleId = id('module:SBC');
+  const firstSbc = modules.find((module) => module.module_name === 'SBC');
+  const secondSbc = modules.filter((module) => module.module_name === 'SBC')[1];
+
+  const step_lists: StepList[] = [
+    {
+      id: id('list:sbc-template'),
+      project_id: PROJECT_ID,
+      name: 'Standard SBC checks',
+      scope_type: 'module',
+      scope_id: sbcModuleId,
+      enforce_order: true,
+      archived_at: null,
+      created_at: daysAgo(30),
+    },
+  ];
+
+  const step_entries: StepEntry[] = [];
+  const step_progress: StepProgress[] = [];
+  const step_events: StepEvent[] = [];
+  const step_comments: StepComment[] = [];
+
+  const templateSteps = [id('step:ciq'), id('step:ut'), id('step:qa'), id('step:prod')];
+  templateSteps.forEach((definitionId, index) => {
+    step_entries.push({
+      id: id(`entry:template:${definitionId}`),
+      step_list_id: id('list:sbc-template'),
+      definition_id: definitionId,
+      order_index: index,
+    });
+  });
+
+  if (firstSbc) {
+    step_lists.push({
+      id: id('list:sbc-first'),
+      project_id: PROJECT_ID,
+      name: 'Standard SBC checks',
+      scope_type: 'sub_module',
+      scope_id: firstSbc.id,
+      enforce_order: true,
+      archived_at: null,
+      created_at: daysAgo(24),
+    });
+
+    templateSteps.forEach((definitionId, index) => {
+      const entryId = id(`entry:first:${definitionId}`);
+      step_entries.push({
+        id: entryId,
+        step_list_id: id('list:sbc-first'),
+        definition_id: definitionId,
+        order_index: index,
+      });
+    });
+
+    // CIQ: ticked, un-ticked when the questionnaire came back short, ticked again. Two
+    // durations rather than one long span — which is exactly what the step timing panel is
+    // there to report, and what reading the cells alone would get wrong.
+    const ciqEntry = id('entry:first:' + id('step:ciq'));
+    step_events.push(
+      {
+        id: id('event:ciq:1'),
+        entry_id: ciqEntry,
+        from_state: 'todo',
+        to_state: 'done',
+        is_override: false,
+        reason: null,
+        by: 'Sanjay',
+        at: daysAgo(22),
+      },
+      {
+        id: id('event:ciq:2'),
+        entry_id: ciqEntry,
+        from_state: 'done',
+        to_state: 'todo',
+        is_override: false,
+        reason: null,
+        by: 'Sanjay',
+        at: daysAgo(18),
+      },
+      {
+        id: id('event:ciq:3'),
+        entry_id: ciqEntry,
+        from_state: 'todo',
+        to_state: 'done',
+        is_override: false,
+        reason: null,
+        by: 'Sanjay',
+        at: daysAgo(16),
+      },
+    );
+    step_progress.push({
+      entry_id: ciqEntry,
+      state: 'done',
+      blocked_reason: null,
+      changed_by: 'Sanjay',
+      changed_at: daysAgo(16),
+    });
+
+    // Unit tested: done, and ticked by an admin on behalf of dev. Recorded as an override,
+    // which is the difference between an audit trail and a decoration.
+    const utEntry = id('entry:first:' + id('step:ut'));
+    step_events.push({
+      id: id('event:ut:1'),
+      entry_id: utEntry,
+      from_state: 'todo',
+      to_state: 'done',
+      is_override: true,
+      reason: 'Bhavnish was on leave and confirmed it over chat.',
+      by: 'Anand',
+      at: daysAgo(12),
+    });
+    step_progress.push({
+      entry_id: utEntry,
+      state: 'done',
+      blocked_reason: null,
+      changed_by: 'Anand',
+      changed_at: daysAgo(12),
+    });
+
+    // QA: blocked, with a reason. A blocker is not a defect — it is "waiting on somebody
+    // else" — and the checklist is where that becomes visible rather than staying in a chat.
+    const qaEntry = id('entry:first:' + id('step:qa'));
+    step_events.push({
+      id: id('event:qa:1'),
+      entry_id: qaEntry,
+      from_state: 'todo',
+      to_state: 'blocked',
+      is_override: false,
+      reason: 'Waiting on the vendor to supply a test licence for the SBC lab.',
+      by: 'Vinayak',
+      at: daysAgo(6),
+    });
+    step_progress.push({
+      entry_id: qaEntry,
+      state: 'blocked',
+      blocked_reason: 'Waiting on the vendor to supply a test licence for the SBC lab.',
+      changed_by: 'Vinayak',
+      changed_at: daysAgo(6),
+    });
+
+    step_comments.push({
+      id: id('comment:qa:1'),
+      entry_id: qaEntry,
+      author_user_id: id('user:vinayak@azalio.io'),
+      author: 'Vinayak',
+      body: 'Licence request raised with the vendor on Monday. Chasing daily.',
+      created_at: daysAgo(5),
+    });
+  }
+
+  if (secondSbc) {
+    // A second sub-module with the same checklist and nothing ticked, so the demo shows what
+    // a checklist looks like before anybody has touched it — and so the timing panel has an
+    // outstanding count to report rather than only completions.
+    step_lists.push({
+      id: id('list:sbc-second'),
+      project_id: PROJECT_ID,
+      name: 'Standard SBC checks',
+      scope_type: 'sub_module',
+      scope_id: secondSbc.id,
+      enforce_order: false,
+      archived_at: null,
+      created_at: daysAgo(9),
+    });
+    templateSteps.forEach((definitionId, index) => {
+      step_entries.push({
+        id: id(`entry:second:${definitionId}`),
+        step_list_id: id('list:sbc-second'),
+        definition_id: definitionId,
+        order_index: index,
+      });
+    });
+  }
+
+  /**
+   * Owners: one overall, then one per team.
+   *
+   * Rows rather than columns, which is what makes "several owners, per role, at every level"
+   * possible without a schema change every time a team is added.
+   */
+  const owners: Owner[] = [];
+  if (firstSbc) {
+    owners.push(
+      {
+        id: id('owner:first:overall'),
+        project_id: PROJECT_ID,
+        scope_type: 'sub_module',
+        scope_id: firstSbc.id,
+        user_id: id('user:sanjay@azalio.io'),
+        role_id: null,
+        created_at: daysAgo(24),
+      },
+      {
+        id: id('owner:first:dev'),
+        project_id: PROJECT_ID,
+        scope_type: 'sub_module',
+        scope_id: firstSbc.id,
+        user_id: id('user:bhavnish@azalio.io'),
+        role_id: id('role:dev'),
+        created_at: daysAgo(24),
+      },
+      {
+        id: id('owner:first:qa'),
+        project_id: PROJECT_ID,
+        scope_type: 'sub_module',
+        scope_id: firstSbc.id,
+        user_id: id('user:vinayak@azalio.io'),
+        role_id: id('role:qa'),
+        created_at: daysAgo(24),
+      },
+      {
+        id: id('owner:first:qa2'),
+        project_id: PROJECT_ID,
+        scope_type: 'sub_module',
+        scope_id: firstSbc.id,
+        user_id: id('user:muskan@azalio.io'),
+        role_id: id('role:qa'),
+        created_at: daysAgo(24),
+      },
+      {
+        id: id('owner:first:devops'),
+        project_id: PROJECT_ID,
+        scope_type: 'sub_module',
+        scope_id: firstSbc.id,
+        user_id: id('user:narayana@azalio.io'),
+        role_id: id('role:devops'),
+        created_at: daysAgo(24),
+      },
+    );
+  }
+  owners.push({
+    id: id('owner:sbc:overall'),
+    project_id: PROJECT_ID,
+    scope_type: 'module',
+    scope_id: sbcModuleId,
+    user_id: id('user:anand@azalio.io'),
+    role_id: null,
+    created_at: daysAgo(30),
+  });
+
+  /** A discussion with a mention in it, and the inbox row that mention produced. */
+  const threads: Thread[] = [];
+  const thread_comments: ThreadComment[] = [];
+  const notifications: Notification[] = [];
+
+  if (firstSbc) {
+    threads.push({
+      id: id('thread:licence'),
+      project_id: PROJECT_ID,
+      scope_type: 'sub_module',
+      scope_id: firstSbc.id,
+      title: 'Vendor licence is holding up QA',
+      created_by_user_id: id('user:vinayak@azalio.io'),
+      created_by: 'Vinayak',
+      created_at: daysAgo(5),
+      resolved_at: null,
+    });
+
+    thread_comments.push(
+      {
+        id: id('tc:licence:1'),
+        thread_id: id('thread:licence'),
+        author_user_id: id('user:vinayak@azalio.io'),
+        author: 'Vinayak',
+        body: 'The SBC lab licence expired on Friday. Nothing can be tested until it is renewed.',
+        mentions: [],
+        created_at: daysAgo(5),
+      },
+      {
+        id: id('tc:licence:2'),
+        thread_id: id('thread:licence'),
+        author_user_id: id('user:vinayak@azalio.io'),
+        author: 'Vinayak',
+        body: '@Narayana can you confirm whether preprod is on the same licence?',
+        mentions: [id('user:narayana@azalio.io')],
+        created_at: daysAgo(4),
+      },
+      {
+        id: id('tc:licence:3'),
+        thread_id: id('thread:licence'),
+        author_user_id: id('user:narayana@azalio.io'),
+        author: 'Narayana',
+        body: 'Different licence — preprod is fine. Only the lab is affected.',
+        mentions: [],
+        created_at: daysAgo(4),
+      },
+    );
+
+    // Written in the same transaction as the comment it is about, which is why an inbox is a
+    // complete channel on its own and not a fallback for a webhook nobody configured.
+    notifications.push({
+      id: id('notif:narayana:mention'),
+      tenant_id: TENANT_ID,
+      user_id: id('user:narayana@azalio.io'),
+      kind: 'mention',
+      title: 'Vinayak mentioned you',
+      body: '@Narayana can you confirm whether preprod is on the same licence?',
+      link: `/sub-modules/${firstSbc.id}`,
+      created_at: daysAgo(4),
+      read_at: null,
+    });
+
+    notifications.push({
+      id: id('notif:vinayak:blocked'),
+      tenant_id: TENANT_ID,
+      user_id: id('user:vinayak@azalio.io'),
+      kind: 'step.blocked',
+      title: 'Testing done by QA is blocked',
+      body: 'Waiting on the vendor to supply a test licence for the SBC lab.',
+      link: `/sub-modules/${firstSbc.id}`,
+      created_at: daysAgo(6),
+      read_at: daysAgo(5),
+    });
+  }
+
   return {
     version: STORE_VERSION,
     // The driver owns this from here on; 0 means "never written".
@@ -802,8 +1225,19 @@ export async function buildSeed(): Promise<StoreData> {
     projects,
     project_config,
     columns,
-    modules,
-    subactivities,
+    modules: moduleRecords,
+    step_definitions,
+    step_lists,
+    step_entries,
+    step_progress,
+    step_events,
+    step_comments,
+    owners,
+    threads,
+    thread_comments,
+    notifications,
+    sub_modules: modules,
+    sub_activities,
     cells,
     audit,
     library,

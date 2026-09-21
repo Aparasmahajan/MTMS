@@ -95,7 +95,12 @@ public class SecurityConfiguration {
                         "/api/v1/auth/login",
                         "/api/v1/auth/refresh",
                         "/api/v1/auth/logout",
-                        "/api/v1/auth/accept-invite")
+                        "/api/v1/auth/accept-invite",
+                        // Somebody who has forgotten their password cannot be asked to sign
+                        // in first. It answers identically whatever the address is — see the
+                        // note on the route — so being open costs nothing it does not already
+                        // cost by existing.
+                        "/api/v1/auth/forgot-password")
                     .permitAll()
                     // Liveness and readiness must answer before anything else works.
                     .requestMatchers("/actuator/health/**", "/actuator/info")

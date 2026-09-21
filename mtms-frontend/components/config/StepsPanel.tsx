@@ -177,7 +177,7 @@ function StepLibrary() {
               send<Snapshot>('/api/v1/steps/library', 'POST', {
                 name: name.trim(),
                 description: description.trim(),
-                roleIds,
+                role_ids: roleIds,
               }),
             ).then((result) => {
               if (result) {
@@ -236,7 +236,7 @@ function StepEditor({ step, onDone }: { step: StepDefinitionView; onDone: () => 
           send<Snapshot>(`/api/v1/steps/library/${step.id}`, 'PATCH', {
             name: name.trim(),
             description: description.trim(),
-            roleIds,
+            role_ids: roleIds,
           }),
         ).then((result) => {
           if (result) onDone();
@@ -437,11 +437,11 @@ function Checklists() {
               if (!listName.trim() || !target) return;
               void apply(null, () =>
                 send<Snapshot>('/api/v1/steps/lists', 'POST', {
-                  scopeType: target.scopeType,
-                  scopeId: target.scopeId,
+                  scope_type: target.scopeType,
+                  scope_id: target.scopeId,
                   name: listName.trim(),
-                  enforceOrder,
-                  stepIds: [],
+                  enforce_order: enforceOrder,
+                  step_ids: [],
                 }),
               ).then((result) => {
                 if (result) setListName('');
@@ -518,7 +518,7 @@ function ChecklistEditor({ list, moduleName }: { list: StepListView; moduleName:
     if (next < 0 || next >= ids.length) return;
     [ids[index], ids[next]] = [ids[next] as string, ids[index] as string];
     void apply(null, () =>
-      send<Snapshot>(`/api/v1/steps/lists/${list.id}/order`, 'PATCH', { entryIds: ids }),
+      send<Snapshot>(`/api/v1/steps/lists/${list.id}/order`, 'PATCH', { entry_ids: ids }),
     );
   }
 
@@ -544,7 +544,7 @@ function ChecklistEditor({ list, moduleName }: { list: StepListView; moduleName:
             onChange={(event) =>
               void apply(null, () =>
                 send<Snapshot>(`/api/v1/steps/lists/${list.id}`, 'PATCH', {
-                  enforceOrder: event.target.checked,
+                  enforce_order: event.target.checked,
                 }),
               )
             }
@@ -573,7 +573,7 @@ function ChecklistEditor({ list, moduleName }: { list: StepListView; moduleName:
                 return;
               }
               const meta = await apply(null, () =>
-                send<Snapshot>(`/api/v1/steps/lists/${list.id}/apply`, 'POST', { moduleName }),
+                send<Snapshot>(`/api/v1/steps/lists/${list.id}/apply`, 'POST', { module_name: moduleName }),
               );
               if (meta) {
                 setNotice(
@@ -660,7 +660,7 @@ function ChecklistEditor({ list, moduleName }: { list: StepListView; moduleName:
           event.preventDefault();
           if (!adding) return;
           void apply(null, () =>
-            send<Snapshot>(`/api/v1/steps/lists/${list.id}/entries`, 'POST', { stepId: adding }),
+            send<Snapshot>(`/api/v1/steps/lists/${list.id}/entries`, 'POST', { step_id: adding }),
           ).then((result) => {
             if (result) setAdding('');
           });

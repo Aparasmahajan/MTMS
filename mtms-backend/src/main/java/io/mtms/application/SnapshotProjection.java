@@ -104,7 +104,7 @@ public final class SnapshotProjection {
     data.subModules().forEach(module -> subModuleLabels.put(module.id(), module.label()));
 
     return new Snapshot(
-        me(actor),
+        me(actor, access),
         new Snapshot.Org(data.tenant().id().toString(), data.tenant().name()),
         new Snapshot.ProjectRef(
             data.project().id().toString(),
@@ -120,7 +120,7 @@ public final class SnapshotProjection {
         defectViews(data.defects(), subModuleLabels),
         libraryViews(data.library(), data.subModules()),
         roleViews(access),
-        userViews(access, data.tenant(), allProjects),
+        userViews(actor, access, data.tenant(), allProjects),
         memberViews(actor, access, data.project().id(), allProjects),
         invitationViews(access, data.tenant(), allProjects),
         stepLibraryViews(data, stepContext),
@@ -138,7 +138,8 @@ public final class SnapshotProjection {
             .toList(),
         (int) inbox.stream().filter(Notifications.Notification::isUnread).count(),
         driftView(data, columns, subModules, now),
-        timingViews(data, activeColumns));
+        timingViews(data, activeColumns),
+        stepTimingViews(data));
   }
 
   // ---------------------------------------------------------------------------
@@ -293,14 +294,39 @@ public final class SnapshotProjection {
   // The remaining panes
   // ---------------------------------------------------------------------------
 
-  private Snapshot.Me me(Actor actor) {
+  private Snapshot.Me me(Actor actor, AccessData access) {
     return new Snapshot.Me(
         actor.userId().toString(),
         actor.displayName(),
         actor.email(),
         List.copyOf(actor.roleKeys()),
         actor.permissions().stream().map(PermissionKey::wire).sorted().toList(),
-        actor.isSuperAdmin());
+        actor.isSuperAdmin(),
+        canCreateProjects(actor, access));
+  }
+
+  /**
+   * The same rule {@code ProjectUseCases.requireOrganisationAdministrator} enforces, computed
+   * once here so the screen and the service cannot disagree.
+   *
+   * <p>Only memberships with no project count. A role granted on one project says nothing about
+   * the organisation, and a new project belongs to the organisation rather than to any existing
+   * one.
+   */
+  private boolean canCreateProjects(Actor actor, AccessData access) {
+    if (actor.isSuperAdmin()) {
+      return true;
+    }
+
+    Map<UUID, Tenancy.Role> roleById = new HashMap<>();
+    access.roles().forEach(role -> roleById.put(role.id(), role));
+
+    return access.memberships().stream()
+        .filter(membership -> membership.userId().equals(actor.userId()))
+        .filter(membership -> membership.projectId() == null)
+        .map(membership -> roleById.get(membership.roleId()))
+        .filter(java.util.Objects::nonNull)
+        .anyMatch(role -> role.permissions().contains(PermissionKey.PROJECT_CREATE));
   }
 
   /**
@@ -372,6 +398,36 @@ public final class SnapshotProjection {
                     timing.meanDays(),
                     timing.addedDays(),
                     timing.measured(),
+                    timing.outstanding()))
+        .toList();
+  }
+
+  /**
+   * How long each step takes, from the append-only event history.
+   *
+   * <p>The accurate half of the timing figures. The column ones read the cells, which keep only
+   * their last change; this reads transitions that are never rewritten, so a step ticked,
+   * un-ticked and ticked again reports two durations rather than one long span.
+   *
+   * <p>Only steps that have been finished at least once. A library of thirty steps where two have
+   * ever been ticked should show two rows, not twenty-eight dashes.
+   */
+  private List<Views.StepTimingView> stepTimingViews(ProjectData data) {
+    return Timing.perStep(
+            data.steps().definitions(),
+            data.steps().lists(),
+            data.steps().entries(),
+            data.steps().doneTransitions())
+        .stream()
+        .filter(timing -> timing.completions() > 0)
+        .map(
+            timing ->
+                new Views.StepTimingView(
+                    timing.definitionId().toString(),
+                    timing.name(),
+                    timing.medianDays(),
+                    timing.meanDays(),
+                    timing.completions(),
                     timing.outstanding()))
         .toList();
   }
@@ -655,20 +711,50 @@ public final class SnapshotProjection {
         .toList();
   }
 
+  /**
+   * Everybody in the organisation, including the people who have been removed.
+   *
+   * <p><strong>Removed accounts are listed.</strong> They were filtered out here until 21 Sept,
+   * which had a consequence nobody intended: removing somebody made them vanish from the only
+   * screen that could put them back, so the act was irreversible through the interface that
+   * performed it. They now appear with a {@code removed} status and a Restore button.
+   *
+   * <p>That is the same rule the rest of this application follows for hidden roles and closed
+   * sub-modules — the record stands, the state changes — and it is why nothing here deletes.
+   */
   private List<Views.OrgUserView> userViews(
-      AccessData access, Tenancy.Tenant tenant, List<Projects.Project> projects) {
+      Actor actor, AccessData access, Tenancy.Tenant tenant, List<Projects.Project> projects) {
 
     Map<UUID, Tenancy.Role> roleById = new HashMap<>();
     access.roles().forEach(role -> roleById.put(role.id(), role));
 
     return access.users().stream()
-        .filter(user -> user.status() != Tenancy.UserStatus.DEACTIVATED)
         .map(
             user -> {
               List<Tenancy.Membership> memberships =
                   access.memberships().stream()
                       .filter(membership -> membership.userId().equals(user.id()))
                       .toList();
+
+              Optional<Tenancy.Membership> orgWide =
+                  memberships.stream().filter(m -> m.projectId() == null).findFirst();
+
+              boolean removed = user.status() == Tenancy.UserStatus.DEACTIVATED;
+              boolean self = user.id().equals(actor.userId());
+              boolean protectedSuperAdmin = user.isSuperAdmin() && !actor.isSuperAdmin();
+
+              // The same three refusals the use case enforces, in the same order, so the
+              // disabled control and the error it would have produced never disagree. They are
+              // stated here as well as there because a rule that only exists on the server is a
+              // control that looks available and is not.
+              String lockedReason =
+                  self
+                      ? "You cannot remove yourself from the organisation"
+                      : protectedSuperAdmin
+                          ? user.displayName()
+                              + " is a platform super administrator — only another super"
+                              + " administrator can remove them"
+                          : removed ? user.displayName() + " is already removed" : null;
 
               return new Views.OrgUserView(
                   user.id().toString(),
@@ -686,7 +772,13 @@ public final class SnapshotProjection {
                       .map(membership -> projectName(membership.projectId(), tenant, projects))
                       .reduce((a, b) -> a + ", " + b)
                       .orElse(""),
-                  user.status().name().toLowerCase());
+                  removed ? "removed" : user.status().name().toLowerCase(),
+                  orgWide.map(m -> m.id().toString()).orElse(null),
+                  orgWide.map(m -> m.roleId().toString()).orElse(null),
+                  (int) memberships.stream().filter(m -> m.projectId() != null).count(),
+                  user.isSuperAdmin(),
+                  lockedReason == null,
+                  lockedReason);
             })
         .toList();
   }
@@ -727,7 +819,10 @@ public final class SnapshotProjection {
                   user == null ? "unknown" : user.status().name().toLowerCase(),
                   !orgWide && !self,
                   orgWide
-                      ? "Organisation-wide access — change it on the Access screen"
+                      // Names where, now that there is a where. It used to say "change it on
+                      // the Access screen" on the Access screen, which is the shape of message
+                      // that teaches people the app does not know what it is talking about.
+                      ? "Organisation-wide access — change it in the organisation table below"
                       : self ? "You cannot change your own access" : "");
             })
         .sorted(Comparator.comparing(Views.MemberView::displayName))

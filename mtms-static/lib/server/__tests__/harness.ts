@@ -74,7 +74,7 @@ export async function projectId(key = 'CR_AUTOMATION'): Promise<string> {
  *  does not silently point a test at a different module. */
 export async function moduleId(name: string): Promise<string> {
   const store = await getStore();
-  const module = store.modules.find((candidate) => candidate.name === name);
+  const module = store.sub_modules.find((candidate) => candidate.name === name);
   if (!module) throw new Error(`No seeded module ${name}`);
   return module.id;
 }
@@ -95,7 +95,7 @@ export async function libraryId(name: string): Promise<string> {
 
 export async function cellsOf(module: string): Promise<StoreData['cells']> {
   const store = await getStore();
-  return store.cells.filter((cell) => cell.module_id === module);
+  return store.cells.filter((cell) => cell.sub_module_id === module);
 }
 
 // Names used across several tests. `FULL` is complete in the sheet; `NOT_STARTED`

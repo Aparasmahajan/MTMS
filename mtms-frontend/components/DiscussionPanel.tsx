@@ -183,9 +183,10 @@ export function DiscussionPanel({
             event.preventDefault();
             if (!topic.trim()) return;
             void apply(null, () =>
+              // snake_case — see OwnersPanel. A camelCase key does not bind and arrives null.
               send<Snapshot>('/api/v1/discussions/threads', 'POST', {
-                scopeType,
-                scopeId,
+                scope_type: scopeType,
+                scope_id: scopeId,
                 topic: topic.trim(),
                 body: opening.trim(),
               }),

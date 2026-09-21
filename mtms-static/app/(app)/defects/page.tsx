@@ -28,7 +28,7 @@ const STATUS_STYLE: Record<string, { background: string; color: string }> = {
 
 export default function DefectsPage() {
   const { snapshot, apply, can, reasonFor, setNotice } = useTracker();
-  const { modules, config, defects } = snapshot;
+  const { sub_modules: modules, config, defects } = snapshot;
 
   const [phaseFilter, setPhaseFilter] = useState<'All' | DefectPhase>('All');
   const [moduleId, setModuleId] = useState(modules[0]?.id ?? '');
@@ -56,7 +56,7 @@ export default function DefectsPage() {
     }
     const result = await apply(null, () =>
       send<Snapshot>('/api/v1/defects', 'POST', {
-        module_id: moduleId,
+        sub_module_id: moduleId,
         phase,
         ticket_key: ticketKey,
         child_req_id: childReqId,
@@ -171,11 +171,11 @@ export default function DefectsPage() {
             style={{ width: 300 }}
             value={moduleId}
             onChange={(event) => setModuleId(event.target.value)}
-            aria-label="Module"
+            aria-label="SubModule"
           >
             {modules.map((module) => (
               <option key={module.id} value={module.id}>
-                {module.node_type} · {module.name}
+                {module.module_name} · {module.name}
               </option>
             ))}
           </select>
@@ -251,7 +251,7 @@ export default function DefectsPage() {
             <tr>
               <th>Severity</th>
               <th>Phase</th>
-              <th>Module</th>
+              <th>SubModule</th>
               <th>Ticket</th>
               <th>Run</th>
               <th>What happened</th>
@@ -281,7 +281,7 @@ export default function DefectsPage() {
                 </td>
                 <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{defect.phase}</td>
                 <td style={{ fontSize: 12, wordBreak: 'break-word', maxWidth: 240 }}>
-                  {defect.module_label}
+                  {defect.sub_module_label}
                 </td>
                 <td style={{ whiteSpace: 'nowrap' }}>
                   {defect.ticket_url ? (

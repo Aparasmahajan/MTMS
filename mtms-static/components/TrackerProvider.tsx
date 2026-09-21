@@ -16,7 +16,8 @@ import { IS_DEMO } from '@/lib/demo/config';
 import { adoptSnapshot, initDemoRuntime, resetDemo, switchDemoRole } from '@/lib/demo/runtime';
 import { loadSnapshot, subscribeToRemoteChanges } from '@/lib/demo/persistence';
 import { hasPermission, permissionDeniedReason, type PermissionKey } from '@/lib/shared/permissions';
-import type { ModuleView, Snapshot } from '@/lib/shared/views';
+import type { SubModuleView, Snapshot } from '@/lib/shared/views';
+import { wordingOf, type Wording } from '@/lib/shared/wording';
 
 /**
  * One snapshot of the project, held client-side, with optimistic mutation.
@@ -41,15 +42,23 @@ interface TrackerContextValue {
     call: () => Promise<{ data: Snapshot; meta: Record<string, unknown> }>,
   ) => Promise<Record<string, unknown> | null>;
   can: (key: PermissionKey) => boolean;
+  /**
+   * What this project calls its three levels, with plurals and lowercase forms worked out.
+   *
+   * Every screen reads this instead of writing "sub-module" into a string. Derived from the
+   * snapshot, so changing the wording on the Configure screen re-renders the whole app in the
+   * new words without a reload.
+   */
+  words: Wording;
   /** The message a disabled control shows. Never let one fail silently. */
   reasonFor: (key: PermissionKey) => string;
-  moduleById: (id: string) => ModuleView | undefined;
+  subModuleById: (id: string) => SubModuleView | undefined;
   /**
    * Where a module's detail page lives. In the static demo only the seeded modules have
    * prerendered HTML, so one created during the tour falls back to the matrix rather
    * than to a 404 on the client's static host.
    */
-  moduleHref: (id: string) => string;
+  subModuleHref: (id: string) => string;
   signOut: () => Promise<void>;
   /** True in the static client demo: no server, nothing persists. */
   isDemo: boolean;
@@ -112,8 +121,8 @@ export function TrackerProvider({ initial, children }: { initial: Snapshot; chil
     });
   }, []);
 
-  /** Which module pages exist as static HTML — see `moduleHref`. */
-  const prerendered = useRef<Set<string>>(new Set(initial.modules.map((module) => module.id)));
+  /** Which module pages exist as static HTML — see `subModuleHref`. */
+  const prerendered = useRef<Set<string>>(new Set(initial.sub_modules.map((module) => module.id)));
 
   const apply = useCallback<TrackerContextValue['apply']>((optimistic, call) => {
     const run = queue.current.then(async () => {
@@ -181,9 +190,10 @@ export function TrackerProvider({ initial, children }: { initial: Snapshot; chil
       setNotice,
       apply,
       can: (key) => hasPermission(permissions, key),
+      words: wordingOf(snapshot.project),
       reasonFor: (key) => permissionDeniedReason(key),
-      moduleById: (id) => snapshot.modules.find((module) => module.id === id),
-      moduleHref: (id) =>
+      subModuleById: (id) => snapshot.sub_modules.find((module) => module.id === id),
+      subModuleHref: (id) =>
         !IS_DEMO || prerendered.current.has(id) ? `/modules/${id}` : '/matrix',
       signOut,
       isDemo: IS_DEMO,

@@ -79,7 +79,7 @@ export interface PlatformProjectView {
   key: string;
   name: string;
   configured: boolean;
-  module_count: number;
+  sub_module_count: number;
   /**
    * Everyone who can administer this project. A project with none is a project nobody can
    * configure, so the console shows the count rather than leaving it to be discovered.
@@ -97,7 +97,7 @@ export interface OrganisationView {
   /** Projects that have at least one deliverable column — the rest are shells. */
   configured_project_count: number;
   user_count: number;
-  module_count: number;
+  sub_module_count: number;
   /** Who can administer it, so an organisation is never left without an owner. */
   admins: { display_name: string; email: string; status: string }[];
   projects: PlatformProjectView[];
@@ -133,7 +133,7 @@ export function buildPlatformView(store: StoreData, actor: Actor): PlatformView 
         project_count: projects.length,
         configured_project_count: projects.filter((project) => project.configured).length,
         user_count: users.length,
-        module_count: store.modules.filter((module) =>
+        sub_module_count: store.sub_modules.filter((module) =>
           projects.some((project) => project.id === module.project_id),
         ).length,
         admins: users
@@ -152,7 +152,7 @@ export function buildPlatformView(store: StoreData, actor: Actor): PlatformView 
           key: project.key,
           name: project.name,
           configured: project.configured,
-          module_count: store.modules.filter((module) => module.project_id === project.id).length,
+          sub_module_count: store.sub_modules.filter((module) => module.project_id === project.id).length,
           admins: store.memberships
             .filter(
               (membership) =>
@@ -253,6 +253,7 @@ export async function createOrganisation(
       note: role.note,
       description: role.description,
       is_system: true,
+      hidden: false,
       permissions: [...role.permissions],
     }));
     store.roles.push(...roles);
@@ -355,11 +356,14 @@ export async function createOrganisationProject(
       configured: false,
       archived: false,
       created_at: nowIso(),
+      module_label: 'Module',
+      sub_module_label: 'Sub-module',
+      sub_activity_label: 'Sub-activity',
     });
 
     store.project_config.push({
       project_id: projectId,
-      node_types: [],
+      module_names: [],
       stages: [],
       owners: [],
       link_types: [],
