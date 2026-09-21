@@ -112,7 +112,7 @@ public final class SnapshotProjection {
             data.vocabulary().module(),
             data.vocabulary().subModule(),
             data.vocabulary().subActivity()),
-        projectSummaries(allProjects, subModuleCounts),
+        projectSummaries(actor, access, allProjects, subModuleCounts),
         configView(data, access, columns, subModules, actor.userId()),
         subModules,
         auditViews(data.audit(), subModuleLabels),
@@ -301,10 +301,35 @@ public final class SnapshotProjection {
         actor.isSuperAdmin());
   }
 
+  /**
+   * The project switcher.
+   *
+   * <p>Only the projects this person can actually open. Listing the organisation's whole set was
+   * the other half of the landing bug: somebody administering one project saw every other one in
+   * the switcher, and picking any of them bounced them straight back — the names of projects they
+   * have nothing to do with, offered as if they were theirs.
+   *
+   * <p>A membership with no project is organisation-wide and reaches all of them, which is what
+   * keeps an org-wide admin seeing the full list. A super admin likewise: they are above tenancy
+   * and the console they work in depends on seeing everything.
+   */
   private List<Snapshot.ProjectSummary> projectSummaries(
-      List<Projects.Project> projects, Map<UUID, Integer> subModuleCounts) {
+      Actor actor,
+      AccessData access,
+      List<Projects.Project> projects,
+      Map<UUID, Integer> subModuleCounts) {
+
+    Set<UUID> reachable =
+        access.memberships().stream()
+            .filter(membership -> membership.userId().equals(actor.userId()))
+            .map(Tenancy.Membership::projectId)
+            .collect(java.util.stream.Collectors.toSet());
+
+    boolean everything = actor.isSuperAdmin() || reachable.contains(null);
+
     return projects.stream()
         .filter(project -> !project.archived())
+        .filter(project -> everything || reachable.contains(project.id()))
         .map(
             project ->
                 new Snapshot.ProjectSummary(

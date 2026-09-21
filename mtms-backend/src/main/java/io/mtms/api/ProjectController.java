@@ -8,6 +8,7 @@ import io.mtms.application.usecase.ProjectUseCases;
 import io.mtms.domain.view.Snapshot;
 import jakarta.validation.constraints.NotBlank;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -81,15 +82,55 @@ public class ProjectController {
       @NotBlank String email, @NotBlank String displayName, @NotBlank String roleId,
       Boolean orgWide) {}
 
+  /**
+   * Invites somebody into this organisation.
+   *
+   * <p>The link comes back in {@code meta}, because there is no mail transport here and an
+   * invitation whose link nobody can see is an invitation nobody can accept. The Access screen
+   * was already written to display it and had simply never been given it.
+   */
   @PostMapping("/invitations")
   public ApiResponse.Success<Snapshot> invite(@RequestBody InviteRequest request, Actor actor) {
-    access.invite(
-        actor,
-        request.email(),
-        request.displayName(),
-        UUID.fromString(request.roleId()),
-        request.orgWide() != null && request.orgWide());
-    return ApiResponse.ok(snapshots.of(actor));
+    AccessUseCases.Invited invited =
+        access.invite(
+            actor,
+            request.email(),
+            request.displayName(),
+            UUID.fromString(request.roleId()),
+            request.orgWide() != null && request.orgWide());
+
+    // Map keys, written as the frontend reads them — Jackson's SNAKE_CASE renames record
+    // properties and leaves Map keys exactly as spelled here.
+    return ApiResponse.ok(
+        snapshots.of(actor),
+        Map.of(
+            "email", invited.email(),
+            "display_name", invited.displayName(),
+            "accept_url", invited.acceptUrl(),
+            "delivery_state", "not_sent",
+            "delivery_detail",
+                "There is no mail transport configured, so nothing was sent."));
+  }
+
+  /**
+   * Issues a password reset link for somebody else.
+   *
+   * <p>The link comes back in {@code meta} and is the only time it exists in readable form —
+   * there is no mail transport yet, so an operator hands it over. Map keys written as the
+   * frontend reads them.
+   */
+  @PostMapping("/users/{id}/reset-password")
+  public ApiResponse.Success<Snapshot> resetPassword(
+      @PathVariable("id") UUID userId, Actor actor) {
+
+    AccessUseCases.PasswordReset reset = access.resetPassword(actor, userId);
+
+    return ApiResponse.ok(
+        snapshots.of(actor),
+        Map.of(
+            "email", reset.email(),
+            "display_name", reset.displayName(),
+            "reset_url", reset.resetUrl()));
   }
 
   public record GrantsRequest(List<String> permissions) {}

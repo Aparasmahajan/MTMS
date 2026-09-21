@@ -869,6 +869,80 @@ public address. The screen then stuck the site address on the front of it a seco
 
 **Fixed by** using the server's address as-is.
 
+### Names and passwords for the people you onboard · **done 18 Sept**
+
+Three things, all in the same area, all noticed from the user table filling up with rows
+whose name was just their email address.
+
+**A name can now be typed when assigning an administrator.** The server had always accepted
+one; the console simply never asked for it, so every person onboarded that way was recorded
+under their email. Both assign boxes — the per-project one and the organisation-wide one —
+now have a "Their name" field next to the address. It is optional and only used for somebody
+who has no account yet; an existing person keeps the name they already have.
+
+Existing rows are not repaired by this. `ritu.agnihotri@azalio.io`, `divyam.dua@azalio.io`,
+`sanjay.gopal@azalio.io` and `anand.nautiyal@azalio.io` still carry an address as their name
+and need editing — there is no screen for that yet, which is worth adding.
+
+**Password reset.** Any administrator, and any super admin, can now reset somebody's
+password from the Access screen: a Reset button on each active person's row.
+
+It does **not** set a password. Nobody, including an administrator, ever learns anybody
+else's. It issues a single-use link; the person follows it and chooses their own. That has
+three consequences worth knowing:
+
+- Their existing password **keeps working** until the link is used. So a reset started by
+  mistake costs nothing.
+- Using the link kills it, and kills any earlier one. Two live links into one account would
+  be a second way in that nothing is tracking.
+- The link is readable exactly once, on the screen that issues it. The server keeps only a
+  one-way hash. Copy it before dismissing the notice.
+
+An account that has not accepted its invitation yet is refused, and told to reissue the
+invitation instead — there is no password there to reset.
+
+**Bug: inviting somebody from inside the app appeared to do nothing.** The Access screen was
+written to show the invitation link; the service never sent it back, so the form did not even
+clear. The invitation was real and the person could never be told. Now the link comes back
+and is displayed.
+
+### Bug: a new project's admin could not sign in at all · **fixed 18 Sept**
+
+Make somebody the administrator of a **newly created** project and they could not get into
+the application. Make somebody the administrator of an **already set-up** project and they
+were fine. That difference is what made it look like a set-up problem. It was not.
+
+**Why.** After signing in, the app had to decide which project to open first, and it picked
+*the organisation's first set-up project* — without checking whether that person was on it.
+So a new administrator of BILLING was put into CR_AUTOMATION, a project they had never been
+added to, and the very first request was refused. The refusal read "You do not have view
+project (project.view) in this project", naming a project they had never heard of.
+
+Two things had to line up for it to happen, which is why it looked random:
+
+- Their own project was new, so it had no columns yet, so the "first set-up project" rule
+  skipped straight past it.
+- If instead they were added to the already-configured project, that same rule happened to
+  land on the right one, and everything worked.
+
+**Fixed by** choosing the landing project from the projects that person can actually open,
+preferring a set-up one but falling back to their own new one. A super admin still lands
+anywhere, because they are deliberately above all of this.
+
+Two related things fixed at the same time:
+
+- **The project switcher listed every project in the organisation**, including ones the
+  reader could not open. Picking one bounced them back. It now lists only theirs. An
+  organisation-wide administrator still sees all of them, because they genuinely can open
+  all of them.
+- **A stale "last project" cookie no longer locks anybody out.** If it points at a project
+  they have since been removed from, they quietly land on one of theirs instead of being
+  refused entry.
+
+And the refusal message, for the case where somebody genuinely has no project yet, is now
+"You have not been added to a project yet. Ask an administrator to add you to one." rather
+than a permission key.
+
 ### Changing who administers a project · **done 15 Sept**
 
 The console could only ever *add* an administrator, and even that was broken against the

@@ -9,7 +9,7 @@ things you copy.
 | `bootstrap.sql` | **The first way in.** Run once against an empty schema, before anything else |
 | `api.env.example` | The API's environment. Copy to `api.env` beside the JAR, or `/etc/mtms/api.env` |
 | `web.env.example` | The web app's environment. Short, because almost everything is compiled in |
-| `systemd/mtms-api.service` | Runs the JAR, restarts it on failure, stops it gracefully |
+| `systemd/mtms-api.service` | Runs the JAR, restarts it on failure, stops it gracefully. An alternative to pm2, which is what HRMSPRODUCTION actually uses — see `ecosystem.config.js` at the root. These target a `/opt/mtms` install owned by a dedicated `mtms` account, so a home-directory layout needs the paths changed and `ProtectHome=true` removed |
 | `systemd/mtms-web.service` | Same for the Next.js server |
 | `nginx/mtms.conf` | HTTPS in front, forwarding to port 6010 only |
 

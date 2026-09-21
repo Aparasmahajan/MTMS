@@ -123,6 +123,8 @@ deploy() {
   scp "$BACKEND/target/$JAR_NAME" "$MTMS_HOST:$API_DIR/"
   scp "$FRONTEND/mtms-frontend.tar.gz" "$MTMS_HOST:$WEB_DIR/"
   scp "$ROOT/scripts/release.sh" "$MTMS_HOST:$REMOTE_DIR/"
+  scp "$ROOT/scripts/install-pm2.sh" "$MTMS_HOST:$REMOTE_DIR/"
+  scp "$ROOT/ecosystem.config.js" "$MTMS_HOST:$REMOTE_DIR/"
 
   # Checksums, before anything is restarted.
   #
@@ -159,6 +161,31 @@ restart() {
   [ -f "$api_dir/$JAR_NAME" ] || die "no $JAR_NAME in $api_dir. Set MTMS_API_DIR if it lives elsewhere."
   [ -f "$env_path" ] || die "no $ENV_FILE in $api_dir — see deploy/api.env.example for what goes in it."
   [ -f "$web_dir/mtms-frontend.tar.gz" ] || die "no mtms-frontend.tar.gz in $web_dir."
+
+  # Under pm2, if it is managing these apps. pm2 is what keeps the pair alive across a crash
+  # and an OOM kill — a nohup process survives neither, which is what produced the 502s that
+  # appeared a day or two after every release. See scripts/install-pm2.sh; this branch is
+  # skipped entirely on a box where pm2 does not know about them.
+  if command -v pm2 > /dev/null && pm2 describe mtms-web > /dev/null 2>&1; then
+    say "Stopping (pm2)"
+    pm2 stop mtms-web mtms-api
+
+    # Unpack while they are stopped, not while they are running: server.js resolves its chunks
+    # from this directory at request time, so replacing it underneath a live process serves
+    # 404s for every asset until the next restart.
+    say "Unpacking the web app"
+    cd "$web_dir"
+    rm -rf dist-frontend
+    tar -xzf mtms-frontend.tar.gz
+
+    say "Starting (pm2)"
+    pm2 restart mtms-api mtms-web --update-env
+    pm2 save
+
+    sleep 12
+    status
+    return
+  fi
 
   say "Stopping"
   # -u $USER, so this cannot reach another account's processes on a shared box.
@@ -213,7 +240,11 @@ status() {
   if [ "$api" != "200" ] || [ "$web" != "200" ]; then
     # Naming the log is the whole value of failing here rather than printing two numbers: the
     # answer is always in the last Caused by: of one of these two files.
-    printf 'Not healthy. The reason is in the last "Caused by:" of api.log or in web.log.\n\n' >&2
+    if command -v pm2 > /dev/null && pm2 describe mtms-api > /dev/null 2>&1; then
+      printf 'Not healthy. The reason is in the last "Caused by:":\n  pm2 logs mtms-api --lines 50 --nostream\n  pm2 logs mtms-web --lines 50 --nostream\n\n' >&2
+    else
+      printf 'Not healthy. The reason is in the last "Caused by:" of api.log or in web.log.\n\n' >&2
+    fi
     return 1
   fi
   say "Both up"
