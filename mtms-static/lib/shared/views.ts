@@ -24,18 +24,25 @@ import { z } from 'zod';
 export interface CellView {
   column_key: string;
   status: string;
-  /** True when the value is derived from subactivities and must not be edited directly. */
+  /** True when the value is derived from sub-activities and must not be edited directly. */
   rolled_up: boolean;
-  subactivity_count: number;
+  sub_activity_count: number;
   changed_by: string | null;
   changed_at: string | null;
 }
 
-export interface SubactivityView {
+export interface SubActivityView {
   id: string;
   name: string;
   readiness: number;
   cells: CellView[];
+  /**
+   * Checklists attached to this sub-activity specifically. A list normally sits on the
+   * activity above; these are the ones an admin pushed down because this piece differs.
+   */
+  step_lists: StepListView[];
+  owners: OwnerGroupView[];
+  threads: ThreadView[];
 }
 
 export interface LinkView {
@@ -51,9 +58,9 @@ export interface RunView {
   artifacts: z.infer<typeof Artifact>[];
 }
 
-export interface ModuleView {
+export interface SubModuleView {
   id: string;
-  node_type: string;
+  module_name: string;
   name: string;
   owner: string | null;
   fni_target_date: string | null;
@@ -65,8 +72,21 @@ export interface ModuleView {
   missing: string[];
   blank_count: number;
   cells: CellView[];
-  subactivities: SubactivityView[];
+  sub_activities: SubActivityView[];
   links: LinkView[];
+  /**
+   * The checklists attached to this sub-module. Deliberately not folded into the matrix: the
+   * matrix is the common set of deliverables every sub-module shares, a checklist is the
+   * specific process one use case follows, and neither replaces the other.
+   */
+  step_lists: StepListView[];
+  /**
+   * One overall owner plus one per team. Separate from `owner` above, which is the single
+   * typed-in name the matrix still shows: that one is a string and can never be sent anything,
+   * these are real accounts.
+   */
+  owners: OwnerGroupView[];
+  threads: ThreadView[];
   last_run: RunView | null;
 }
 
@@ -74,9 +94,9 @@ export interface AuditView {
   id: string;
   scope: AuditScope;
   /** null for a project-level change, such as a column being added. */
-  module_id: string | null;
+  sub_module_id: string | null;
   /** "CFX · 128_TGRP…", or "—" when the change was not about one module. */
-  module_label: string;
+  sub_module_label: string;
   /** Column label for a cell change; otherwise MODULE, CONFIG or ACCESS. */
   label: string;
   what: string;
@@ -86,8 +106,8 @@ export interface AuditView {
 
 export interface DefectView {
   id: string;
-  module_id: string;
-  module_label: string;
+  sub_module_id: string;
+  sub_module_label: string;
   phase: DefectPhase;
   ticket_key: string;
   ticket_url: string;
@@ -102,10 +122,10 @@ export interface DefectView {
 
 export interface LibraryView {
   id: string;
-  node_type: string;
+  module_name: string;
   name: string;
   version: string;
-  subactivity_count: number;
+  sub_activity_count: number;
   used_in_projects: number;
   in_this_project: boolean;
 }
@@ -116,6 +136,16 @@ export interface RoleView {
   name: string;
   note: string;
   permissions: PermissionKey[];
+  /** Shipped with the organisation. Marks where it came from; its permissions are still editable. */
+  is_system: boolean;
+  /**
+   * Not offered in any picker — owner teams, "who may tick this step", the member role selector.
+   * Still sent, because rows already pointing at it have to render with a name, and an admin
+   * needs something to click to bring it back. **Every picker must filter on this.**
+   */
+  hidden: boolean;
+  /** How many people hold it. Hiding a role somebody holds is refused; the screen says so first. */
+  member_count: number;
 }
 
 export interface OrgUserView {
@@ -154,6 +184,169 @@ export interface InvitationView {
   role_name: string;
   scope: string;
   state: string;
+}
+
+
+// ---------------------------------------------------------------------------
+// Steps — the reusable checklist
+// ---------------------------------------------------------------------------
+
+/**
+ * One step in the project's library, written once and used on any number of checklists.
+ *
+ * `role_names` empty means the step names no role that still exists — nobody can tick it,
+ * and an admin has to pick one. That is the safe direction: a step whose last allowed role
+ * was deleted quietly becoming one anybody may tick is the opposite of what gating meant.
+ */
+export interface StepDefinitionView {
+  id: string;
+  name: string;
+  description: string;
+  role_ids: string[];
+  role_names: string[];
+  /** How many checklists currently contain it, so retiring one is an informed decision. */
+  used_in: number;
+}
+
+export interface StepEventView {
+  id: string;
+  from: string;
+  to: string;
+  /** "not done → done", already worded by the server. */
+  what: string;
+  is_override: boolean;
+  reason: string | null;
+  by: string;
+  at: string;
+}
+
+export interface StepCommentView {
+  id: string;
+  author: string;
+  body: string;
+  created_at: string;
+  /** Whether the reader wrote it. Removal is still checked server-side. */
+  mine: boolean;
+}
+
+/**
+ * One step on one checklist.
+ *
+ * `can_tick` and `locked_reason` are answers, not raw facts — the server has already applied
+ * the order rule and the role rule and says whether this reader may act. Nothing here
+ * recomputes them. A client that guessed would eventually guess differently from the server,
+ * and produce the worst failure a permission system has: a control that looks available and
+ * then refuses.
+ */
+export interface StepEntryView {
+  id: string;
+  definition_id: string;
+  name: string;
+  description: string;
+  state: 'todo' | 'done' | 'blocked';
+  blocked_reason: string | null;
+  changed_by: string | null;
+  changed_at: string | null;
+  allowed_roles: string[];
+  can_tick: boolean;
+  /** True when this reader can only act by overriding the role gate — warn before they do. */
+  is_override_for_me: boolean;
+  locked_reason: string;
+  history: StepEventView[];
+  comments: StepCommentView[];
+}
+
+export interface StepListView {
+  id: string;
+  name: string;
+  /** Whether the order is a real sequence. The server refuses an out-of-turn tick. */
+  enforce_order: boolean;
+  readiness: number;
+  done_count: number;
+  blocked_count: number;
+  entries: StepEntryView[];
+}
+
+
+// ---------------------------------------------------------------------------
+// Owners and discussions
+// ---------------------------------------------------------------------------
+
+/** One person owning one thing, in one capacity. */
+/**
+ * One message in the reader's inbox.
+ *
+ * `link` is a path, not a URL: the service does not know its own public address, and the client
+ * reading this is already at the right origin.
+ */
+export interface NotificationView {
+  id: string;
+  kind: 'mention' | 'step.blocked' | 'step.ready';
+  title: string;
+  body: string;
+  link: string;
+  at: string;
+  unread: boolean;
+}
+
+export interface OwnerView {
+  /** The row, which is what gets removed — not the user id: one person can own for two teams. */
+  owner_id: string;
+  user_id: string;
+  display_name: string;
+  email: string;
+}
+
+/**
+ * The owners of one thing, grouped by team.
+ *
+ * Only groups with somebody in them are sent, which is what makes "a project with no SME team
+ * simply does not show an SME row" true without anything deciding it. `role_id` is null for the
+ * overall owner — the one name to ask when you do not know whose problem it is.
+ */
+export interface OwnerGroupView {
+  role_id: string | null;
+  label: string;
+  people: OwnerView[];
+}
+
+export interface ThreadCommentView {
+  id: string;
+  author: string;
+  body: string;
+  created_at: string;
+  mine: boolean;
+  /** The reader was named in it. Until there is a mail transport, showing it is all we can do. */
+  mentions_me: boolean;
+}
+
+export interface ThreadView {
+  id: string;
+  topic: string;
+  opened_by: string;
+  opened_at: string;
+  mine: boolean;
+  mentions_me: boolean;
+  comments: ThreadCommentView[];
+}
+
+/**
+ * A module, with the counts the landing page and the module screen read.
+ *
+ * It has an id now, which is what lets a checklist, a set of owners and a discussion attach to
+ * it — none of which could attach to the name it used to be.
+ */
+export interface ModuleView {
+  id: string;
+  name: string;
+  description: string;
+  order_index: number;
+  sub_module_count: number;
+  /** Sub-modules with every counted deliverable done — the matrix's own definition of finished. */
+  in_prod: number;
+  readiness: number;
+  owners: OwnerGroupView[];
+  threads: ThreadView[];
 }
 
 export interface DriftRowView {
@@ -231,7 +424,9 @@ export interface ColumnView extends DeliverableColumn {
 
 export interface ConfigView {
   columns: ColumnView[];
-  node_types: string[];
+  /** The modules as records, with ids. `module_names` stays for everything that only wants names. */
+  modules: ModuleView[];
+  module_names: string[];
   stages: { id: string; label: string }[];
   owners: string[];
   link_types: string[];
@@ -282,10 +477,22 @@ export interface Snapshot {
     is_super_admin: boolean;
   };
   org: { id: string; name: string };
-  project: { id: string; key: string; name: string };
-  projects: { id: string; key: string; name: string; configured: boolean; module_count: number }[];
+  /**
+   * `module_label`, `sub_module_label` and `sub_activity_label` are what *this* project calls
+   * its three levels — "Node" and "Activity" for CR_AUTOMATION. Read them through
+   * `useVocabulary()` rather than reaching in here, so every screen words it the same way.
+   */
+  project: {
+    id: string;
+    key: string;
+    name: string;
+    module_label: string;
+    sub_module_label: string;
+    sub_activity_label: string;
+  };
+  projects: { id: string; key: string; name: string; configured: boolean; sub_module_count: number }[];
   config: ConfigView;
-  modules: ModuleView[];
+  sub_modules: SubModuleView[];
   audit: AuditView[];
   defects: DefectView[];
   library: LibraryView[];
@@ -293,6 +500,15 @@ export interface Snapshot {
   users: OrgUserView[];
   members: MemberView[];
   invitations: InvitationView[];
+  /** The step library, for the Configure screen and the "add a step" pickers. */
+  step_library: StepDefinitionView[];
+  /**
+   * The reader's own inbox, unread first. It rides on the snapshot so a tick that unblocks
+   * somebody updates their badge in the same round trip — and so no second request fires on
+   * every page.
+   */
+  notifications: NotificationView[];
+  unread_notifications: number;
   drift: {
     rows: DriftRowView[];
     warnings: DriftWarningView[];
@@ -301,6 +517,63 @@ export interface Snapshot {
     reports: DriftReportView[];
     promotions: DriftPromotionView[];
   };
+  /**
+   * How long each column actually takes, computed from the ticks themselves — nobody fills
+   * anything in for this.
+   *
+   * Nulls are meaningful and must not be rendered as 0: a column nobody has finished yet has no
+   * median, and "no answer yet" is a different statement from "takes no time".
+   */
+  timing: ColumnTimingView[];
+  /**
+   * How long each step takes, from the append-only event history — the more trustworthy of the
+   * two, because steps keep every transition and cells keep only the last one. Only steps that
+   * have been finished at least once appear.
+   */
+  step_timing: StepTimingView[];
+}
+
+/**
+ * Every optional number here is `| null | undefined`, and both halves are load-bearing.
+ *
+ * The service runs Jackson with `default-property-inclusion: non_null`, so a null field is not
+ * sent as `null` — it is **absent from the JSON entirely** and arrives as `undefined`. Typing
+ * these as `number | null` alone compiles and then renders the string "undefined" on screen,
+ * because `undefined !== null` is true. Test any of them with `== null`, which catches both.
+ */
+export interface ColumnTimingView {
+  column_key: string;
+  label: string;
+  /** Days from a sub-module being created to this column being done. Absent when nothing is. */
+  median_days: number | null | undefined;
+  mean_days: number | null | undefined;
+  /**
+   * How much longer this takes than the column to its left — the closest thing to time spent at
+   * this stage. Absent on the first column, which has nothing to compare against. May be negative
+   * when the column order is a reading order rather than a sequence.
+   */
+  added_days: number | null | undefined;
+  measured: number;
+  /** Not finished here, so not in the figures. "4 days, from 2 of 60" means something else. */
+  outstanding: number;
+}
+
+/**
+ * How long one step takes, from the append-only event history.
+ *
+ * The accurate counterpart to `ColumnTimingView`. A cell keeps only its last change, so a
+ * deliverable corrected a month later reads as having taken a month; step events are never
+ * rewritten, so a step ticked, un-ticked and ticked again reports two durations rather than one
+ * long span. Same `== null` rule as above — absent fields arrive as `undefined`.
+ */
+export interface StepTimingView {
+  definition_id: string;
+  name: string;
+  median_days: number | null | undefined;
+  mean_days: number | null | undefined;
+  /** How many times it was finished, not how many exist. Two goes count twice. */
+  completions: number;
+  outstanding: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -314,7 +587,7 @@ export interface CellPresentation extends ToneStyle {
   title: string;
   /** "who · when", or "no change recorded". */
   stamp: string;
-  /** A roll-up cell opens the subactivities instead of advancing. */
+  /** A roll-up cell opens the sub-activities instead of advancing. */
   editable: boolean;
 }
 
@@ -333,7 +606,7 @@ export function cellPresentation(cell: CellView, column: DeliverableColumn): Cel
   const tone = TONE_STYLE[entry.tone];
 
   const rollNote = cell.rolled_up
-    ? ` · rolled up from ${cell.subactivity_count} subactivities, click to open them`
+    ? ` · rolled up from ${cell.sub_activity_count} sub-activities, click to open them`
     : '';
   const stampNote =
     cell.changed_by && cell.changed_at ? ` · ${cell.changed_by}, ${formatStamp(cell.changed_at)}` : '';

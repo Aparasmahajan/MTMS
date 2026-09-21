@@ -224,7 +224,7 @@ export default function PlatformPage() {
             style={{ width: 220 }}
             value={adminEmail}
             onChange={(event) => setAdminEmail(event.target.value)}
-            placeholder="First admin, name@mahajan.com"
+            placeholder="First admin, name@mail.com"
             aria-label="Administrator email"
           />
           <input
@@ -283,7 +283,7 @@ export default function PlatformPage() {
             <span style={{ fontSize: 12, color: 'var(--color-neutral-700)' }}>
               {organisation.project_count}{' '}
               {organisation.project_count === 1 ? 'project' : 'projects'} ·{' '}
-              {organisation.module_count} modules · {organisation.user_count} people
+              {organisation.sub_module_count} modules · {organisation.user_count} people
             </span>
             <button
               type="button"
@@ -325,7 +325,7 @@ export default function PlatformPage() {
                     {project.key}
                   </span>
                   <span style={{ flex: 1, fontSize: 13, color: 'var(--color-neutral-700)' }}>
-                    {project.module_count} {project.module_count === 1 ? 'module' : 'modules'}
+                    {project.sub_module_count} {project.sub_module_count === 1 ? 'module' : 'modules'}
                   </span>
                   <span
                     style={{

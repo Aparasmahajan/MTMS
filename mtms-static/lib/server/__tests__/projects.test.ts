@@ -65,9 +65,9 @@ describe('creating a project', () => {
     const snapshot = await snapshotOf(admin, created);
     expect(snapshot.project.key).toBe('RADIO_ROLLOUT');
     expect(snapshot.config.columns).toHaveLength(0);
-    expect(snapshot.config.node_types).toHaveLength(0);
+    expect(snapshot.config.module_names).toHaveLength(0);
     expect(snapshot.config.stages).toHaveLength(0);
-    expect(snapshot.modules).toHaveLength(0);
+    expect(snapshot.sub_modules).toHaveLength(0);
 
     // It does not inherit CR_AUTOMATION's fourteen columns — that is the whole point.
     const original = await snapshotOf(admin, project);
@@ -83,7 +83,7 @@ describe('creating a project', () => {
 
     let listed = (await snapshotOf(admin, project)).projects.find((entry) => entry.id === created);
     expect(listed?.configured).toBe(false);
-    expect(listed?.module_count).toBe(0);
+    expect(listed?.sub_module_count).toBe(0);
 
     await addColumn(admin, created, 'Smoke test');
 

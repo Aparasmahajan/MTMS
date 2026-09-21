@@ -140,6 +140,45 @@ public class NotificationUseCases {
     }
   }
 
+  /**
+   * Writes one notification to the actor themselves, and sends it nowhere.
+   *
+   * <p>Two deliberate departures from {@link #notify}, and both are the point of the method.
+   *
+   * <p><strong>It is addressed to the actor</strong>, which {@code notify} refuses. That refusal
+   * is right for the three "somebody is waiting for you" kinds — nobody needs telling about
+   * their own tick — and wrong here, where the whole purpose is handing the person who just
+   * acted something they have to keep.
+   *
+   * <p><strong>No transport is attempted.</strong> The body carries a live, single-use
+   * credential, and the configured {@link Notifier} is a Teams or Slack webhook — posting a
+   * password-reset link into a chat channel that the account's owner is not even in would be a
+   * worse outcome than the banner this replaces. The row goes in the recipient's own inbox and
+   * stays there.
+   *
+   * <p>What that costs, stated rather than buried: the link is now <b>at rest in the
+   * notifications table</b>, where before it existed only in a banner and in the recipient's
+   * mailbox. It is single-use and expires in seven days, so the window is bounded — but anybody
+   * who can read that table during those seven days can use it. That is the trade for a link
+   * that survives a page refresh, and it is the reason this does not also go to a webhook.
+   */
+  @Transactional
+  public void notifySelf(
+      Actor actor, Notifications.Kind kind, String title, String body, String link) {
+
+    notifications.insert(
+        List.of(
+            Notifications.Notification.of(
+                actor.tenantId(),
+                actor.projectId(),
+                actor.userId(),
+                kind,
+                title,
+                body,
+                link,
+                Instant.now())));
+  }
+
   /** Everybody in this organisation holding any of these roles — who a team notification reaches. */
   public Set<UUID> holdersOf(Actor actor, Collection<UUID> roleIds) {
     if (roleIds.isEmpty()) {

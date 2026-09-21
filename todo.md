@@ -22,7 +22,7 @@ true.
 
 | | What has to be decided |
 |---|---|
-| ~~**Email**~~ | **Built 18 Sept.** `SmtpMailer` sends invitations and password resets; it exists only when `MTMS_MAIL_HOST` is set, so a deployment without a relay behaves exactly as before. All that is left is the host, port, credentials and from-address in `mtms.env` on the server — see `deploy/api.env.example`. The screen tells the truth either way: it says whether anything was actually sent, and shows the link regardless, because the server keeps only a hash of it |
+| ~~**Email**~~ | **Built 18 Sept, corrected 21 Sept.** `SmtpMailer` sends invitations, password resets and password-change notices as three distinct messages; the condition that switches it on tests the value of `MTMS_MAIL_HOST` rather than the property's existence, which it did not before — so until 21 Sept the SMTP bean won even with no relay configured and `LoggingMailer` never ran. **Now genuinely needed**, because *Forgotten your password?* produces a link with nobody at a keyboard to relay it. All that is left is the host, port, credentials and from-address in `mtms.env` on the server — see `deploy/api.env.example`. The screen tells the truth either way: it says whether anything was actually sent, and shows the link regardless, because the server keeps only a hash of it |
 | **File attachments** on discussions | Where the bytes live: local disk, S3, or the database. An operational commitment, not a coding one |
 | **Custom fields** on the module screen | Nothing, except somebody naming a real field. A generic `(entity, key, value)` store invented first is how you get a schema nobody uses |
 
@@ -44,15 +44,158 @@ true.
 
 ### Nobody has clicked most of it
 
-The largest item, and it is not a feature. Five real bugs were found on 18 Sept in half an
-hour of actually using the deployment — none of them findable by reading the code, four of them
-in the seam between the Java service and a frontend that was assumed to match it. See
-`todo-next.md` §0.
+Was the largest item. **Eighteen real bugs in two days**, not one findable by reading the code:
 
-**Everything built on 16 and 17 Sept is still unclicked**: the checklist panel, the wording
-editor, the owners panel, the discussion panel, the roles panel, the module screen and the
-inbox. Those five bugs all came from onboarding and project set-up, because that is as far as
-anybody has got.
+- **Five on 18 Sept**, from half an hour of using the deployment.
+- **Ten on 19 Sept**, from auditing what the frontend sends against what the service reads.
+- **Three more**, from then sending all fifty-nine of them at a running service — including
+  ticking one permission wiping every other permission on the role, with a 200.
+
+**Every screen and every operation has now been exercised**, the last two panels included.
+
+The pattern worth keeping: both halves compile, and neither language can see across the gap
+between them. Five of the eighteen produced no error at all. Reviewing the code would not have
+found any of them; sending a request did.
+
+**Four things now guard it** — see *What guards this now*, below: a build-time rule against
+camelCase request keys, `scripts/e2e-sweep.js` (every write, re-read afterwards),
+`scripts/e2e-shape.js` (fields the screens read that the service does not send) and
+`scripts/e2e-access.js` (what a write left *unchanged*, added 21 Sept after all three stayed
+green through five more). Last run: 0 of 59, 0 of 42, 0 missing fields.
+
+That is not "there are no bugs". It is the same 59 operations, and a real user does things in an
+order nobody scripted. It is the difference between a suite that stayed green through eighteen
+of them and one that would not have.
+
+### Shipped 21 Sept — organisation membership, the profile, and the mail that was never sent
+
+Reported from the real deployment, and the first two are the same complaint: **the screen had
+one word for two acts, and no control at all for one of them.**
+
+- **"Remove" meant two things and looked like one.** Removing somebody from a project was the
+  only removal that existed, so "take this person off the system" was done by removing them from
+  each project in turn — which never catches an organisation-wide membership, because no project
+  screen lists one as removable. There is now a *Members of \<organisation\>* table with its own
+  remove, its own permission (`admin.users.manage`, not `project.members.manage`), and wording on
+  both that says which is which. The project one asks "they stay in the organisation and keep
+  every other project — continue?" before it does anything.
+- **Organisation-wide access could be granted and then never found.** An invitation or the super
+  admin console could hand out a role covering every project, and afterwards no screen showed it
+  as anything but a scope label. It is a column now: the role, a revoke, and a grant for anybody
+  who has none.
+- **Removing somebody was irreversible through the screen that did it.** Deactivated accounts
+  were filtered out of the organisation list, so the act removed the row that could undo it.
+  They are listed, marked `removed`, with Restore — which brings the account back holding
+  *nothing*, because storing their old access through a removal would make "removed" a state
+  that still carries live grants.
+- **Forgotten your password?** on the sign-in screen, which did not exist: a password could only
+  be repaired by finding an administrator. It answers identically for an address that exists and
+  one that does not — an endpoint reachable without signing in that says "no such account" is a
+  way to enumerate who works here.
+- **Your own account**, reached from your name in the header. Change your display name; change
+  your password, proving you know the current one. Neither was possible before, which is why
+  several accounts still carry an email address as their name.
+
+**Three bugs found while building it, two of them by the new script rather than by review.**
+
+- **The reset email said "You have been invited to".** Resetting the password of somebody who
+  had been signing in for months sent them the invitation wording — the exact sentence a careful
+  reader ignores, on the one message whose job is to be acted on. Three separate messages now:
+  invitation, reset, and an after-the-fact notice that a password has changed.
+- **`PATCH /me` answered 200 and never changed the name.** The row was correct and the
+  organisation table showed the new name; only `me.display_name` was wrong — because the
+  `Actor` is built before the request body is read, `me` is projected off it, and that stale
+  projection was then **cached under the revision the rename had just bumped**. So it was not a
+  one-request glitch: every later read found the cache and got the old name back, permanently.
+  Same family as building a view in the same expression as the mutation that changes it, and the
+  same fix — write, then rebuild the actor, then project. `PATCH /users/{id}` had it too, for an
+  administrator editing their own row.
+- **`LoggingMailer` had never run, anywhere.** `SmtpMailer` was `@ConditionalOnProperty("mtms.mail.host")`,
+  which asks whether the property is *present*, and `application.yml` defines it as
+  `${MTMS_MAIL_HOST:}` — so with no relay configured the property still existed, holding `""`,
+  and the SMTP bean won every deployment. It mostly hid, because the screens show the link
+  regardless and merely blamed "the mail server refused it". It stopped hiding the moment the
+  sign-in screen grew a reset button, because that link has no screen to appear on: it goes to
+  the log or it is lost, and it was being lost. The condition now tests the value.
+
+**And the live one, which is the reason a build sitting undeployed is not the same as a fix.**
+Ticking a permission on the deployed site still wipes every other permission on the role and
+cannot be re-ticked, because the deployed JAR is `bcdd4e2` and the fix has never been shipped.
+Worse, that state is unrecoverable through the interface: when the wiped role is Admin, everyone
+holding it loses `admin.roles.manage`, and the screen that would put it back refuses them — and
+so does the escalation check, which will not grant a permission the caller does not hold, which
+after a wipe is all of them. A super admin is now exempt from both. That is a repair route, not
+a convenience: `isSuperAdmin` is set outside the application, no screen turns it on, and its
+holder can already create organisations and appoint their administrators, so "they could grant
+themselves more" is not a step up from what they have.
+
+**`scripts/e2e-access.js`** is the fourth guard, and it exists because the other three were all
+green through the list above. Their question is "did the call succeed". Its question is "did it
+change the right amount of the world" — every check reads the state afterwards and asserts on
+what did *not* change as well as what did, which is the only shape of test that can tell
+*removed from a project* from *removed from the organisation*. 42 checks, 0 failing. Sixteen new
+unit tests alongside it, in `OrganisationMembershipTest`.
+
+### Also 21 Sept — the inbox, and where a project gets created
+
+Four things, and two of them were broken rather than missing.
+
+- **A one-shot link lived only in a banner.** Issuing a password reset or an invitation produced
+  a link the server can never show again — it stores only the hash — and put it in a notice that
+  disappears on the next click. The repair for losing it was to issue another one, which
+  invalidates the first. Both now also write a row to the **issuer's own inbox** (⚿), carrying
+  the link and what the mail transport actually did with it.
+
+  That row is deliberately odd in two ways. It is addressed to the person who caused it, which
+  every other notification kind refuses — being told about your own action is how a badge gets
+  ignored — and it is **sent to no webhook**, because the configured transport is a Teams or
+  Slack channel and posting somebody's password-reset link into one is worse than the banner it
+  replaces. Clicking it **copies** rather than opens: following it lands the administrator on the
+  "choose a password" form for an account that is not theirs.
+
+  The cost, stated: the link is now at rest in the notifications table for the seven days it
+  lives. That is the trade for a link that survives a page refresh.
+
+- **The NEW_PROJECT_KEY box in the header switcher never worked.** It posted `{ key }` and
+  nothing else, against a handler reading `(key, name, description)` — so `name` arrived null
+  against a NOT NULL column and every click failed. The audit line it would have written reads
+  "project created — null".
+
+  Not repaired in place. A switcher is for moving between projects, and creating one is an
+  organisation-wide act; it now lives on **Configure** for an organisation administrator, and on
+  the super admin console per organisation, where it already worked. `POST /projects` also
+  gained `@Valid`, so a body with no name is now a 422 saying so rather than an error page.
+
+- **Creating a project needed `project.create` — anywhere.** Permissions resolve as the union of
+  an organisation-wide role and a role on the open project, so a role granted on one project was
+  enough to create new ones for the whole organisation. That is a project administrator minting
+  organisation-level things, the same distinction as removing somebody from a project versus from
+  the organisation. It now requires the grant **held organisation-wide**, or a super admin.
+
+  Which means two pieces of code answer one question — the use case decides, and the snapshot
+  tells the screen whether to draw the form. That arrangement is where most of this project's
+  bugs came from, so `e2e-access.js` signs in as a real person holding `project.create` on one
+  project and asserts both answers agree, then grants the same role organisation-wide and asserts
+  they both flip.
+
+- **`me.can_create_projects`** exists for exactly that reason, and is not
+  `permissions.includes('project.create')`. A screen reading the permission list would draw a
+  control the service is about to refuse.
+
+### Open, and found on 19 Sept
+
+**Bean validation does not run.** `@NotBlank` appears on thirty-seven fields across ten
+controllers, and `@Valid` appears on `AuthController` and nowhere else — so outside sign-in,
+none of those annotations do anything. They read as protection and are decoration, which is
+worse than their absence: a null required field falls through into the use case and fails
+somewhere further down, which is how "apply this checklist to SBC" came out as *"there are no
+other sub-modules on null"*.
+
+It cannot simply be switched on. `PATCH /config/columns/{key}` reuses `ColumnRequest`, whose
+`key`, `label` and `full` are `@NotBlank`, and the Configure screen legitimately sends partial
+bodies to it — adding `@Valid` there would turn a working edit into a 422. The fix is per
+endpoint: `@Valid` on the creates, and a separate partial record for the patches. Roughly twenty
+endpoints, each needing a request sent at it to confirm.
 
 ### Two questions waiting on an answer
 
@@ -76,7 +219,22 @@ anybody has got.
   Three limitations are stated on the screen and in the class rather than buried: a cell keeps
   only its *last* change, creation is not the same as starting, and unfinished work is excluded
   rather than counted as instant. That last one is why "4 days, from 2 of 60" is printed rather
-  than "4 days". Seven tests, written from the angle of what somebody would wrongly believe.
+  than "4 days".
+
+  **The first of those was then fixed, on 19 Sept**, with a second panel — *Slowest steps* —
+  computed from the **append-only step history** instead of from cells. Steps keep every
+  transition, so a step ticked, un-ticked and ticked again contributes **two durations rather
+  than one long span**. That is the reading that goes most wrong exactly on the work that went
+  badly, which is the work anybody is asking about.
+
+  That needed its own query, and the reason is worth keeping: the step events already on the
+  projection are **capped at the most recent thousand, newest first**, for screens that show
+  recent activity. Computing how long work takes from a truncated, recency-biased sample would
+  have produced confident figures quietly describing only the last fortnight, with nothing on the
+  screen to say so. The timing query is filtered instead of capped — ticks and un-ticks only — so
+  it grows with work completed rather than with activity.
+
+  Twelve tests between the two, written from the angle of what somebody would wrongly believe.
 
 - ~~**A default checklist for new sub-modules**~~ (§3, open 1) — a checklist on a **module** is
   now that module's template and is copied onto each sub-module as it is created.
@@ -951,6 +1109,103 @@ setting — that setting exists because the service sits behind a proxy and cann
 public address. The screen then stuck the site address on the front of it a second time.
 
 **Fixed by** using the server's address as-is.
+
+### Three more, found by exercising every operation · **fixed 19 Sept**
+
+After the ten above were fixed, every write the UI can make was sent at a running service and
+the result re-read. Fifty-nine operations. Three more failures, and one of them is the most
+destructive thing found in this project.
+
+**Ticking one permission wiped every other permission on the role.** The Access screen is a grid
+of checkboxes; ticking one sends `{permission, granted}`. The endpoint took `{permissions: [...]}`
+— the whole set — and its first line read:
+
+```java
+request.permissions() == null ? List.of() : request.permissions()
+```
+
+So the field that failed to bind became "the empty set", and granting one thing revoked
+everything else. **QA went from five permissions to none, and the API answered 200.** In
+production that is every QA user losing the ability to do their job, with nothing on screen to
+say so — the screen had already drawn the change it expected.
+
+It takes a toggle now, which is also the better shape: two administrators editing different rows
+of the same grid no longer overwrite each other. And nothing defaults a field that did not bind.
+**That null-guard is the whole lesson** — substituting a sensible-looking default for a missing
+field turns a loud failure into a quiet, destructive one.
+
+**A bad severity or phase on a defect returned 500.** `Defects.Severity.fromWire` throws
+`IllegalArgumentException`, which reaches the API boundary as "Something went wrong on our side"
+— a claim about whose fault it is, and the one that wakes somebody up — for what is plainly a bad
+request. `DiscussionController` already converted its scope the same way; the two defect enums
+were simply never given the same guard. Now a 422 naming the accepted values.
+
+**Changing a hidden role's permissions un-hid it — in the in-memory store only.** `Tenancy.Role`
+has an eight-argument convenience constructor that defaults `archivedAt` to null, meaning "not
+hidden". The in-memory write used it; the MySQL write updates one column and does not. Two
+stores that disagree about what a write does are worse than one that is simply wrong, because
+the tests run against this one and production runs against the other.
+
+### What guards this now
+
+Three things, each catching a different half of the gap between the two halves of the
+application:
+
+| | |
+|---|---|
+| `mtms-frontend/lib/shared/__tests__/wire-contract.test.ts` | Build fails if a request body sends a camelCase key |
+| `scripts/e2e-sweep.js` | Every write the UI can make, sent as the UI sends it — and re-read afterwards, so a 200 that changes nothing fails |
+| `scripts/e2e-shape.js` | The other direction: fields the screens read that the service does not send |
+
+Both scripts exit non-zero, so they can sit in a release step rather than being read by eye.
+They need a seeded database.
+
+**Last run: 0 of 59 failed, and 0 missing fields.** That is not the same as "there are no bugs" —
+it is the same 59 operations, and a real user does things in an order nobody scripted. But it is
+the difference between a suite that was green through eighteen of them and one that would not
+have been.
+
+### Bug class: ten operations that never worked · **fixed 19 Sept**
+
+Everything built on 16 and 17 Sept had a checklist panel, an owners panel, a discussion panel
+and a wording editor. **Ten of their operations had never worked once**, and nothing said so.
+
+The cause is one mistake made ten times. The service reads the wire as **snake_case** — Jackson
+is configured that way, so a Java field `scopeType` is read from `scope_type`. The frontend sent
+`{ scopeType }`. Jackson binds nothing, the field arrives **null**, and the failure appears
+somewhere else entirely:
+
+| What you clicked | What you got |
+|---|---|
+| Add a step to a checklist | "That step is not in this project." |
+| Apply a checklist to a module | "There are no other sub-modules on **null** to apply it to." |
+| Reorder the steps | "A reorder has to list every step exactly once." |
+| Create a checklist | Refused |
+| Tick "steps must be done in order" | Silently ignored |
+| Create a step with roles | Created — **with no roles, so nobody could ever tick it** |
+| Assign an owner | "An owner is a person — send the account to assign." |
+| Start a discussion | "A topic attaches to a module, sub_module or sub_activity." |
+| Add a grouped column | Refused |
+| Rename what the project calls things | **200. "Saved." Nothing changed.** |
+
+That last one is the worst and explains why this survived three releases: every field on that
+request is legitimately optional, because the screen saves one box at a time. So there was
+nothing for the service to reject. It answered 200, the screen said saved, and the edit was gone
+on the next reload.
+
+**Why nothing caught it.** Both halves compile. TypeScript cannot see into a JSON body, Java
+cannot see the caller, and four of the ten fields carry no validation constraint — because they
+are genuinely optional. The `@NotBlank` annotations that might have caught two of them never ran
+at all: `@Valid` is on `AuthController` and nowhere else, so bean validation is off across ten
+controllers. That is a separate finding and is **still open** — it cannot simply be switched on,
+because `PATCH /config/columns/{key}` reuses a record whose fields are `@NotBlank` and the screen
+sends partial bodies to it.
+
+**What closes it.** `mtms-frontend/lib/shared/__tests__/wire-contract.test.ts` — a lint rule
+wearing a test's clothes. It reads every `send(...)` call and fails the build on a camelCase key.
+It found four of the ten on its first run, and two more after the shorthand `{ roleIds }`
+spelling was handled — a rule with a blind spot being worse than none, because it also claims
+there is nothing left to find.
 
 ### Names and passwords for the people you onboard · **done 18 Sept**
 

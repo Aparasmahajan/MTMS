@@ -35,7 +35,7 @@ cd mtms-backend  && ./mvn.sh spring-boot:run    # :8080, seeds the demo org on f
 cd mtms-frontend && npm run dev                 # :3000
 ```
 
-Sign in as `parmahaj@mahajan.com` / `tracker`.
+Sign in as `parmahaj@mail.com` / `tracker`.
 
 ## Running the static one
 

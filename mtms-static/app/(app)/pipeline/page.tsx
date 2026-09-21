@@ -11,7 +11,7 @@ import { missingLine } from '@/lib/shared/views';
  * screen re-buckets every module without touching any data.
  */
 export default function PipelinePage() {
-  const { snapshot, moduleHref } = useTracker();
+  const { snapshot, subModuleHref } = useTracker();
   const { stages } = snapshot.config;
 
   if (stages.length === 0) {
@@ -43,7 +43,7 @@ export default function PipelinePage() {
         }}
       >
         {stages.map((stage, index) => {
-          const items = snapshot.modules.filter((module) => module.stage_index === index);
+          const items = snapshot.sub_modules.filter((module) => module.stage_index === index);
           return (
             <div key={stage.id} style={{ background: 'var(--color-bg)', paddingBottom: 'var(--space-4)', minWidth: 160 }}>
               <div
@@ -84,7 +84,7 @@ export default function PipelinePage() {
                 {items.map((module) => (
                   <Link
                     key={module.id}
-                    href={moduleHref(module.id)}
+                    href={subModuleHref(module.id)}
                     style={{
                       border: '1px solid var(--color-neutral-400)',
                       padding: 'var(--space-3)',
@@ -100,7 +100,7 @@ export default function PipelinePage() {
                         gap: 'var(--space-2)',
                       }}
                     >
-                      <span className="tag tag-accent">{module.node_type}</span>
+                      <span className="tag tag-accent">{module.module_name}</span>
                       <span
                         className="tabular"
                         style={{ fontFamily: 'var(--font-heading)', fontSize: 13 }}

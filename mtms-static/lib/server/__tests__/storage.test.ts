@@ -236,7 +236,7 @@ describe('the event outbox', () => {
 
     const names = (await getStore()).events.map((event) => event.name);
     expect(names).toContain('defect.raised');
-    expect(names).toContain('module.closed');
+    expect(names).toContain('subModule.closed');
   });
 
   it('marks events published once the publisher accepts them', async () => {
@@ -296,8 +296,8 @@ describe('the projection still matches after all of this', () => {
     const actor = await actorFor(DEVOPS);
     const snapshot = buildSnapshot(await getStore(), actor, await projectId());
 
-    expect(snapshot.modules).toHaveLength(18);
+    expect(snapshot.sub_modules).toHaveLength(18);
     expect(snapshot.config.columns).toHaveLength(26);
-    expect(snapshot.modules.filter((module) => module.readiness === 100)).toHaveLength(3);
+    expect(snapshot.sub_modules.filter((module) => module.readiness === 100)).toHaveLength(3);
   });
 });

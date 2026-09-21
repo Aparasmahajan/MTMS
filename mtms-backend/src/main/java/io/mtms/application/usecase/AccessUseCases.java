@@ -10,6 +10,7 @@ import io.mtms.application.port.PasswordHasher;
 import io.mtms.domain.PermissionKey;
 import io.mtms.domain.Permissions;
 import io.mtms.domain.model.Audit;
+import io.mtms.domain.model.Notifications;
 import io.mtms.domain.model.Tenancy;
 import java.time.Duration;
 import java.time.Instant;
@@ -31,6 +32,7 @@ public class AccessUseCases {
   private final PasswordHasher passwords;
   private final Mailer mailer;
   private final MutationSupport support;
+  private final NotificationUseCases notifications;
   private final MtmsProperties properties;
 
   public AccessUseCases(
@@ -38,11 +40,13 @@ public class AccessUseCases {
       PasswordHasher passwords,
       Mailer mailer,
       MutationSupport support,
+      NotificationUseCases notifications,
       MtmsProperties properties) {
     this.access = access;
     this.passwords = passwords;
     this.mailer = mailer;
     this.support = support;
+    this.notifications = notifications;
     this.properties = properties;
   }
 
@@ -115,7 +119,8 @@ public class AccessUseCases {
 
     if (membership.projectId() == null) {
       throw ServiceException.forbidden(
-          "That is organisation-wide access — change it on the Access screen.");
+          "That is organisation-wide access, which applies to every project. Change it in the"
+              + " organisation's own member table rather than from one project.");
     }
     if (!membership.projectId().equals(actor.projectId())) {
       throw ServiceException.notFound("That membership is not in this project.");
@@ -126,6 +131,247 @@ public class AccessUseCases {
     return membership;
   }
 
+
+  // --- Organisation membership -----------------------------------------------
+
+  /**
+   * Removes somebody from the organisation entirely.
+   *
+   * <p><strong>This is not what the project screen's "remove" does, and the difference is the
+   * whole point of this method existing.</strong> Removing somebody from a project deletes one
+   * membership row and leaves the account alone — they stay in the organisation, keep every
+   * other project, and can be added back by anyone who administers that project. Removing them
+   * from the organisation deletes <em>every</em> membership they hold and deactivates the
+   * account, so they cannot sign in at all.
+   *
+   * <p>They are two different acts with two different blast radiuses, and before this existed
+   * only the first one had a button. So "take this person off the system" was done by removing
+   * them from each project one at a time and hoping that was all of them — which it never is,
+   * because an organisation-wide membership is not removable from any project's row.
+   *
+   * <p>Guarded by {@code admin.users.manage}, not {@code project.members.manage}. A project
+   * administrator administers a project; ending somebody's access to the whole organisation is
+   * not a bigger version of that, it is a different job.
+   *
+   * <p>Deactivated rather than deleted, for the reason everything else in this application is:
+   * their name is on audit entries, on comments, on owner rows and on defects, and a delete
+   * would either take those with it or leave rows pointing at nothing. A deactivated account
+   * keeps its history and cannot be signed in to — see {@code ActorFactory} and {@code
+   * AuthenticationService}, which both refuse one.
+   */
+  @Transactional
+  public void removeFromOrganisation(Actor actor, UUID userId) {
+    if (!actor.isSuperAdmin()) {
+      actor.require(PermissionKey.ADMIN_USERS_MANAGE);
+    }
+
+    Tenancy.User user = requireRemovableUser(actor, userId);
+
+    // Every membership, not only the ones on the project currently open. A person removed from
+    // the organisation who kept an organisation-wide row would be deactivated and still listed
+    // as a member of every project, which is the half-state this avoids.
+    access.memberships(actor.tenantId()).stream()
+        .filter(membership -> membership.userId().equals(userId))
+        .forEach(membership -> access.deleteMembership(membership.id()));
+
+    access.updateUser(
+        new Tenancy.User(
+            user.id(),
+            user.tenantId(),
+            user.email(),
+            user.displayName(),
+            user.isSuperAdmin(),
+            Tenancy.UserStatus.DEACTIVATED,
+            user.lastLoginAt(),
+            user.createdAt()));
+
+    support.recordProjectChange(
+        actor,
+        actor.projectId(),
+        "ACCESS",
+        user.displayName() + " removed from the organisation");
+    // Their name disappears from every project's member list at once, so every project's
+    // cached projection is stale, not just this one.
+    support.bumpEveryProjectIn(actor.tenantId());
+  }
+
+  /**
+   * Brings a removed account back, with no memberships.
+   *
+   * <p>Reactivating and re-granting are deliberately two steps. Restoring whatever access they
+   * had before would mean storing it through the removal, and "removed" would then be a state
+   * that still holds live grants. Coming back with nothing is the honest version: somebody has
+   * to decide what they should have now.
+   */
+  @Transactional
+  public void restoreToOrganisation(Actor actor, UUID userId) {
+    if (!actor.isSuperAdmin()) {
+      actor.require(PermissionKey.ADMIN_USERS_MANAGE);
+    }
+
+    Tenancy.User user =
+        access
+            .findUser(actor.tenantId(), userId)
+            .orElseThrow(
+                () -> ServiceException.notFound("That person is not in this organisation."));
+
+    if (user.status() != Tenancy.UserStatus.DEACTIVATED) {
+      throw ServiceException.validation(user.displayName() + " is not removed.");
+    }
+
+    // ACTIVE, never INVITED: the account has a password already, and putting it back into the
+    // invited state would make a reissued link the only way in while the password still works.
+    access.updateUser(
+        new Tenancy.User(
+            user.id(),
+            user.tenantId(),
+            user.email(),
+            user.displayName(),
+            user.isSuperAdmin(),
+            Tenancy.UserStatus.ACTIVE,
+            user.lastLoginAt(),
+            user.createdAt()));
+
+    support.recordProjectChange(
+        actor, actor.projectId(), "ACCESS", user.displayName() + " restored to the organisation");
+    support.bumpEveryProjectIn(actor.tenantId());
+  }
+
+  /**
+   * Gives somebody one role across every project in the organisation, present and future.
+   *
+   * <p>Also {@code admin.users.manage}, for the reason above: this is the grant that puts one
+   * name on every project row, including projects that do not exist yet. A project
+   * administrator handing it out would be granting access to projects they cannot themselves
+   * open.
+   */
+  @Transactional
+  public UUID grantOrganisationWide(Actor actor, UUID userId, UUID roleId) {
+    if (!actor.isSuperAdmin()) {
+      actor.require(PermissionKey.ADMIN_USERS_MANAGE);
+    }
+
+    Tenancy.User user =
+        access
+            .findUser(actor.tenantId(), userId)
+            .orElseThrow(
+                () -> ServiceException.notFound("That person is not in this organisation."));
+
+    if (user.status() == Tenancy.UserStatus.DEACTIVATED) {
+      throw ServiceException.validation(
+          user.displayName() + " has been removed from the organisation. Restore them first.");
+    }
+
+    Tenancy.Role role = requireGrantableRole(actor, roleId);
+
+    boolean already =
+        access.memberships(actor.tenantId()).stream()
+            .anyMatch(m -> m.userId().equals(userId) && m.projectId() == null);
+    if (already) {
+      throw ServiceException.conflict(
+          user.displayName() + " already has organisation-wide access.");
+    }
+
+    Tenancy.Membership membership =
+        new Tenancy.Membership(
+            UUID.randomUUID(), actor.tenantId(), userId, null, roleId, Instant.now());
+    access.insertMembership(membership);
+
+    support.recordProjectChange(
+        actor,
+        actor.projectId(),
+        "ACCESS",
+        user.displayName() + " granted " + role.name() + " across the organisation");
+    support.bumpEveryProjectIn(actor.tenantId());
+    return membership.id();
+  }
+
+  /** Changes the role on an organisation-wide membership. */
+  @Transactional
+  public void changeOrganisationWideRole(Actor actor, UUID membershipId, UUID roleId) {
+    if (!actor.isSuperAdmin()) {
+      actor.require(PermissionKey.ADMIN_USERS_MANAGE);
+    }
+
+    Tenancy.Membership membership = requireOrganisationWide(actor, membershipId);
+    Tenancy.Role role = requireGrantableRole(actor, roleId);
+
+    access.updateMembershipRole(membership.id(), roleId);
+    support.recordProjectChange(
+        actor, actor.projectId(), "ACCESS", "organisation-wide role changed to " + role.name());
+    support.bumpEveryProjectIn(actor.tenantId());
+  }
+
+  /**
+   * Takes away organisation-wide access, leaving every per-project membership alone.
+   *
+   * <p>Somebody who is org-wide Viewer and Release manager on one project keeps the second after
+   * this. That is the narrow act the row offers, and doing anything wider would be a surprise.
+   */
+  @Transactional
+  public void revokeOrganisationWide(Actor actor, UUID membershipId) {
+    if (!actor.isSuperAdmin()) {
+      actor.require(PermissionKey.ADMIN_USERS_MANAGE);
+    }
+
+    Tenancy.Membership membership = requireOrganisationWide(actor, membershipId);
+
+    access.deleteMembership(membership.id());
+    support.recordProjectChange(
+        actor, actor.projectId(), "ACCESS", "organisation-wide access removed");
+    support.bumpEveryProjectIn(actor.tenantId());
+  }
+
+  /** An organisation-wide row in this tenant, and not the caller's own. */
+  private Tenancy.Membership requireOrganisationWide(Actor actor, UUID membershipId) {
+    Tenancy.Membership membership =
+        access
+            .membership(actor.tenantId(), membershipId)
+            .orElseThrow(() -> ServiceException.notFound("That membership does not exist."));
+
+    if (membership.projectId() != null) {
+      throw ServiceException.validation(
+          "That access is for one project only. Change it on that project's row.");
+    }
+    if (membership.userId().equals(actor.userId())) {
+      throw ServiceException.forbidden("You cannot change your own access.");
+    }
+    return membership;
+  }
+
+  /**
+   * Who may be removed from the organisation.
+   *
+   * <p>Not yourself: it is usually a misclick, and it is the one mistake here that cannot be
+   * undone by the person who made it — they are signed out of an account they can no longer
+   * reach. Not a super admin either, unless the caller is one. A super admin is set outside the
+   * application and no screen turns it on, so an organisation's own administrator deactivating
+   * one would be removing the only account that can create organisations, from a screen that
+   * cannot put it back.
+   */
+  private Tenancy.User requireRemovableUser(Actor actor, UUID userId) {
+    Tenancy.User user =
+        access
+            .findUser(actor.tenantId(), userId)
+            .orElseThrow(
+                () -> ServiceException.notFound("That person is not in this organisation."));
+
+    if (user.id().equals(actor.userId())) {
+      throw ServiceException.forbidden(
+          "You cannot remove yourself from the organisation. Ask another administrator.");
+    }
+    if (user.isSuperAdmin() && !actor.isSuperAdmin()) {
+      throw ServiceException.forbidden(
+          user.displayName()
+              + " is a platform super administrator. Only another super administrator can"
+              + " remove them.");
+    }
+    if (user.status() == Tenancy.UserStatus.DEACTIVATED) {
+      throw ServiceException.validation(
+          user.displayName() + " has already been removed from the organisation.");
+    }
+    return user;
+  }
 
   // --- The roles themselves ---------------------------------------------------
 
@@ -372,6 +618,20 @@ public class AccessUseCases {
 
     Mailer.Delivery delivery = deliver(actor.tenantId(), email, displayName, acceptUrl);
 
+    // The same reasoning as a reset: one-shot link, banner-only until now, and the reason
+    // invitations "kept getting lost" is that the only copy vanished on the next click.
+    notifications.notifySelf(
+        actor,
+        Notifications.Kind.ACCOUNT,
+        "Invitation for " + displayName,
+        delivery.sent()
+            ? delivery.detail() + " The link below is the only other copy — it works once and"
+                + " expires in seven days."
+            : delivery.detail()
+                + " Send them the link below yourself. It works once, expires in seven days,"
+                + " and cannot be shown again.",
+        acceptUrl);
+
     support.emit(
         actor, projectId, Audit.DomainEventName.USER_INVITED, actor.tenantId().toString(),
         Map.of("email", email, "role", role.name()));
@@ -405,6 +665,31 @@ public class AccessUseCases {
     } catch (RuntimeException failure) {
       // A Mailer is not supposed to throw. If one does, it is still not allowed to undo the
       // account that already exists.
+      return Mailer.Delivery.notSent("The mail transport failed, so nothing was sent.");
+    }
+  }
+
+  /**
+   * The same, for a reset link.
+   *
+   * <p>Separate from {@link #deliver} because the message is separate. Sending the invitation
+   * wording to somebody who has been signing in for months — which is what this did until
+   * 21 Sept — reads as a phishing attempt to a careful person and as noise to everybody else,
+   * on the one email whose entire purpose is to be acted on.
+   */
+  private Mailer.Delivery deliverReset(
+      UUID tenantId, String email, String displayName, String resetUrl, boolean selfService) {
+
+    Optional<Tenancy.Tenant> tenant = access.findTenant(tenantId);
+    if (tenant.isEmpty()) {
+      return Mailer.Delivery.notSent("That organisation could not be read, so nothing was sent.");
+    }
+
+    try {
+      return mailer.sendPasswordReset(
+          new Mailer.PasswordReset(
+              email, displayName, tenant.get().name(), resetUrl, selfService));
+    } catch (RuntimeException failure) {
       return Mailer.Delivery.notSent("The mail transport failed, so nothing was sent.");
     }
   }
@@ -460,7 +745,10 @@ public class AccessUseCases {
         actor.projectId(),
         "ACCESS",
         "renamed " + user.email() + " to " + next);
-    support.bump(actor.projectId());
+    // Every project, not just the open one. A display name is on every project's member list,
+    // and bumping one leaves the rest showing the old name until something unrelated happens to
+    // change them — which can be days.
+    support.bumpEveryProjectIn(actor.tenantId());
   }
 
   /**
@@ -525,7 +813,29 @@ public class AccessUseCases {
     String resetUrl = properties.appBaseUrl() + "/accept-invite?token=" + token;
 
     Mailer.Delivery delivery =
-        deliver(actor.tenantId(), user.email(), user.displayName(), resetUrl);
+        deliverReset(actor.tenantId(), user.email(), user.displayName(), resetUrl, false);
+
+    // Into the issuer's own inbox, as well as the banner.
+    //
+    // The banner was the only copy, and a banner is gone the moment anything is clicked — on a
+    // link the server can never show again, because it stores only the hash. So the failure mode
+    // was: issue a reset, navigate away by reflex, and the only repair is to issue another one
+    // and invalidate the first. Somebody did exactly that.
+    //
+    // It says what the mail transport actually did, so the issuer knows whether they still have
+    // to relay the link by hand or whether it has already arrived. Deliberately not sent to any
+    // webhook — see notifySelf.
+    notifications.notifySelf(
+        actor,
+        Notifications.Kind.ACCOUNT,
+        "Password reset for " + user.displayName(),
+        delivery.sent()
+            ? delivery.detail() + " The link below is the only other copy — it works once and"
+                + " expires in seven days."
+            : delivery.detail()
+                + " Send them the link below yourself. It works once, expires in seven days,"
+                + " and cannot be shown again.",
+        resetUrl);
 
     support.recordProjectChange(
         actor, actor.projectId(), "ACCESS", "password reset link issued for " + user.email());
@@ -537,11 +847,88 @@ public class AccessUseCases {
   // --- Roles -----------------------------------------------------------------
 
   /**
-   * Rewrites a role's permissions.
+   * Grants or removes <em>one</em> permission on a role.
+   *
+   * <p>This exists because the screen that edits permissions is a grid of checkboxes, and a
+   * checkbox is a toggle. It used to call {@link #setRolePermissions}, which replaces the whole
+   * set — and it sent {@code {permission, granted}}, which that endpoint does not read. The list
+   * bound to nothing, the role was rewritten with an empty set, and the API answered <b>200</b>.
+   *
+   * <p>So ticking one box to grant one thing <b>silently revoked everything else the role could
+   * do.</b> QA went from five permissions to none. Nothing on the screen said so, because the
+   * screen had already drawn the change it expected.
+   *
+   * <p>A toggle is also the better shape on its own merits: two administrators editing different
+   * rows of the same grid no longer overwrite each other, which "replace the whole set" cannot
+   * avoid.
+   *
+   * <p>Only the permission being <em>granted</em> is checked against the actor's own. A
+   * permission already on the role is not being granted by this call, and refusing the edit
+   * because of one would make a role uneditable by anybody who did not create it.
+   *
+   * <p><strong>A super admin is exempt from both checks, and that is a repair route rather than
+   * a convenience.</strong> The bug above left roles in production holding nothing — including,
+   * on at least one organisation, the Admin role. Everybody whose only role was that one then
+   * lost {@code admin.roles.manage}, so the screen that could put it back refused them; and the
+   * escalation check refuses to grant a permission the caller does not hold, which after a wipe
+   * is all of them. That is an unrecoverable state reachable by clicking one checkbox, with no
+   * way out short of editing the database by hand.
+   *
+   * <p>The escalation argument does not apply to a super admin. {@code isSuperAdmin} is set
+   * outside the application, no screen turns it on, and the holder can already create
+   * organisations and appoint their administrators — so "they could grant themselves more" is
+   * not a step up from what they have. For an organisation's own admin the argument stands
+   * exactly as it did, and the check is unchanged for them.
+   */
+  @Transactional
+  public void setRolePermission(Actor actor, UUID roleId, String permission, boolean granted) {
+    if (!actor.isSuperAdmin()) {
+      actor.require(PermissionKey.ADMIN_ROLES_MANAGE);
+    }
+
+    Tenancy.Role role =
+        access
+            .role(actor.tenantId(), roleId)
+            .orElseThrow(() -> ServiceException.notFound("That role does not exist."));
+
+    PermissionKey key =
+        PermissionKey.fromWire(permission)
+            .orElseThrow(
+                () ->
+                    ServiceException.validation(
+                        "Not a permission this system knows: " + permission + "."));
+
+    if (granted && !actor.isSuperAdmin() && !actor.permissions().contains(key)) {
+      throw ServiceException.forbidden(
+          "You cannot grant a permission you do not hold: " + key.label() + ".");
+    }
+
+    Set<PermissionKey> next = new java.util.LinkedHashSet<>(role.permissions());
+    boolean changed = granted ? next.add(key) : next.remove(key);
+    if (!changed) {
+      return;
+    }
+
+    access.updateRolePermissions(roleId, Set.copyOf(next));
+
+    support.recordProjectChange(
+        actor,
+        actor.projectId(),
+        "ACCESS",
+        role.name() + (granted ? " granted " : " no longer has ") + key.label());
+    support.bump(actor.projectId());
+  }
+
+  /**
+   * Rewrites a role's whole permission set.
    *
    * <p>Guarded by the rule that nobody may grant what they do not hold. Without it, an admin of
    * one organisation could add every key to a role and assign it to themselves — and since roles
    * are editable by their own organisation's admin, that is a one-step escalation.
+   *
+   * <p>No screen calls this: the Access grid toggles one box at a time through {@link
+   * #setRolePermission}. It is kept because replacing a set outright is the right shape for
+   * importing a role definition, which project templates will need.
    */
   @Transactional
   public void setRolePermissions(Actor actor, UUID roleId, List<String> permissions) {

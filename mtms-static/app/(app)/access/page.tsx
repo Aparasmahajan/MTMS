@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useTracker } from '@/components/TrackerProvider';
 import { Blueprint, PageTitle, SectionHeading } from '@/components/primitives';
+import { RolesPanel } from '@/components/access/RolesPanel';
 import { send } from '@/lib/client/api';
 import { PERMISSION_GROUPS, PERMISSION_LABELS, type PermissionKey } from '@/lib/shared/permissions';
 import type { Snapshot } from '@/lib/shared/views';
@@ -34,7 +35,7 @@ const HIERARCHY = [
   {
     level: 'Project',
     who: 'Custom roles',
-    can: 'Any mix of permissions: who may create modules, update deliverables, sign off FNI, log defects.',
+    can: 'Any mix of permissions: who may create sub-modules, update deliverables, sign off FNI, log defects.',
   },
 ];
 
@@ -57,6 +58,9 @@ export default function AccessPage() {
   const alreadyHere = new Set(members.map((member) => member.user_id));
   const addable = users.filter((user) => !alreadyHere.has(user.id));
 
+  // Hidden roles are not offered anywhere. They are still in `roles` because rows already
+  // pointing at one have to render with a name rather than an id.
+  const liveRoles = roles.filter((role) => !role.hidden);
   const selectedRole = roles.find((role) => role.id === roleId);
   const previewLabels = selectedRole
     ? selectedRole.permissions.map((key) => PERMISSION_LABELS[key])
@@ -66,6 +70,50 @@ export default function AccessPage() {
         .slice(0, 5)
         .join(', ')}${previewLabels.length > 5 ? `, +${previewLabels.length - 5} more` : ''}`
     : '';
+
+
+  /**
+   * Starts a password reset for somebody else.
+   *
+   * Nobody sets anybody's password: the server issues a single-use link and the person chooses
+   * their own. So the link is the whole product of this action, it is shown once, and it cannot
+   * be recovered afterwards — the server keeps only a one-way hash of it. Hence the confirm
+   * before, and the notice that has to be read rather than dismissed.
+   */
+  async function resetPassword(userId: string, who: string) {
+    if (
+      !window.confirm(
+        `Issue a password reset link for ${who}?\n\nTheir current password keeps working until they use the link. Any earlier link stops working now.`,
+      )
+    ) {
+      return;
+    }
+
+    const meta = await apply(null, () =>
+      send<Snapshot>(`/api/v1/users/${userId}/reset-password`, 'POST'),
+    );
+    if (!meta?.reset_url) return;
+
+    setNotice(
+      `Password reset for ${meta.display_name}. ${meta.delivery_detail ?? ''} It works once, expires in seven days, and this is the only time the link can be read — copy it before dismissing this: ${meta.reset_url}`,
+    );
+  }
+
+  /**
+   * Corrects somebody's display name.
+   *
+   * The name only. The email address is the login identity, so changing it is an account
+   * migration rather than an edit and is deliberately not offered here.
+   */
+  async function renameUser(userId: string, current: string, email: string) {
+    const next = window.prompt(`Name for ${email}`, current);
+    if (next === null) return;
+    if (!next.trim() || next.trim() === current) return;
+
+    await apply(null, () =>
+      send<Snapshot>(`/api/v1/users/${userId}`, 'PATCH', { display_name: next.trim() }),
+    );
+  }
 
   async function sendInvitation() {
     if (!email.trim() || !roleId) return;
@@ -82,7 +130,11 @@ export default function AccessPage() {
       setDisplayName('');
       // The link is surfaced whatever the transport did: it is single-use and it works,
       // and a delivery that only logged would otherwise leave the admin with nothing.
-      const link = `${window.location.origin}${meta.accept_url}`;
+      //
+      // Used as sent. The server builds it from MTMS_APP_BASE_URL — the setting that exists
+      // because the service cannot see its own public address behind a proxy — so prefixing
+      // the page's origin here is what produced links carrying the domain twice.
+      const link = String(meta.accept_url);
       setNotice(
         meta.delivery_state === 'sent'
           ? `Invitation sent. ${String(meta.delivery_detail)} The link, if you need it: ${link}`
@@ -193,7 +245,7 @@ export default function AccessPage() {
             style={{ width: 220 }}
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            placeholder="name@mahajan.com"
+            placeholder="name@mail.com"
             aria-label="Email"
           />
           <input
@@ -211,7 +263,7 @@ export default function AccessPage() {
             onChange={(event) => setRoleId(event.target.value)}
             aria-label="Role"
           >
-            {roles.map((role) => (
+            {liveRoles.map((role) => (
               <option key={role.id} value={role.id}>
                 {role.name}
               </option>
@@ -292,6 +344,12 @@ export default function AccessPage() {
         </div>
       </Blueprint>
 
+      {/*
+        Which roles exist sits above what they can do, because that is the order the decisions
+        get made in: a team decides it needs a Field Engineer before it decides what one may do.
+      */}
+      <RolesPanel />
+
       <Blueprint style={{ marginBottom: 'var(--space-8)' }}>
         <div
           style={{
@@ -316,7 +374,7 @@ export default function AccessPage() {
             <thead>
               <tr>
                 <th style={{ minWidth: 250 }}>Permission</th>
-                {roles.map((role) => (
+                {liveRoles.map((role) => (
                   <th key={role.id} style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
                     {role.name}
                     <div
@@ -359,7 +417,7 @@ export default function AccessPage() {
                         {key}
                       </div>
                     </td>
-                    {roles.map((role) => {
+                    {liveRoles.map((role) => {
                       const granted = role.permissions.includes(key);
                       return (
                         <td key={role.id} style={{ textAlign: 'center', padding: 'var(--space-1)' }}>
@@ -443,7 +501,7 @@ export default function AccessPage() {
                       )
                     }
                   >
-                    {roles.map((role) => (
+                    {liveRoles.map((role) => (
                       <option key={role.id} value={role.id}>
                         {role.name}
                       </option>
@@ -534,7 +592,7 @@ export default function AccessPage() {
           onChange={(event) => setMemberRoleId(event.target.value)}
           aria-label="Role for the new member"
         >
-          {roles.map((role) => (
+          {liveRoles.map((role) => (
             <option key={role.id} value={role.id}>
               {role.name}
             </option>
@@ -569,12 +627,39 @@ export default function AccessPage() {
               <th>Role</th>
               <th>Scope</th>
               <th>State</th>
+              {canManageUsers ? <th>Password</th> : null}
             </tr>
           </thead>
           <tbody>
             {users.map((user) => (
               <tr key={user.id}>
-                <td style={{ whiteSpace: 'nowrap' }}>{user.display_name}</td>
+                <td style={{ whiteSpace: 'nowrap' }}>
+                  {user.display_name}
+                  {/*
+                    Only where the name is worth correcting. Several accounts carry an email
+                    address as their name because the console did not ask for one until 18 Sept,
+                    and nothing could change it until this existed.
+                  */}
+                  {canManageUsers ? (
+                    <button
+                      type="button"
+                      title={`Rename ${user.email}`}
+                      aria-label={`Rename ${user.email}`}
+                      onClick={() => void renameUser(user.id, user.display_name, user.email)}
+                      style={{
+                        marginLeft: 6,
+                        border: 0,
+                        background: 'transparent',
+                        padding: 0,
+                        cursor: 'pointer',
+                        fontSize: 11,
+                        color: 'var(--color-neutral-600)',
+                      }}
+                    >
+                      edit
+                    </button>
+                  ) : null}
+                </td>
                 <td className="mono" style={{ fontSize: 12 }}>
                   {user.email}
                 </td>
@@ -583,6 +668,28 @@ export default function AccessPage() {
                 </td>
                 <td style={{ fontSize: 13, color: 'var(--color-neutral-700)' }}>{user.scope}</td>
                 <td style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>{user.status}</td>
+                {canManageUsers ? (
+                  <td>
+                    {/*
+                      Only for somebody with a password to reset. An invited account has none
+                      yet — that case is a reissued invitation, and the server says so rather
+                      than pretending the two are the same thing.
+                    */}
+                    {user.status === 'active' ? (
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ fontSize: 12, padding: '2px 10px' }}
+                        title={`Issue a single-use link for ${user.email} to choose a new password`}
+                        onClick={() => void resetPassword(user.id, user.display_name)}
+                      >
+                        Reset
+                      </button>
+                    ) : (
+                      <span style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>—</span>
+                    )}
+                  </td>
+                ) : null}
               </tr>
             ))}
           </tbody>

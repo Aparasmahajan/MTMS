@@ -66,8 +66,8 @@ describe('the audit trail', () => {
     expect(entry?.what).toBe('Loaded → Not Loaded');
     // The ADMIN fixture is Nitin — see the harness. Paras is a developer.
     expect(entry?.who).toBe('Nitin');
-    expect(entry?.module_id).toBe(module);
-    expect(entry?.module_label).toBe('DLU · DLU update');
+    expect(entry?.sub_module_id).toBe(module);
+    expect(entry?.sub_module_label).toBe('DLU · DLU update');
   });
 
   it('records creating a module', async () => {
@@ -90,7 +90,7 @@ describe('the audit trail', () => {
     const [entry] = await since(1);
     expect(entry?.label).toBe('SUBACT');
     expect(entry?.what).toContain('the module row is now a roll-up');
-    expect(entry?.module_id).toBe(module);
+    expect(entry?.sub_module_id).toBe(module);
   });
 
   it('records FNI sign-off and reopening', async () => {
@@ -119,7 +119,7 @@ describe('the audit trail', () => {
     const [entry] = await since(1);
     expect(entry?.label).toBe('DEFECT');
     expect(entry?.what).toBe(`${defect.ticket_key} assigned unassigned → Bhavnish`);
-    expect(entry?.module_id).toBe(defect.module_id);
+    expect(entry?.sub_module_id).toBe(defect.sub_module_id);
   });
 
   it('records configuration changes with no module attached', async () => {
@@ -129,8 +129,8 @@ describe('the audit trail', () => {
     expect(entry?.scope).toBe('project');
     expect(entry?.label).toBe('CONFIG');
     expect(entry?.what).toBe('added the deliverable column Smoke test');
-    expect(entry?.module_id).toBeNull();
-    expect(entry?.module_label).toBe('—');
+    expect(entry?.sub_module_id).toBeNull();
+    expect(entry?.sub_module_label).toBe('—');
   });
 
   it('records a reorder', async () => {
@@ -180,7 +180,7 @@ describe('the audit trail', () => {
     const entries = await feed();
     expect(entries).toHaveLength(5);
     expect(entries.every((entry) => entry.scope === 'cell')).toBe(true);
-    expect(entries.every((entry) => entry.module_label !== '—')).toBe(true);
+    expect(entries.every((entry) => entry.sub_module_label !== '—')).toBe(true);
   });
 });
 

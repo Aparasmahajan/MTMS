@@ -2,7 +2,7 @@
   "name": "mtms",
   "private": true,
   "version": "1.0.0",
-  "description": "MTMS — Mahajan Ticket Management System. Change activities into production, as an editable matrix.",
+  "description": "MTMS — Organization Management System. Change activities into production, as an editable matrix.",
   "scripts": {
     "dev": "next dev -p 3100",
     "build": "next build",

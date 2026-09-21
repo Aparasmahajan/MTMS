@@ -8,10 +8,16 @@ import type {
   DeliverableColumn,
   DriftEnvironment,
   DriftLayer,
-  Module,
+  SubModule,
   ProjectConfig,
   Role,
-  Subactivity,
+  SubActivity,
+  Scope,
+  StepDefinition,
+  StepEntry,
+  StepList,
+  StepProgress,
+  StepState,
 } from '../shared/domain';
 import {
   DEFECT_STATUS_ORDER,
@@ -50,9 +56,20 @@ import type {
   DriftRowView,
   LibraryView,
   MemberView,
-  ModuleView,
+  SubModuleView,
   Snapshot,
-  SubactivityView,
+  SubActivityView,
+  OwnerGroupView,
+  OwnerView,
+  StepEntryView,
+  StepListView,
+  ThreadView,
+  StepDefinitionView,
+  ModuleView,
+  NotificationView,
+  ColumnTimingView,
+  StepTimingView,
+  RoleView,
 } from '../shared/views';
 import { columnDisplayLabel } from '../shared/views';
 import type { Actor } from './auth';
@@ -76,6 +93,14 @@ export interface Access {
   projectId: string;
   permissions: Set<PermissionKey>;
   roleNames: string[];
+  /**
+   * The role ids this person holds here, which is what a step gate compares against.
+   *
+   * Ids rather than the names beside them: a role can be renamed, and a checklist that
+   * stopped gating correctly because somebody fixed a typo in "QA" would be a very quiet
+   * way to lose a control.
+   */
+  roleIds: string[];
 }
 
 export function resolveAccess(store: StoreData, actor: Actor, projectId: string): Access {
@@ -95,7 +120,12 @@ export function resolveAccess(store: StoreData, actor: Actor, projectId: string)
     .map((key) => store.roles.find((role) => role.key === key)?.name ?? key)
     .filter(Boolean);
 
-  return { actor, projectId, permissions: effective.permissions, roleNames };
+  // Resolved from the same keys, so the ids and the names can never describe different roles.
+  const roleIds = [...effective.roleKeys]
+    .map((key) => store.roles.find((role) => role.key === key)?.id)
+    .filter((id): id is string => Boolean(id));
+
+  return { actor, projectId, permissions: effective.permissions, roleNames, roleIds };
 }
 
 function require_(access: Access, key: PermissionKey, what: string): void {
@@ -124,8 +154,8 @@ function record(
   store.audit.push({
     id: randomUUID(),
     project_id: projectId,
-    module_id: entry.moduleId ?? null,
-    subactivity_id: entry.subactivityId ?? null,
+    sub_module_id: entry.moduleId ?? null,
+    sub_activity_id: entry.subactivityId ?? null,
     scope: entry.scope,
     label: entry.label,
     what: entry.what,
@@ -154,7 +184,7 @@ function configFor(store: StoreData, projectId: string): ProjectConfig {
   return (
     config ?? {
       project_id: projectId,
-      node_types: [],
+      module_names: [],
       stages: [],
       owners: [],
       link_types: [],
@@ -195,13 +225,13 @@ function offVocabularyCount(
   column: DeliverableColumn,
 ): number {
   const modules = new Set(
-    store.modules.filter((module) => module.project_id === projectId).map((module) => module.id),
+    store.sub_modules.filter((module) => module.project_id === projectId).map((module) => module.id),
   );
   const allowed = new Set(column.allowed);
   return store.cells.filter(
     (cell) =>
       cell.column_key === column.key &&
-      modules.has(cell.module_id) &&
+      modules.has(cell.sub_module_id) &&
       cell.status !== BLANK &&
       !allowed.has(cell.status),
   ).length;
@@ -214,7 +244,7 @@ function cellKey(moduleId: string, subactivityId: string | null, columnKey: stri
 function indexCells(cells: readonly Cell[]): Map<string, Cell> {
   const index = new Map<string, Cell>();
   for (const cell of cells) {
-    index.set(cellKey(cell.module_id, cell.subactivity_id, cell.column_key), cell);
+    index.set(cellKey(cell.sub_module_id, cell.sub_activity_id, cell.column_key), cell);
   }
   return index;
 }
@@ -225,6 +255,250 @@ function indexCells(cells: readonly Cell[]): Map<string, Cell> {
  * hundred cells, so a single projection is both simpler and faster than per-screen
  * queries; the Redis cache the README calls for slots in exactly here.
  */
+
+// ---------------------------------------------------------------------------
+// Checklists, owners and discussions
+// ---------------------------------------------------------------------------
+//
+// These project the tables added in store version 8 onto the three levels of the hierarchy.
+// They are read-only: every rule about who may tick what lives in `stepGate` and is applied
+// here once, so the client never recomputes it. A client that guessed would eventually guess
+// differently from the server and produce the worst failure a permission system has — a
+// control that looks available and then refuses.
+
+/** Whose names these role ids are, for a step that says "QA may tick this". */
+function roleNamesOf(store: StoreData, roleIds: readonly string[]): string[] {
+  return roleIds
+    .map((id) => store.roles.find((role) => role.id === id)?.name)
+    .filter((name): name is string => Boolean(name));
+}
+
+function wordForState(state: StepState): string {
+  return state === 'todo' ? 'not done' : state;
+}
+
+/**
+ * Whether this reader may tick one entry, and why not when they may not.
+ *
+ * The order of the checks is the message: the list's own order first, then who is allowed.
+ * Each refusal names the thing standing in the way, because "not allowed" sends somebody to
+ * ask an administrator about a permission when the real answer is that step 1 is not done.
+ */
+function stepGate(
+  store: StoreData,
+  list: StepList,
+  entries: readonly StepEntry[],
+  entry: StepEntry,
+  progressOf: (entryId: string) => StepProgress | undefined,
+  definition: StepDefinition,
+  access: Access,
+): { canTick: boolean; isOverrideForMe: boolean; lockedReason: string } {
+  if (list.enforce_order) {
+    const earlier = entries
+      .filter((candidate) => candidate.order_index < entry.order_index)
+      .sort((a, b) => a.order_index - b.order_index);
+    const blocking = earlier.find((candidate) => progressOf(candidate.id)?.state !== 'done');
+    if (blocking) {
+      const name = store.step_definitions.find((d) => d.id === blocking.definition_id)?.name;
+      return {
+        canTick: false,
+        isOverrideForMe: false,
+        lockedReason: `This checklist runs in order, and "${name ?? 'an earlier step'}" is not done yet.`,
+      };
+    }
+  }
+
+  const allowed = roleNamesOf(store, definition.role_ids);
+  const mine = access.roleIds.some((roleId) => definition.role_ids.includes(roleId));
+
+  // A `project.config` holder may tick anything, and it is recorded as an override —
+  // "Anand ticked this on behalf of QA". That flag is the difference between an audit trail
+  // and a decoration, so the screen warns before it happens.
+  const canConfigure = access.permissions.has('project.config');
+
+  if (definition.role_ids.length === 0) {
+    // A step whose last allowed role was deleted must not quietly become one anybody may
+    // tick. That is the opposite of what gating meant, so it closes rather than opens.
+    return {
+      canTick: canConfigure,
+      isOverrideForMe: canConfigure,
+      lockedReason: canConfigure
+        ? 'This step names no role that still exists. Ticking it will be recorded as an override.'
+        : 'This step names no role that still exists, so nobody can tick it until an admin picks one.',
+    };
+  }
+
+  if (mine) return { canTick: true, isOverrideForMe: false, lockedReason: '' };
+
+  return {
+    canTick: canConfigure,
+    isOverrideForMe: canConfigure,
+    lockedReason: canConfigure
+      ? `Only ${allowed.join(' or ')} may tick this. You can, as an override, and it is recorded as one.`
+      : `Only ${allowed.join(' or ')} may tick this.`,
+  };
+}
+
+/** The checklists attached to one thing, with each step's state and whether the reader may act. */
+function stepListsFor(
+  store: StoreData,
+  scopeType: Scope,
+  scopeId: string,
+  access: Access,
+  readerId: string,
+): StepListView[] {
+  return store.step_lists
+    .filter((list) => list.scope_type === scopeType && list.scope_id === scopeId && !list.archived_at)
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))
+    .map((list) => {
+      const entries = store.step_entries
+        .filter((entry) => entry.step_list_id === list.id)
+        .sort((a, b) => a.order_index - b.order_index);
+
+      const progressOf = (entryId: string) =>
+        store.step_progress.find((row) => row.entry_id === entryId);
+
+      const entryViews: StepEntryView[] = entries.map((entry) => {
+        const definition = store.step_definitions.find((d) => d.id === entry.definition_id);
+        const progress = progressOf(entry.id);
+        const gate = definition
+          ? stepGate(store, list, entries, entry, progressOf, definition, access)
+          : { canTick: false, isOverrideForMe: false, lockedReason: 'That step no longer exists.' };
+
+        return {
+          id: entry.id,
+          definition_id: entry.definition_id,
+          name: definition?.name ?? 'Removed step',
+          description: definition?.description ?? '',
+          state: progress?.state ?? 'todo',
+          blocked_reason: progress?.blocked_reason ?? null,
+          changed_by: progress?.changed_by ?? null,
+          changed_at: progress?.changed_at ?? null,
+          allowed_roles: definition ? roleNamesOf(store, definition.role_ids) : [],
+          can_tick: gate.canTick,
+          is_override_for_me: gate.isOverrideForMe,
+          locked_reason: gate.lockedReason,
+          history: store.step_events
+            .filter((event) => event.entry_id === entry.id)
+            .sort((a, b) => b.at.localeCompare(a.at))
+            .map((event) => ({
+              id: event.id,
+              from: event.from_state,
+              to: event.to_state,
+              what: `${wordForState(event.from_state)} → ${wordForState(event.to_state)}`,
+              is_override: event.is_override,
+              reason: event.reason,
+              by: event.by,
+              at: event.at,
+            })),
+          comments: store.step_comments
+            .filter((comment) => comment.entry_id === entry.id)
+            .sort((a, b) => a.created_at.localeCompare(b.created_at))
+            .map((comment) => ({
+              id: comment.id,
+              author: comment.author,
+              body: comment.body,
+              created_at: comment.created_at,
+              mine: comment.author_user_id === readerId,
+            })),
+        };
+      });
+
+      const done = entryViews.filter((entry) => entry.state === 'done').length;
+
+      return {
+        id: list.id,
+        name: list.name,
+        scope_type: list.scope_type,
+        scope_id: list.scope_id,
+        enforce_order: list.enforce_order,
+        entries: entryViews,
+        done_count: done,
+        blocked_count: entryViews.filter((entry) => entry.state === 'blocked').length,
+        readiness: entryViews.length === 0 ? 0 : Math.round((done / entryViews.length) * 100),
+      };
+    });
+}
+
+/**
+ * Owners, grouped: the overall owner first, then one group per team.
+ *
+ * Grouped rather than flat because that is the question people ask — "who is the QA owner" —
+ * and a flat list of five names with a role beside each makes the reader do the grouping
+ * themselves, every time.
+ */
+function ownerGroupsFor(store: StoreData, scopeType: Scope, scopeId: string): OwnerGroupView[] {
+  const rows = store.owners.filter(
+    (owner) => owner.scope_type === scopeType && owner.scope_id === scopeId,
+  );
+  if (rows.length === 0) return [];
+
+  const groups = new Map<string, OwnerView[]>();
+  for (const row of rows) {
+    const user = store.users.find((candidate) => candidate.id === row.user_id);
+    if (!user) continue;
+    const key = row.role_id ?? '';
+    const list = groups.get(key) ?? [];
+    list.push({
+      owner_id: row.id,
+      user_id: row.user_id,
+      display_name: user.display_name,
+      email: user.email,
+    });
+    groups.set(key, list);
+  }
+
+  return [...groups.entries()]
+    .map(([roleId, owners]) => ({
+      role_id: roleId === "" ? null : roleId,
+      label:
+        roleId === ""
+          ? "Overall"
+          : (store.roles.find((role) => role.id === roleId)?.name ??
+            "A role that no longer exists"),
+      people: owners,
+    }))
+    // Overall first, then the teams alphabetically, so the order cannot shuffle between two
+    // readers or two renders.
+    .sort((a, b) => {
+      if (a.role_id === null) return -1;
+      if (b.role_id === null) return 1;
+      return a.label.localeCompare(b.label);
+    });
+}
+
+/** Topics raised on one thing, newest first, each with its comments oldest first. */
+function threadsFor(
+  store: StoreData,
+  scopeType: Scope,
+  scopeId: string,
+  readerId: string,
+): ThreadView[] {
+  return store.threads
+    .filter((thread) => thread.scope_type === scopeType && thread.scope_id === scopeId)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .map((thread) => ({
+      id: thread.id,
+      topic: thread.title,
+      opened_by: thread.created_by,
+      opened_at: thread.created_at,
+      mine: thread.created_by_user_id === readerId,
+      mentions_me: store.thread_comments.some(
+        (comment) => comment.thread_id === thread.id && comment.mentions.includes(readerId),
+      ),
+      comments: store.thread_comments
+        .filter((comment) => comment.thread_id === thread.id)
+        .sort((a, b) => a.created_at.localeCompare(b.created_at))
+        .map((comment) => ({
+          id: comment.id,
+          author: comment.author,
+          body: comment.body,
+          created_at: comment.created_at,
+          mentions_me: comment.mentions.includes(readerId),
+          mine: comment.author_user_id === readerId,
+        })),
+    }));
+}
 export function buildSnapshot(store: StoreData, actor: Actor, projectId: string): Snapshot {
   const tenant = store.tenants.find((candidate) => candidate.id === actor.tenantId);
   const project = store.projects.find(
@@ -246,29 +520,29 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
 
   const statusOf = (moduleId: string, subactivityId: string | null, columnKey: string): Cell =>
     cellIndex.get(cellKey(moduleId, subactivityId, columnKey)) ?? {
-      module_id: moduleId,
-      subactivity_id: subactivityId,
+      sub_module_id: moduleId,
+      sub_activity_id: subactivityId,
       column_key: columnKey,
       status: BLANK,
       changed_by: null,
       changed_at: null,
     };
 
-  const projectModules = store.modules.filter((module) => module.project_id === projectId);
+  const projectModules = store.sub_modules.filter((module) => module.project_id === projectId);
 
-  const modules: ModuleView[] = projectModules.map((module) => {
-    const subs = store.subactivities
-      .filter((subactivity) => subactivity.module_id === module.id)
+  const modules: SubModuleView[] = projectModules.map((module) => {
+    const subs = store.sub_activities
+      .filter((subactivity) => subactivity.sub_module_id === module.id)
       .sort((a, b) => a.order_index - b.order_index);
 
-    const subactivityViews: SubactivityView[] = subs.map((subactivity) => {
+    const subactivityViews: SubActivityView[] = subs.map((subactivity) => {
       const cells = columns.map<CellView>((column) => {
         const cell = statusOf(module.id, subactivity.id, column.key);
         return {
           column_key: column.key,
           status: cell.status,
           rolled_up: false,
-          subactivity_count: 0,
+          sub_activity_count: 0,
           changed_by: cell.changed_by,
           changed_at: cell.changed_at,
         };
@@ -281,6 +555,12 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
         name: subactivity.name,
         readiness: readiness(counted),
         cells,
+        // Checklists, owners and discussions attach at all three levels in the Java service.
+        // This implementation carries the shape so every screen renders, and fills the
+        // sub-module level only — see `stepListsFor` and the note on `buildSnapshot`.
+        step_lists: stepListsFor(store, 'sub_activity', subactivity.id, access, actor.userId),
+        owners: ownerGroupsFor(store, 'sub_activity', subactivity.id),
+        threads: threadsFor(store, 'sub_activity', subactivity.id, actor.userId),
       };
     });
 
@@ -294,7 +574,7 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
           column_key: column.key,
           status,
           rolled_up: true,
-          subactivity_count: subs.length,
+          sub_activity_count: subs.length,
           changed_by: null,
           changed_at: null,
         };
@@ -304,7 +584,7 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
         column_key: column.key,
         status: cell.status,
         rolled_up: false,
-        subactivity_count: 0,
+        sub_activity_count: 0,
         changed_by: cell.changed_by,
         changed_at: cell.changed_at,
       };
@@ -314,11 +594,11 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
       cells.find((cell) => cell.column_key === columnKey)?.status ?? BLANK;
 
     const percent = readiness(countedColumns.map((column) => statusFor(column.key)));
-    const run = store.runs.find((candidate) => candidate.module_id === module.id) ?? null;
+    const run = store.runs.find((candidate) => candidate.sub_module_id === module.id) ?? null;
 
     return {
       id: module.id,
-      node_type: module.node_type,
+      module_name: module.module_name,
       name: module.name,
       owner: module.owner,
       fni_target_date: module.fni_target_date,
@@ -331,20 +611,52 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
         .map(columnDisplayLabel),
       blank_count: activeColumns.filter((column) => statusFor(column.key) === BLANK).length,
       cells,
-      subactivities: subactivityViews,
+      sub_activities: subactivityViews,
       links: store.links
-        .filter((link) => link.module_id === module.id)
+        .filter((link) => link.sub_module_id === module.id)
         .map((link) => ({ id: link.id, type: link.type, label: link.label, url: link.url })),
       last_run: run
         ? { child_req_id: run.child_req_id, phases: run.phases, artifacts: run.artifacts }
         : null,
+      step_lists: stepListsFor(store, 'sub_module', module.id, access, actor.userId),
+      owners: ownerGroupsFor(store, 'sub_module', module.id),
+      threads: threadsFor(store, 'sub_module', module.id, actor.userId),
     };
   });
 
   const moduleLabel = (moduleId: string): string => {
     const module = projectModules.find((candidate) => candidate.id === moduleId);
-    return module ? `${module.node_type} · ${module.name}` : '—';
+    return module ? `${module.module_name} · ${module.name}` : '—';
   };
+
+  /**
+   * The modules as records, reconciled against the editable list of names.
+   *
+   * A name with no record yet is still shown, with a derived id, so the Configure screen and
+   * the matrix cannot disagree about which modules exist while a record is being created. The
+   * counts are computed from the live sub-modules rather than stored, for the same reason the
+   * platform console derives its own: a stored count is a second copy that drifts.
+   */
+  const moduleViews: ModuleView[] = config.module_names.map((name, index) => {
+    const record = store.modules.find(
+      (candidate) => candidate.project_id === projectId && candidate.name === name,
+    );
+    const mine = modules.filter((subModule) => subModule.module_name === name);
+    const inProd = mine.filter((subModule) => subModule.readiness === 100).length;
+
+    return {
+      id: record?.id ?? `pending:${name}`,
+      name,
+      description: record?.description ?? '',
+      order_index: record?.order_index ?? index,
+      sub_module_count: mine.length,
+      in_prod: inProd,
+      readiness:
+        mine.length === 0 ? 0 : Math.round(mine.reduce((total, m) => total + m.readiness, 0) / mine.length),
+      owners: record ? ownerGroupsFor(store, 'module', record.id) : [],
+      threads: record ? threadsFor(store, 'module', record.id, actor.userId) : [],
+    };
+  });
 
   const audit: AuditView[] = store.audit
     .filter((entry) => entry.project_id === projectId)
@@ -352,8 +664,8 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
     .map((entry) => ({
       id: entry.id,
       scope: entry.scope,
-      module_id: entry.module_id,
-      module_label: entry.module_id ? moduleLabel(entry.module_id) : '—',
+      sub_module_id: entry.sub_module_id,
+      sub_module_label: entry.sub_module_id ? moduleLabel(entry.sub_module_id) : '—',
       label: entry.label,
       what: entry.what,
       who: entry.who,
@@ -365,8 +677,8 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
     .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
     .map((defect) => ({
       id: defect.id,
-      module_id: defect.module_id,
-      module_label: moduleLabel(defect.module_id),
+      sub_module_id: defect.sub_module_id,
+      sub_module_label: moduleLabel(defect.sub_module_id),
       phase: defect.phase,
       ticket_key: defect.ticket_key,
       ticket_url: defect.ticket_key ? `${TICKET_BASE_URL}/${defect.ticket_key}` : '',
@@ -383,13 +695,13 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
     .filter((entry) => entry.tenant_id === actor.tenantId)
     .map((entry) => ({
       id: entry.id,
-      node_type: entry.node_type,
+      module_name: entry.module_name,
       name: entry.name,
       version: entry.version,
-      subactivity_count: entry.subactivity_names.length,
+      sub_activity_count: entry.sub_activity_names.length,
       used_in_projects: entry.used_in_projects,
       in_this_project: projectModules.some(
-        (module) => module.node_type === entry.node_type && module.name === entry.name,
+        (module) => module.module_name === entry.module_name && module.name === entry.name,
       ),
     }));
 
@@ -495,7 +807,16 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
       ),
     },
     org: { id: tenant.id, name: tenant.name },
-    project: { id: project.id, key: project.key, name: project.name },
+    project: {
+      id: project.id,
+      key: project.key,
+      name: project.name,
+      // Read through `useVocabulary()` on the client rather than reached into directly, so
+      // every screen words the three levels the same way.
+      module_label: project.module_label,
+      sub_module_label: project.sub_module_label,
+      sub_activity_label: project.sub_activity_label,
+    },
     projects: store.projects
       .filter((candidate) => candidate.tenant_id === actor.tenantId && !candidate.archived)
       .map((candidate) => ({
@@ -503,7 +824,7 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
         key: candidate.key,
         name: candidate.name,
         configured: candidate.configured,
-        module_count: store.modules.filter((module) => module.project_id === candidate.id).length,
+        sub_module_count: store.sub_modules.filter((module) => module.project_id === candidate.id).length,
       })),
     config: {
       columns: columns.map((column) => ({
@@ -511,14 +832,18 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
         off_vocabulary: offVocabularyCount(store, projectId, column),
         active: isActiveColumn(config, column),
       })),
-      node_types: config.node_types,
+      // The records, with ids — what a checklist, an owner or a discussion hangs off. The
+      // names stay beside them for everything that only wants a name, and the two are
+      // reconciled on write so they cannot describe different sets.
+      modules: moduleViews,
+      module_names: config.module_names,
       stages: config.stages,
       owners: config.owners,
       link_types: config.link_types,
       environments: config.environments,
       phases: ['Staging test', 'Preprod test', 'Prod deployment'],
     },
-    modules,
+    sub_modules: modules,
     audit,
     defects,
     library,
@@ -530,6 +855,14 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
         name: role.name,
         note: role.note,
         permissions: role.permissions,
+        is_system: role.is_system ?? false,
+        hidden: role.hidden ?? false,
+        // Hiding a role somebody still holds is refused, and the screen says so before
+        // anybody tries — which needs the count here rather than a second request.
+        member_count: store.memberships.filter(
+          (membership) =>
+            membership.tenant_id === actor.tenantId && membership.role_id === role.id,
+        ).length,
       })),
     users,
     members,
@@ -553,9 +886,220 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
         })),
       warnings: driftWarningViews,
     },
+
+    // The project's step library, for the Configure screen and the "add a step" pickers. The
+    // checklists themselves hang off the things they are attached to, because that is where
+    // they are read.
+    step_library: store.step_definitions
+      .filter((definition) => definition.project_id === projectId && !definition.archived_at)
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((definition) => ({
+        id: definition.id,
+        name: definition.name,
+        description: definition.description,
+        role_ids: definition.role_ids,
+        role_names: roleNamesOf(store, definition.role_ids),
+        // So retiring a step is an informed decision rather than a surprise on forty
+        // checklists.
+        used_in: store.step_entries.filter((entry) => entry.definition_id === definition.id)
+          .length,
+      })),
+
+    notifications: inboxFor(store, actor),
+    unread_notifications: inboxFor(store, actor).filter((row) => row.unread).length,
+
+    timing: columnTimings(activeColumns, projectModules, store.cells),
+    step_timing: stepTimings(store, projectId),
   };
 }
 
+/** One page of inbox. Older than this is history, and would need its own screen. */
+function inboxFor(store: StoreData, actor: Actor): NotificationView[] {
+  return store.notifications
+    .filter((row) => row.tenant_id === actor.tenantId && row.user_id === actor.userId)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .slice(0, 50)
+    .map((row) => ({
+      id: row.id,
+      kind: row.kind,
+      title: row.title,
+      body: row.body,
+      link: row.link ?? '',
+      at: row.created_at,
+      unread: row.read_at === null,
+    }));
+}
+
+
+// ---------------------------------------------------------------------------
+// How long work actually takes
+// ---------------------------------------------------------------------------
+//
+// A port of `io.mtms.domain.Timing`. The point of it is that **nobody fills anything in**:
+// every cell carries the moment it last changed, every sub-module the moment it was created,
+// and every step transition is kept forever. So these are facts the application has been
+// recording since the first tick, and there are answers for work that finished months ago.
+//
+// Two panels, and they are not the same measurement:
+//
+//  - Per column, from the **cells**. A lead time — from the work appearing to that deliverable
+//    being finished — and the difference between one column and the previous one is roughly
+//    the time spent at that stage. A cell keeps only its *last* change, so a column that was
+//    corrected reads as having taken longer. That limitation is real and is stated on screen.
+//  - Per step, from the **append-only events**, which do not have that problem: a step ticked,
+//    un-ticked and ticked again contributes two durations rather than one long span. That is
+//    the reading that goes most wrong exactly on the work that went badly — which is the work
+//    anybody is asking about.
+
+/** One decimal. Hours of precision on a figure measured in weeks is false confidence. */
+function round1(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+function daysBetween(from: string, to: string): number {
+  return round1((Date.parse(to) - Date.parse(from)) / 86_400_000);
+}
+
+/** Null for no data, so the caller renders "not enough yet" rather than a confident zero. */
+function median(values: readonly number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  // Indexed reads are non-null here because the array is non-empty and `middle` is derived
+  // from its length, but `noUncheckedIndexedAccess` cannot see that.
+  const upper = sorted[middle] as number;
+  return sorted.length % 2 === 1
+    ? round1(upper)
+    : round1(((sorted[middle - 1] as number) + upper) / 2);
+}
+
+function mean(values: readonly number[]): number | null {
+  if (values.length === 0) return null;
+  return round1(values.reduce((total, value) => total + value, 0) / values.length);
+}
+
+/**
+ * Days from a sub-module being created to each column being done.
+ *
+ * "Done" is read from the project's own vocabulary rather than assumed: a project defines
+ * which statuses mean finished, and hard-coding one word here would silently report nothing
+ * for a team whose column says "Loaded in prod".
+ */
+function columnTimings(
+  activeColumns: readonly DeliverableColumn[],
+  subModules: readonly SubModule[],
+  cells: readonly Cell[],
+): ColumnTimingView[] {
+  const createdAt = new Map(subModules.map((subModule) => [subModule.id, subModule.created_at]));
+  const mine = new Set(subModules.map((subModule) => subModule.id));
+
+  const timings: ColumnTimingView[] = [];
+  let previousMedian: number | null = null;
+
+  for (const column of activeColumns) {
+    const days: number[] = [];
+
+    for (const cell of cells) {
+      // The sub-module's own row only. A sub-activity's cells are a finer grain, and mixing
+      // the two would count one piece of work several times with a different answer each.
+      if (cell.sub_activity_id !== null) continue;
+      if (cell.column_key !== column.key) continue;
+      if (!mine.has(cell.sub_module_id)) continue;
+      if (!cell.changed_at) continue;
+      if (toneOf(cell.status) !== 'done') continue;
+
+      const created = createdAt.get(cell.sub_module_id);
+      if (!created) continue;
+
+      // Negative means a cell changed before its sub-module existed — a clock problem
+      // rather than a measurement, so it is dropped rather than reported as a negative age.
+      const elapsed = daysBetween(created, cell.changed_at);
+      if (elapsed >= 0) days.push(elapsed);
+    }
+
+    const middle = median(days);
+    // Can legitimately be negative: a column finished before the one to its left, which
+    // happens when the order on screen is a reading order rather than a sequence. Shown as
+    // it is rather than clamped, because clamping would hide exactly that.
+    const added = middle !== null && previousMedian !== null ? round1(middle - previousMedian) : null;
+
+    timings.push({
+      column_key: column.key,
+      label: column.label,
+      median_days: middle,
+      mean_days: mean(days),
+      added_days: added,
+      measured: days.length,
+      // Anything unfinished is excluded rather than counted as instant, and the count says
+      // so: "4 days, from 2 of 60" is a very different statement from "4 days".
+      outstanding: subModules.length - days.length,
+    });
+
+    if (middle !== null) previousMedian = middle;
+  }
+
+  return timings;
+}
+
+/**
+ * How long each step takes, from the append-only history.
+ *
+ * Measured from the moment a step became outstanding — the checklist being attached, or the
+ * last un-tick — to the tick that followed. A step ticked twice is two durations, which is
+ * the whole reason this reads events rather than the current state.
+ */
+function stepTimings(store: StoreData, projectId: string): StepTimingView[] {
+  const lists = new Map(
+    store.step_lists.filter((list) => list.project_id === projectId).map((list) => [list.id, list]),
+  );
+
+  const perDefinition = new Map<string, { days: number[]; outstanding: number }>();
+
+  for (const entry of store.step_entries) {
+    const list = lists.get(entry.step_list_id);
+    if (!list) continue;
+
+    const bucket = perDefinition.get(entry.definition_id) ?? { days: [], outstanding: 0 };
+
+    const events = store.step_events
+      .filter((event) => event.entry_id === entry.id)
+      .sort((a, b) => a.at.localeCompare(b.at));
+
+    // Outstanding from the moment the checklist was attached, not from the first event —
+    // otherwise a step nobody has touched contributes nothing and the wait is invisible.
+    let since: string | null = list.created_at;
+
+    for (const event of events) {
+      if (event.to_state === 'done' && since !== null) {
+        const elapsed = daysBetween(since, event.at);
+        if (elapsed >= 0) bucket.days.push(elapsed);
+        since = null;
+      } else if (event.from_state === 'done' && event.to_state !== 'done') {
+        // Un-ticked: it is waiting again, and the clock restarts from here.
+        since = event.at;
+      }
+    }
+
+    if (since !== null) bucket.outstanding += 1;
+    perDefinition.set(entry.definition_id, bucket);
+  }
+
+  return [...perDefinition.entries()]
+    .map(([definitionId, bucket]) => {
+      const definition = store.step_definitions.find((candidate) => candidate.id === definitionId);
+      return {
+        definition_id: definitionId,
+        name: definition?.name ?? 'Removed step',
+        median_days: median(bucket.days),
+        mean_days: mean(bucket.days),
+        completions: bucket.days.length,
+        outstanding: bucket.outstanding,
+      };
+    })
+    // Slowest first: the point of the panel is which step is the bottleneck, and making
+    // somebody sort a list to find that out is making them do the work themselves.
+    .sort((a, b) => (b.median_days ?? -1) - (a.median_days ?? -1));
+}
 function shortDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }
@@ -564,8 +1108,8 @@ function shortDate(iso: string): string {
 // Mutations
 // ---------------------------------------------------------------------------
 
-function findModule(store: StoreData, projectId: string, moduleId: string): Module {
-  const module = store.modules.find(
+function findModule(store: StoreData, projectId: string, moduleId: string): SubModule {
+  const module = store.sub_modules.find(
     (candidate) => candidate.id === moduleId && candidate.project_id === projectId,
   );
   if (!module) throw notFound('That module is not in this project.');
@@ -601,10 +1145,10 @@ export async function advanceCell(
       throw badRequest('This module is closed. Reopen it before changing a deliverable.');
     }
 
-    const subs = store.subactivities.filter((sub) => sub.module_id === module.id);
+    const subs = store.sub_activities.filter((sub) => sub.sub_module_id === module.id);
     if (input.subactivityId === null && subs.length > 0) {
       throw badRequest(
-        'This module has subactivities, so its row is a roll-up. Change the subactivity instead.',
+        'This module has sub_activities, so its row is a roll-up. Change the subactivity instead.',
       );
     }
     if (input.subactivityId !== null && !subs.some((sub) => sub.id === input.subactivityId)) {
@@ -613,8 +1157,8 @@ export async function advanceCell(
 
     const existing = store.cells.find(
       (cell) =>
-        cell.module_id === module.id &&
-        cell.subactivity_id === input.subactivityId &&
+        cell.sub_module_id === module.id &&
+        cell.sub_activity_id === input.subactivityId &&
         cell.column_key === column.key,
     );
     const current = existing?.status ?? BLANK;
@@ -639,8 +1183,8 @@ export async function advanceCell(
       existing.changed_at = at;
     } else {
       store.cells.push({
-        module_id: module.id,
-        subactivity_id: input.subactivityId,
+        sub_module_id: module.id,
+        sub_activity_id: input.subactivityId,
         column_key: column.key,
         status: next,
         changed_by: actor.displayName,
@@ -665,8 +1209,8 @@ export async function advanceCell(
       partitionKey: module.id,
       actor: actor.displayName,
       payload: {
-        module_id: module.id,
-        subactivity_id: input.subactivityId,
+        sub_module_id: module.id,
+        sub_activity_id: input.subactivityId,
         column_key: column.key,
         from: current,
         to: next,
@@ -679,13 +1223,13 @@ export async function advanceCell(
  * Readiness for the FNI gate, recomputed from the store rather than trusted from the
  * client. Mirrors the projection in `buildSnapshot`.
  */
-function moduleReadiness(store: StoreData, module: Module): { percent: number; fniDone: boolean } {
+function moduleReadiness(store: StoreData, module: SubModule): { percent: number; fniDone: boolean } {
   const config = configFor(store, module.project_id);
   const columns = columnsFor(store, module.project_id);
   // Same filter as the projection, or the gate would demand a tick in an environment the
   // grid does not even show.
   const counted = columns.filter((column) => column.counts && isActiveColumn(config, column));
-  const subs = store.subactivities.filter((sub) => sub.module_id === module.id);
+  const subs = store.sub_activities.filter((sub) => sub.sub_module_id === module.id);
   const index = indexCells(store.cells);
 
   const statusFor = (columnKey: string): string => {
@@ -705,7 +1249,7 @@ function moduleReadiness(store: StoreData, module: Module): { percent: number; f
 }
 
 /** The blocking reasons the disabled control states. Empty means the gate is open. */
-export function fniBlockers(store: StoreData, module: Module): string[] {
+export function fniBlockers(store: StoreData, module: SubModule): string[] {
   const { percent, fniDone } = moduleReadiness(store, module);
   const blockers: string[] = [];
   if (percent !== 100) {
@@ -774,12 +1318,12 @@ export async function signOffFni(
       module.fni_closed_at = nowIso();
       module.fni_closed_by = actor.displayName;
       emit(store, {
-        name: 'module.closed',
+        name: 'subModule.closed',
         tenantId: actor.tenantId,
         projectId,
         partitionKey: module.id,
         actor: actor.displayName,
-        payload: { module_id: module.id, node_type: module.node_type, name: module.name },
+        payload: { sub_module_id: module.id, module_name: module.module_name, name: module.name },
       });
     } else {
       module.fni_closed_at = null;
@@ -816,7 +1360,7 @@ export async function confirmLoadedInProd(
     const columns = columnsFor(store, projectId).filter(
       (column) => column.counts && isActiveColumn(config, column),
     );
-    const subs = store.subactivities.filter((sub) => sub.module_id === module.id);
+    const subs = store.sub_activities.filter((sub) => sub.sub_module_id === module.id);
     const targets: (string | null)[] = subs.length ? subs.map((sub) => sub.id) : [null];
     const at = nowIso();
     let changed = 0;
@@ -833,8 +1377,8 @@ export async function confirmLoadedInProd(
       for (const target of targets) {
         const existing = store.cells.find(
           (cell) =>
-            cell.module_id === module.id &&
-            cell.subactivity_id === target &&
+            cell.sub_module_id === module.id &&
+            cell.sub_activity_id === target &&
             cell.column_key === column.key,
         );
         const current = existing?.status ?? BLANK;
@@ -846,8 +1390,8 @@ export async function confirmLoadedInProd(
           existing.changed_at = at;
         } else {
           store.cells.push({
-            module_id: module.id,
-            subactivity_id: target,
+            sub_module_id: module.id,
+            sub_activity_id: target,
             column_key: column.key,
             status: done,
             changed_by: actor.displayName,
@@ -873,7 +1417,7 @@ export async function confirmLoadedInProd(
         projectId,
         partitionKey: module.id,
         actor: actor.displayName,
-        payload: { module_id: module.id, cells_changed: changed },
+        payload: { sub_module_id: module.id, cells_changed: changed },
       });
     }
 
@@ -889,8 +1433,8 @@ export async function confirmLoadedInProd(
 function fillBlankCells(store: StoreData, moduleId: string, projectId: string, target: string | null): void {
   for (const column of columnsFor(store, projectId)) {
     store.cells.push({
-      module_id: moduleId,
-      subactivity_id: target,
+      sub_module_id: moduleId,
+      sub_activity_id: target,
       column_key: column.key,
       status: BLANK,
       changed_by: null,
@@ -919,7 +1463,7 @@ export async function createModule(
     if (!name) throw validationFailed('A module needs an activity name.');
 
     const config = configFor(store, projectId);
-    if (!config.node_types.includes(nodeType)) {
+    if (!config.module_names.includes(nodeType)) {
       throw validationFailed(
         `${nodeType} is not a node type on this project. Add it on the Configure screen first.`,
       );
@@ -927,19 +1471,19 @@ export async function createModule(
 
     // The node type and the activity name together are the module's identity: the same
     // activity on two node types is two modules, tracked separately.
-    const duplicate = store.modules.some(
+    const duplicate = store.sub_modules.some(
       (module) =>
-        module.project_id === projectId && module.node_type === nodeType && module.name === name,
+        module.project_id === projectId && module.module_name === nodeType && module.name === name,
     );
     if (duplicate) {
       throw conflict(`${nodeType} · ${name} is already tracked on this project.`);
     }
 
     const moduleId = randomUUID();
-    store.modules.push({
+    store.sub_modules.push({
       id: moduleId,
       project_id: projectId,
-      node_type: nodeType,
+      module_name: nodeType,
       name,
       library_entry_id: null,
       owner: null,
@@ -960,24 +1504,24 @@ export async function createModule(
       const existing = store.library.find(
         (entry) =>
           entry.tenant_id === actor.tenantId &&
-          entry.node_type === nodeType &&
+          entry.module_name === nodeType &&
           entry.name === name,
       );
       if (existing) {
         existing.used_in_projects += 1;
-        store.modules.find((module) => module.id === moduleId)!.library_entry_id = existing.id;
+        store.sub_modules.find((module) => module.id === moduleId)!.library_entry_id = existing.id;
       } else {
         const entryId = randomUUID();
         store.library.push({
           id: entryId,
           tenant_id: actor.tenantId,
-          node_type: nodeType,
+          module_name: nodeType,
           name,
           version: 'v1',
-          subactivity_names: [],
+          sub_activity_names: [],
           used_in_projects: 1,
         });
-        store.modules.find((module) => module.id === moduleId)!.library_entry_id = entryId;
+        store.sub_modules.find((module) => module.id === moduleId)!.library_entry_id = entryId;
       }
     }
 
@@ -989,9 +1533,9 @@ export async function createModule(
 // Subactivities
 // ---------------------------------------------------------------------------
 
-function subactivitiesOf(store: StoreData, moduleId: string): Subactivity[] {
-  return store.subactivities
-    .filter((subactivity) => subactivity.module_id === moduleId)
+function subactivitiesOf(store: StoreData, moduleId: string): SubActivity[] {
+  return store.sub_activities
+    .filter((subactivity) => subactivity.sub_module_id === moduleId)
     .sort((a, b) => a.order_index - b.order_index);
 }
 
@@ -1014,7 +1558,7 @@ export async function addSubactivity(
 
     const module = findModule(store, projectId, moduleId);
     if (module.fni_closed_at) {
-      throw badRequest('This module is closed. Reopen it before changing its subactivities.');
+      throw badRequest('This module is closed. Reopen it before changing its sub_activities.');
     }
 
     const label = name.trim();
@@ -1026,9 +1570,9 @@ export async function addSubactivity(
     }
 
     const subactivityId = randomUUID();
-    store.subactivities.push({
+    store.sub_activities.push({
       id: subactivityId,
-      module_id: moduleId,
+      sub_module_id: moduleId,
       name: label,
       order_index: existing.length,
     });
@@ -1037,9 +1581,9 @@ export async function addSubactivity(
       // Carry the module's own row down onto the first subactivity, then drop it — the
       // module's cells are derived from here on.
       const ownCells = store.cells.filter(
-        (cell) => cell.module_id === moduleId && cell.subactivity_id === null,
+        (cell) => cell.sub_module_id === moduleId && cell.sub_activity_id === null,
       );
-      for (const cell of ownCells) cell.subactivity_id = subactivityId;
+      for (const cell of ownCells) cell.sub_activity_id = subactivityId;
     } else {
       fillBlankCells(store, moduleId, projectId, subactivityId);
     }
@@ -1074,8 +1618,8 @@ export async function renameSubactivity(
     const label = name.trim();
     if (!label) throw validationFailed('A subactivity needs a name.');
 
-    const subactivity = store.subactivities.find(
-      (candidate) => candidate.id === subactivityId && candidate.module_id === moduleId,
+    const subactivity = store.sub_activities.find(
+      (candidate) => candidate.id === subactivityId && candidate.sub_module_id === moduleId,
     );
     if (!subactivity) throw notFound('That subactivity is not on this module.');
 
@@ -1109,7 +1653,7 @@ export async function removeSubactivity(
 
     const module = findModule(store, projectId, moduleId);
     if (module.fni_closed_at) {
-      throw badRequest('This module is closed. Reopen it before changing its subactivities.');
+      throw badRequest('This module is closed. Reopen it before changing its sub_activities.');
     }
 
     const existing = subactivitiesOf(store, moduleId);
@@ -1136,19 +1680,19 @@ export async function removeSubactivity(
       }
     }
 
-    store.subactivities = store.subactivities.filter(
+    store.sub_activities = store.sub_activities.filter(
       (candidate) => candidate.id !== subactivityId,
     );
     store.cells = store.cells.filter(
-      (cell) => !(cell.module_id === moduleId && cell.subactivity_id === subactivityId),
+      (cell) => !(cell.sub_module_id === moduleId && cell.sub_activity_id === subactivityId),
     );
 
     if (lastOne) {
       const at = nowIso();
       for (const column of columns) {
         store.cells.push({
-          module_id: moduleId,
-          subactivity_id: null,
+          sub_module_id: moduleId,
+          sub_activity_id: null,
           column_key: column.key,
           status: rolledUp.get(column.key) ?? BLANK,
           changed_by: actor.displayName,
@@ -1202,7 +1746,7 @@ export async function createDefect(
       actor: actor.displayName,
       payload: {
         defect_id: defectId,
-        module_id: input.moduleId,
+        sub_module_id: input.moduleId,
         severity: input.severity,
         phase: input.phase,
         ticket_key: input.ticketKey.trim(),
@@ -1211,7 +1755,7 @@ export async function createDefect(
     store.defects.push({
       id: defectId,
       project_id: projectId,
-      module_id: input.moduleId,
+      sub_module_id: input.moduleId,
       phase: input.phase,
       ticket_key: input.ticketKey.trim(),
       child_req_id: input.childReqId.trim(),
@@ -1252,7 +1796,7 @@ export async function transitionDefect(
       name: 'defect.transitioned',
       tenantId: actor.tenantId,
       projectId,
-      partitionKey: defect.module_id,
+      partitionKey: defect.sub_module_id,
       actor: actor.displayName,
       payload: { defect_id: defect.id, from: before, to: defect.status },
     });
@@ -1261,7 +1805,7 @@ export async function transitionDefect(
       scope: 'module',
       label: 'DEFECT',
       what: `${defect.ticket_key || 'defect'} ${before} → ${defect.status}`,
-      moduleId: defect.module_id,
+      moduleId: defect.sub_module_id,
     });
   });
 }
@@ -1305,7 +1849,7 @@ export async function assignDefect(
       scope: 'module',
       label: 'DEFECT',
       what: `${defect.ticket_key || 'defect'} assigned ${before} → ${defect.assignee ?? 'unassigned'}`,
-      moduleId: defect.module_id,
+      moduleId: defect.sub_module_id,
     });
   });
 }
@@ -1330,7 +1874,7 @@ export async function addLink(
 
     store.links.push({
       id: randomUUID(),
-      module_id: moduleId,
+      sub_module_id: moduleId,
       type: input.type,
       label: input.label.trim() || url,
       url,
@@ -1345,7 +1889,7 @@ export async function removeLink(actor: Actor, projectId: string, linkId: string
 
     const index = store.links.findIndex((link) => link.id === linkId);
     if (index < 0) throw notFound('That link does not exist.');
-    findModule(store, projectId, store.links[index]!.module_id);
+    findModule(store, projectId, store.links[index]!.sub_module_id);
     store.links.splice(index, 1);
   });
 }
@@ -1394,10 +1938,15 @@ export async function createProject(
       configured: false,
       archived: false,
       created_at: nowIso(),
+      // The generic words until its admin picks its own on the Configure screen. A new
+      // project should not inherit another team's vocabulary.
+      module_label: 'Module',
+      sub_module_label: 'Sub-module',
+      sub_activity_label: 'Sub-activity',
     });
     store.project_config.push({
       project_id: projectId,
-      node_types: [],
+      module_names: [],
       stages: [],
       owners: [],
       link_types: [],
@@ -1486,7 +2035,7 @@ export async function removeColumn(actor: Actor, projectId: string, columnKey: s
     // The cells go with it: a column that is not configured has no meaning, and
     // leaving orphans behind would quietly resurrect them if the name were reused.
     store.cells = store.cells.filter((cell) => {
-      const module = store.modules.find((candidate) => candidate.id === cell.module_id);
+      const module = store.sub_modules.find((candidate) => candidate.id === cell.sub_module_id);
       return !(module?.project_id === projectId && cell.column_key === columnKey);
     });
   });
@@ -1657,7 +2206,7 @@ export async function setEnvironmentEnabled(
 export async function updateConfigList(
   actor: Actor,
   projectId: string,
-  list: 'node_types' | 'stages' | 'owners' | 'link_types',
+  list: 'modules' | 'stages' | 'owners' | 'link_types',
   action: 'add' | 'remove',
   value: string,
 ): Promise<void> {
@@ -1669,7 +2218,7 @@ export async function updateConfigList(
     if (!config) {
       config = {
         project_id: projectId,
-        node_types: [],
+        module_names: [],
         stages: [],
         owners: [],
         link_types: [],
@@ -1689,13 +2238,19 @@ export async function updateConfigList(
       return;
     }
 
-    const current = config[list];
+    // `modules` on the wire, `module_names` in the store. The list was renamed when a module
+    // became a record with an id of its own: the *names* are still what this editable list
+    // holds, and the records are derived from them. One mapping here rather than a second
+    // name on the wire that the Java service does not use.
+    const field = list === 'modules' ? 'module_names' : list;
+    const current = config[field];
+
     if (action === 'add') {
       const entry = value.trim();
       if (!entry) throw validationFailed('That cannot be empty.');
       if (!current.includes(entry)) current.push(entry);
     } else {
-      config[list] = current.filter((item) => item !== value);
+      config[field] = current.filter((item) => item !== value);
     }
   });
 }
@@ -1723,10 +2278,10 @@ export async function cloneFromLibrary(
     if (!entry) throw notFound('That library entry does not exist.');
 
     const moduleId = randomUUID();
-    store.modules.push({
+    store.sub_modules.push({
       id: moduleId,
       project_id: projectId,
-      node_type: entry.node_type,
+      module_name: entry.module_name,
       name: entry.name,
       library_entry_id: entry.id,
       owner: null,
@@ -1736,10 +2291,10 @@ export async function cloneFromLibrary(
       created_at: nowIso(),
     });
 
-    entry.subactivity_names.forEach((name, index) => {
-      store.subactivities.push({
+    entry.sub_activity_names.forEach((name, index) => {
+      store.sub_activities.push({
         id: randomUUID(),
-        module_id: moduleId,
+        sub_module_id: moduleId,
         name,
         order_index: index,
       });
@@ -1748,14 +2303,14 @@ export async function cloneFromLibrary(
 
     // A clone starts with an empty deliverable row: every cell blank, so the gaps show.
     const columns = columnsFor(store, projectId);
-    const targets: (string | null)[] = entry.subactivity_names.length
-      ? store.subactivities.filter((sub) => sub.module_id === moduleId).map((sub) => sub.id)
+    const targets: (string | null)[] = entry.sub_activity_names.length
+      ? store.sub_activities.filter((sub) => sub.sub_module_id === moduleId).map((sub) => sub.id)
       : [null];
     for (const target of targets) {
       for (const column of columns) {
         store.cells.push({
-          module_id: moduleId,
-          subactivity_id: target,
+          sub_module_id: moduleId,
+          sub_activity_id: target,
           column_key: column.key,
           status: BLANK,
           changed_by: null,
@@ -1765,18 +2320,18 @@ export async function cloneFromLibrary(
     }
 
     const config = store.project_config.find((candidate) => candidate.project_id === projectId);
-    if (config && !config.node_types.includes(entry.node_type)) {
-      config.node_types.push(entry.node_type);
+    if (config && !config.module_names.includes(entry.module_name)) {
+      config.module_names.push(entry.module_name);
     }
 
     record(store, projectId, actor, {
       scope: 'module',
       label: 'MODULE',
-      what: `cloned ${entry.node_type} · ${entry.name} ${entry.version} from the library`,
+      what: `cloned ${entry.module_name} · ${entry.name} ${entry.version} from the library`,
       moduleId,
     });
 
-    return { moduleId, nodeType: entry.node_type };
+    return { moduleId, nodeType: entry.module_name };
   });
 }
 
@@ -2159,7 +2714,7 @@ export async function promoteDrift(
 
     if (from === to) throw validationFailed('A promotion needs two different environments.');
 
-    const { modules } = buildSnapshot(store, actor, projectId);
+    const { sub_modules: modules } = buildSnapshot(store, actor, projectId);
     const rows = driftRows(store, projectId);
     const gate = promotionGate(store, projectId, modules, rows);
     if (!gate.can_promote) {

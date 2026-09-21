@@ -148,13 +148,33 @@ export interface RoleView {
   member_count: number;
 }
 
+/**
+ * One person in the organisation, as the Access screen's organisation table needs them.
+ *
+ * Every field added after `status` is optional in TypeScript for a reason that has bitten this
+ * codebase before: the service runs Jackson with `non_null` property inclusion, so a null field
+ * is **absent from the JSON**, not null in it. `org_wide_membership_id` for somebody with no
+ * organisation-wide row does not arrive as `null` — it does not arrive. Typing it `string | null`
+ * and writing `!== null` would then be true for `undefined` and the screen would render a role
+ * picker pointed at nothing.
+ */
 export interface OrgUserView {
   id: string;
   display_name: string;
   email: string;
   role_name: string;
   scope: string;
+  /** `invited`, `active`, or `removed` — a deactivated account, still listed so it can be put back. */
   status: string;
+  /** The organisation-wide membership row, when there is one. Absent when there is not. */
+  org_wide_membership_id?: string | null;
+  org_wide_role_id?: string | null;
+  /** Per-project memberships. Organisation-wide access is not counted here — it is the field above. */
+  project_count: number;
+  super_admin: boolean;
+  /** False when the reader may not remove them from the organisation; `locked_reason` says why. */
+  removable: boolean;
+  locked_reason?: string | null;
 }
 
 /** One person's access to the project currently open. */
@@ -281,7 +301,11 @@ export interface StepListView {
  */
 export interface NotificationView {
   id: string;
-  kind: 'mention' | 'step.blocked' | 'step.ready';
+  /**
+   * `account` is the one addressed to the person who caused it rather than to somebody waiting
+   * on them — it carries a single-use link the server can never show again.
+   */
+  kind: 'mention' | 'step.blocked' | 'step.ready' | 'account';
   title: string;
   body: string;
   link: string;
@@ -475,6 +499,16 @@ export interface Snapshot {
      * are granted by a role an organisation's own admin can edit. See `User.is_super_admin`.
      */
     is_super_admin: boolean;
+    /**
+     * Whether this person may create a project — **not** the same as
+     * `permissions.includes('project.create')`, and the reason it is sent separately.
+     *
+     * Permissions are the union of an organisation-wide role and a role on the open project, so
+     * that list answers "may create a project somewhere". Creating one is an organisation-wide
+     * act, so the service requires the grant to be held organisation-wide. Reading the
+     * permission list here would draw a control the service then refuses.
+     */
+    can_create_projects: boolean;
   };
   org: { id: string; name: string };
   /**
@@ -525,6 +559,12 @@ export interface Snapshot {
    * median, and "no answer yet" is a different statement from "takes no time".
    */
   timing: ColumnTimingView[];
+  /**
+   * How long each step takes, from the append-only event history — the more trustworthy of the
+   * two, because steps keep every transition and cells keep only the last one. Only steps that
+   * have been finished at least once appear.
+   */
+  step_timing: StepTimingView[];
 }
 
 /**
@@ -549,6 +589,24 @@ export interface ColumnTimingView {
   added_days: number | null | undefined;
   measured: number;
   /** Not finished here, so not in the figures. "4 days, from 2 of 60" means something else. */
+  outstanding: number;
+}
+
+/**
+ * How long one step takes, from the append-only event history.
+ *
+ * The accurate counterpart to `ColumnTimingView`. A cell keeps only its last change, so a
+ * deliverable corrected a month later reads as having taken a month; step events are never
+ * rewritten, so a step ticked, un-ticked and ticked again reports two durations rather than one
+ * long span. Same `== null` rule as above — absent fields arrive as `undefined`.
+ */
+export interface StepTimingView {
+  definition_id: string;
+  name: string;
+  median_days: number | null | undefined;
+  mean_days: number | null | undefined;
+  /** How many times it was finished, not how many exist. Two goes count twice. */
+  completions: number;
   outstanding: number;
 }
 

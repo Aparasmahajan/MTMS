@@ -1,4 +1,4 @@
-# Pending — MTMS (Mahajan Ticket Management System)
+# Pending — MTMS (Organization Management System)
 
 **Handoff document.** Written to be read cold, with no prior conversation. Parts 1–6 are
 built; Part 4 is all but two items. The rename to MTMS and the static client demo are done.

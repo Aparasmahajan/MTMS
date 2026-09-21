@@ -7,5 +7,5 @@ const Body = z.object({ name: z.string().trim().min(1) });
 export const POST = withAuth<{ id: string }>(async ({ actor, projectId, request, params, snapshot }) => {
   const body = await parseBody(request, Body);
   const { subactivityId } = await addSubactivity(actor, projectId, params.id, body.name);
-  return ok(await snapshot(), { subactivity_id: subactivityId });
+  return ok(await snapshot(), { sub_activity_id: subactivityId });
 });

@@ -21,15 +21,15 @@ export default function LibraryPage() {
   const canClone = can('module.clone');
   const canCreate = can('module.create');
 
-  const nodeTypes = snapshot.config.node_types;
+  const nodeTypes = snapshot.config.module_names;
   const [nodeType, setNodeType] = useState(nodeTypes[0] ?? '');
   const [name, setName] = useState('');
   const [addToLibrary, setAddToLibrary] = useState(false);
 
   async function clone(entryId: string) {
     const meta = await apply(null, () => send<Snapshot>(`/api/v1/library/${entryId}/clone`, 'POST'));
-    if (meta?.node_type) {
-      router.push(`/matrix?node=${encodeURIComponent(String(meta.node_type))}`);
+    if (meta?.module_name) {
+      router.push(`/matrix?node=${encodeURIComponent(String(meta.module_name))}`);
     }
   }
 
@@ -41,7 +41,7 @@ export default function LibraryPage() {
     }
     const meta = await apply(null, () =>
       send<Snapshot>('/api/v1/modules', 'POST', {
-        node_type: nodeType,
+        module_name: nodeType,
         name: name.trim(),
         add_to_library: addToLibrary,
       }),
@@ -55,7 +55,7 @@ export default function LibraryPage() {
   return (
     <div className="page page-narrow">
       <PageTitle
-        title="Module library"
+        title="SubModule library"
         lede="A module is a node type plus an activity, built once. Clone it into a project and its own tracking starts from scratch — the library entry is not affected."
       />
 
@@ -141,16 +141,16 @@ export default function LibraryPage() {
             {snapshot.library.map((entry) => (
               <tr key={entry.id}>
                 <td>
-                  <span className="tag tag-accent">{entry.node_type}</span>
+                  <span className="tag tag-accent">{entry.module_name}</span>
                 </td>
                 <td style={{ fontSize: 12, wordBreak: 'break-word', maxWidth: 380 }}>{entry.name}</td>
                 <td className="mono" style={{ fontSize: 12 }}>
                   {entry.version}
                 </td>
                 <td style={{ fontSize: 12, color: 'var(--color-neutral-700)', whiteSpace: 'nowrap' }}>
-                  {entry.subactivity_count
-                    ? `${entry.subactivity_count} subactivities`
-                    : 'no subactivities'}
+                  {entry.sub_activity_count
+                    ? `${entry.sub_activity_count} sub_activities`
+                    : 'no sub_activities'}
                 </td>
                 <td style={{ fontSize: 12, color: 'var(--color-neutral-700)', whiteSpace: 'nowrap' }}>
                   {entry.used_in_projects} {entry.used_in_projects === 1 ? 'project' : 'projects'}

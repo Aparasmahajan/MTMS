@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTracker } from '@/components/TrackerProvider';
 import { Blueprint, NotConfigured, PageTitle, SectionHeading } from '@/components/primitives';
-import { formatStamp, missingLine } from '@/lib/shared/views';
+import { missingLine } from '@/lib/shared/views';
 
 /**
  * Prod readiness — where the project stands, and what is not recorded.
@@ -15,28 +15,36 @@ import { formatStamp, missingLine } from '@/lib/shared/views';
  * why a cell click changes this screen too.
  */
 export default function DashboardPage() {
-  const { snapshot, can, reasonFor, moduleHref } = useTracker();
+  const { snapshot, can, reasonFor, subModuleHref, words } = useTracker();
   const router = useRouter();
-  const { modules, config } = snapshot;
+  const { sub_modules: subModules, config } = snapshot;
+
+  // Only the columns that have produced an answer. A row of dashes teaches nothing, and the
+  // panel is hidden entirely until at least one column has something finished to measure.
+  const timing = (snapshot.timing ?? []).filter((row) => row.median_days != null);
+
+  // The steps are the accurate half — measured from an append-only history rather than from
+  // cells that keep only their last change. Slowest first, already sorted by the server.
+  const stepTiming = (snapshot.step_timing ?? []).filter((row) => row.median_days != null);
 
   const stats = useMemo(() => {
-    const fullyDone = modules.filter((module) => module.readiness === 100).length;
-    const notStarted = modules.filter((module) => module.readiness === 0).length;
-    const blankCells = modules.reduce((total, module) => total + module.blank_count, 0);
+    const fullyDone = subModules.filter((subModule) => subModule.readiness === 100).length;
+    const notStarted = subModules.filter((subModule) => subModule.readiness === 0).length;
+    const blankCells = subModules.reduce((total, subModule) => total + subModule.blank_count, 0);
 
     return {
       fullyDone,
       notStarted,
-      partWay: modules.length - fullyDone - notStarted,
+      partWay: subModules.length - fullyDone - notStarted,
       blankCells,
-      noTarget: modules.filter((module) => !module.fni_target_date).length,
-      noOwner: modules.filter((module) => !module.owner).length,
-      noRitm: modules.filter((module) => {
-        const cell = module.cells.find((entry) => entry.column_key === 'ritm');
+      noTarget: subModules.filter((subModule) => !subModule.fni_target_date).length,
+      noOwner: subModules.filter((subModule) => !subModule.owner).length,
+      noRitm: subModules.filter((subModule) => {
+        const cell = subModule.cells.find((entry) => entry.column_key === 'ritm');
         return !cell || cell.status !== 'raised';
       }).length,
     };
-  }, [modules]);
+  }, [subModules]);
 
   // Every figure below counts over the deliverable columns. With none configured they
   // would all read zero, which looks like a project in trouble rather than one not yet
@@ -51,18 +59,12 @@ export default function DashboardPage() {
     );
   }
 
-  const byNodeType = config.node_types
-    .map((nodeType) => {
-      const rows = modules.filter((module) => module.node_type === nodeType);
-      const average = rows.length
-        ? Math.round(rows.reduce((total, module) => total + module.readiness, 0) / rows.length)
-        : 0;
-      return { nodeType, count: rows.length, average };
-    })
-    .filter((entry) => entry.count > 0);
+  // Counted by the server now, so this screen and the module screen cannot disagree about what
+  // "in prod" means. It is the matrix's own definition: every counted deliverable done.
+  const byModule = config.modules.filter((entry) => entry.sub_module_count > 0);
 
-  const closest = modules
-    .filter((module) => module.readiness > 0 && module.readiness < 100)
+  const closest = subModules
+    .filter((subModule) => subModule.readiness > 0 && subModule.readiness < 100)
     .sort((a, b) => b.readiness - a.readiness)
     .slice(0, 5);
 
@@ -70,7 +72,7 @@ export default function DashboardPage() {
     {
       label: 'Fully loaded in prod',
       value: stats.fullyDone,
-      note: `of ${modules.length} modules`,
+      note: `of ${subModules.length} ${words.subModule.lowerMany}`,
       href: '/matrix?ready=Loaded+in+prod',
     },
     {
@@ -95,9 +97,9 @@ export default function DashboardPage() {
 
   const gaps = [
     { count: stats.blankCells, text: 'cells with no status at all, so readiness cannot be trusted' },
-    { count: stats.noTarget, text: 'modules with no target date for prod loading' },
-    { count: stats.noOwner, text: 'modules with no owner recorded' },
-    { count: stats.noRitm, text: 'modules where no RITM has been raised' },
+    { count: stats.noTarget, text: `${words.subModule.lowerMany} with no target date for prod loading` },
+    { count: stats.noOwner, text: `${words.subModule.lowerMany} with no owner recorded` },
+    { count: stats.noRitm, text: `${words.subModule.lowerMany} where no RITM has been raised` },
   ];
 
   return (
@@ -105,14 +107,14 @@ export default function DashboardPage() {
       <PageTitle
         kicker={`${snapshot.org.name} / ${snapshot.project.key}`}
         title="Prod readiness"
-        lede={`${modules.length} modules across ${byNodeType.length} node types. A module is a node type plus an activity; readiness is measured per deliverable.`}
+        lede={`${subModules.length} ${words.subModule.lowerMany} across ${byModule.length} ${words.module.lowerMany}. A ${words.subModule.lower} is one ${words.module.lower} plus one piece of work on it; readiness is measured per deliverable.`}
         actions={
           <>
             <Link href="/matrix" className="btn btn-secondary">
               Open matrix
             </Link>
             <Link href="/library" className="btn btn-primary">
-              Add a module
+              Add a {words.subModule.lower}
             </Link>
           </>
         }
@@ -182,14 +184,14 @@ export default function DashboardPage() {
         }}
       >
         <div>
-          <SectionHeading first>Readiness by node type</SectionHeading>
+          <SectionHeading first>Readiness by {words.module.lower}</SectionHeading>
           <div className="bordered">
-            {byNodeType.map((entry) => (
+            {byModule.map((entry) => (
               <button
-                key={entry.nodeType}
+                key={entry.id}
                 type="button"
                 className="hoverable"
-                onClick={() => router.push(`/matrix?node=${encodeURIComponent(entry.nodeType)}`)}
+                onClick={() => router.push(`/modules/${entry.id}`)}
                 style={{
                   display: 'flex',
                   width: '100%',
@@ -213,13 +215,27 @@ export default function DashboardPage() {
                     textTransform: 'uppercase',
                   }}
                 >
-                  {entry.nodeType}
+                  {entry.name}
                 </span>
-                <span style={{ width: 74, flex: 'none', fontSize: 12, color: 'var(--color-neutral-600)' }}>
-                  {entry.count} {entry.count === 1 ? 'module' : 'modules'}
+                <span style={{ width: 96, flex: 'none', fontSize: 12, color: 'var(--color-neutral-600)' }}>
+                  {entry.sub_module_count}{' '}
+                  {entry.sub_module_count === 1 ? words.subModule.lower : words.subModule.lowerMany}
+                </span>
+                {/*
+                  The question a PM opens this screen to ask. An average is a summary of how far
+                  along things are; this is the count of things that are actually finished, and
+                  the two move apart exactly when it matters — nineteen activities at 95% is an
+                  average that reads well and a release with nothing in production.
+                */}
+                <span
+                  className="tabular"
+                  style={{ width: 92, flex: 'none', fontSize: 12, color: 'var(--color-neutral-700)' }}
+                  title={`${entry.in_prod} of ${entry.sub_module_count} ${entry.sub_module_count === 1 ? words.subModule.lower : words.subModule.lowerMany} have every counted deliverable loaded in prod`}
+                >
+                  {entry.in_prod} of {entry.sub_module_count} in prod
                 </span>
                 <span className="bar" style={{ flex: 1, height: 10 }} aria-hidden>
-                  <span style={{ width: `${entry.average}%` }} />
+                  <span style={{ width: `${entry.readiness}%` }} />
                 </span>
                 <span
                   className="tabular"
@@ -231,7 +247,7 @@ export default function DashboardPage() {
                     fontSize: 16,
                   }}
                 >
-                  {entry.average}%
+                  {entry.readiness}%
                 </span>
               </button>
             ))}
@@ -280,10 +296,10 @@ export default function DashboardPage() {
                 Nothing is part way — every module is either finished or not started.
               </div>
             ) : null}
-            {closest.map((module) => (
+            {closest.map((subModule) => (
               <Link
-                key={module.id}
-                href={moduleHref(module.id)}
+                key={subModule.id}
+                href={subModuleHref(subModule.id)}
                 className="hoverable"
                 style={{
                   display: 'block',
@@ -294,81 +310,215 @@ export default function DashboardPage() {
               >
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-3)' }}>
                   <span className="tag tag-accent" style={{ flex: 'none' }}>
-                    {module.node_type}
+                    {subModule.module_name}
                   </span>
                   <span style={{ flex: 1, fontSize: 13, lineHeight: 1.3, wordBreak: 'break-word' }}>
-                    {module.name}
+                    {subModule.name}
                   </span>
                   <span
                     className="tabular"
                     style={{ fontFamily: 'var(--font-heading)', fontSize: 16, flex: 'none' }}
                   >
-                    {module.readiness}%
+                    {subModule.readiness}%
                   </span>
                 </div>
                 <div style={{ marginTop: 'var(--space-1)', fontSize: 12, color: 'var(--color-neutral-600)' }}>
-                  {missingLine(module.missing)}
+                  {missingLine(subModule.missing)}
                 </div>
               </Link>
             ))}
           </div>
 
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'baseline',
-              justifyContent: 'space-between',
-              gap: 'var(--space-3)',
-            }}
-          >
-            <SectionHeading>Recent changes</SectionHeading>
-            {can('admin.audit.view') ? (
-              <Link
-                href="/audit"
-                style={{ fontSize: 12, color: 'var(--color-neutral-700)', flex: 'none' }}
-              >
-                See every change →
-              </Link>
-            ) : null}
-          </div>
-          <div className="bordered">
-            {snapshot.audit.slice(0, 6).map((entry) => (
-              <div
-                key={entry.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'baseline',
-                  gap: 'var(--space-3)',
-                  padding: 'var(--space-2) var(--space-4)',
-                  borderBottom: '1px solid var(--color-divider)',
-                  fontSize: 12,
-                }}
-              >
-                <span
+          {/*
+            Where the time goes.
+
+            Nobody fills any of this in. Every tick already carries the moment it was made and
+            every sub-module the moment it was created, so these are facts the application has
+            been recording since the first tick — which is the whole point: most tools cannot
+            answer this because they rely on estimates people stop updating.
+
+            Shown only once something has finished. A panel of dashes teaches nothing and takes
+            up the space where the honest answer ("not yet") belongs.
+          */}
+          {timing.length > 0 ? (
+            <>
+              <SectionHeading>Where the time goes</SectionHeading>
+              <Blueprint>
+                <div
                   style={{
-                    fontFamily: 'var(--font-heading)',
-                    letterSpacing: '.06em',
-                    textTransform: 'uppercase',
-                    width: 76,
-                    flex: 'none',
+                    fontSize: 14,
+                    lineHeight: 1.5,
+                    marginBottom: 'var(--space-4)',
+                    textWrap: 'pretty',
                   }}
                 >
-                  {entry.label}
-                </span>
-                <span style={{ flex: 1, color: 'var(--color-neutral-700)', wordBreak: 'break-word' }}>
-                  {entry.what}
-                </span>
-                <span style={{ color: 'var(--color-neutral-600)', flex: 'none' }}>
-                  {entry.who}, {formatStamp(entry.at)}
-                </span>
-              </div>
-            ))}
-            {snapshot.audit.length === 0 ? (
-              <div style={{ padding: 'var(--space-4)', fontSize: 13, color: 'var(--color-neutral-600)' }}>
-                Nothing has been changed yet.
-              </div>
-            ) : null}
-          </div>
+                  Measured from the ticks, not from anybody&rsquo;s estimate. Days from a{' '}
+                  {words.subModule.lower} being created to that deliverable being finished, and
+                  how much each one adds on top of the one before it.
+                </div>
+
+                {timing.map((row) => (
+                  <div
+                    key={row.column_key}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      gap: 'var(--space-3)',
+                      padding: 'var(--space-2) 0',
+                      borderTop: '1px solid var(--color-divider)',
+                    }}
+                  >
+                    <span
+                      className="tabular"
+                      style={{
+                        fontFamily: 'var(--font-heading)',
+                        fontWeight: 600,
+                        fontSize: 20,
+                        width: 56,
+                        flex: 'none',
+                        // Null is not zero. A column nobody has finished has no answer yet.
+                        color:
+                          row.median_days == null
+                            ? 'var(--color-neutral-500)'
+                            : 'var(--color-text)',
+                      }}
+                    >
+                      {row.median_days == null ? '—' : row.median_days}
+                    </span>
+                    <span style={{ flex: 1, fontSize: 13, textWrap: 'pretty' }}>
+                      {row.label}
+                      {row.added_days != null ? (
+                        <span style={{ color: 'var(--color-neutral-600)' }}>
+                          {' '}
+                          · {row.added_days > 0 ? '+' : ''}
+                          {row.added_days}d on the previous column
+                        </span>
+                      ) : null}
+                    </span>
+                    <span
+                      className="tabular"
+                      style={{ fontSize: 12, color: 'var(--color-neutral-600)', flex: 'none' }}
+                      title={
+                        row.outstanding > 0
+                          ? `${row.outstanding} not finished here, so not counted`
+                          : 'every one is finished here'
+                      }
+                    >
+                      from {row.measured}
+                      {row.outstanding > 0 ? ` of ${row.measured + row.outstanding}` : ''}
+                    </span>
+                  </div>
+                ))}
+
+                <div
+                  style={{
+                    marginTop: 'var(--space-3)',
+                    fontSize: 12,
+                    color: 'var(--color-neutral-600)',
+                    textWrap: 'pretty',
+                  }}
+                >
+                  Median days, so one abandoned {words.subModule.lower} does not distort the
+                  figure. Anything unfinished is left out rather than counted as instant, which is
+                  why the count beside each row matters. A cell records only its last change, so a
+                  deliverable corrected later reads as having taken longer — the steps below do
+                  not have that problem.
+                </div>
+              </Blueprint>
+            </>
+          ) : null}
+
+          {/*
+            The accurate half.
+
+            Steps keep every transition, so this pairs each "became outstanding" with the tick
+            that ended it: a step ticked, un-ticked and ticked again contributes two durations
+            rather than one long span — which is the reading that goes most wrong exactly on the
+            work that went badly, and that is the work anybody is asking about.
+          */}
+          {stepTiming.length > 0 ? (
+            <>
+              <SectionHeading>Slowest steps</SectionHeading>
+              <Blueprint>
+                <div
+                  style={{
+                    fontSize: 14,
+                    lineHeight: 1.5,
+                    marginBottom: 'var(--space-4)',
+                    textWrap: 'pretty',
+                  }}
+                >
+                  Days from a checklist being attached to the step being ticked, across every
+                  checklist it appears on. Slowest first.
+                </div>
+
+                {stepTiming.map((row) => (
+                  <div
+                    key={row.definition_id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      gap: 'var(--space-3)',
+                      padding: 'var(--space-2) 0',
+                      borderTop: '1px solid var(--color-divider)',
+                    }}
+                  >
+                    <span
+                      className="tabular"
+                      style={{
+                        fontFamily: 'var(--font-heading)',
+                        fontWeight: 600,
+                        fontSize: 20,
+                        width: 56,
+                        flex: 'none',
+                      }}
+                    >
+                      {row.median_days}
+                    </span>
+                    <span style={{ flex: 1, fontSize: 13, textWrap: 'pretty' }}>{row.name}</span>
+                    <span
+                      className="tabular"
+                      style={{ fontSize: 12, color: 'var(--color-neutral-600)', flex: 'none' }}
+                      title={
+                        row.outstanding > 0
+                          ? `${row.outstanding} still waiting, so not counted`
+                          : 'nothing is waiting on this step'
+                      }
+                    >
+                      {row.completions} done
+                      {row.outstanding > 0 ? `, ${row.outstanding} waiting` : ''}
+                    </span>
+                  </div>
+                ))}
+
+                <div
+                  style={{
+                    marginTop: 'var(--space-3)',
+                    fontSize: 12,
+                    color: 'var(--color-neutral-600)',
+                    textWrap: 'pretty',
+                  }}
+                >
+                  Read from the step history, which is never rewritten. A step ticked, un-ticked
+                  and ticked again counts as two goes rather than one long wait — so rework shows
+                  up here instead of being averaged away.
+                </div>
+              </Blueprint>
+            </>
+          ) : null}
+
+          {/*
+            The recent-changes panel that sat here was dropped on 15 Sept. It duplicated the
+            Audit screen in six rows and could not say enough to be useful — the link is kept
+            because "where did the feed go" is the obvious next question.
+          */}
+          {can('admin.audit.view') ? (
+            <div style={{ marginTop: 'var(--space-6)', fontSize: 12 }}>
+              <Link href="/audit" style={{ color: 'var(--color-neutral-700)' }}>
+                See every change →
+              </Link>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

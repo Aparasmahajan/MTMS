@@ -55,7 +55,17 @@ public class InMemoryStepRepository implements StepRepository {
         entries,
         db.stepProgress.stream().filter(p -> entryIds.contains(p.entryId())).toList(),
         db.stepEvents.stream().filter(e -> entryIds.contains(e.entryId())).toList(),
-        db.stepComments.stream().filter(c -> entryIds.contains(c.entryId())).toList());
+        db.stepComments.stream().filter(c -> entryIds.contains(c.entryId())).toList(),
+        // The same filter the JDBC one applies, and the same ascending order — which is required
+        // rather than cosmetic, because Timing.perStep treats the order as the truth about what
+        // happened. This store never caps, so the difference from `events` here is only the
+        // filter; under MySQL it is also the difference between a complete history and the most
+        // recent thousand rows.
+        db.stepEvents.stream()
+            .filter(e -> entryIds.contains(e.entryId()))
+            .filter(e -> e.to() == Steps.State.DONE || e.from() == Steps.State.DONE)
+            .sorted(Comparator.comparing(Steps.Event::at))
+            .toList());
   }
 
   // --- The library -----------------------------------------------------------

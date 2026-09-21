@@ -1,6 +1,7 @@
 package io.mtms.domain;
 
 import io.mtms.domain.model.Modules;
+import io.mtms.domain.model.Steps;
 import io.mtms.domain.model.Projects;
 import java.time.Duration;
 import java.time.Instant;
@@ -148,6 +149,127 @@ public final class Timing {
       }
     }
 
+    return timings;
+  }
+
+  /**
+   * One step's timings, across every checklist it appears on.
+   *
+   * @param medianDays the middle time from a step becoming outstanding to it being ticked done.
+   * @param completions how many times it was finished — not how many steps there are. A step
+   *     ticked, un-ticked and ticked again counts twice, because it genuinely took two goes and
+   *     reporting it once would hide the rework that is usually the reason somebody asked.
+   * @param outstanding how many are attached and not currently done.
+   */
+  public record StepTiming(
+      UUID definitionId,
+      String name,
+      Double medianDays,
+      Double meanDays,
+      int completions,
+      int outstanding) {}
+
+  /**
+   * How long each step takes, from the append-only event history.
+   *
+   * <p><strong>This is the accurate half.</strong> {@link #perColumn} reads the cells, which keep
+   * only their last change, so a deliverable corrected a month later reads as having taken a
+   * month. Step events are never rewritten, so this pairs each "became outstanding" with the
+   * "ticked done" that ended it and gets the re-tick case right: a step ticked, un-ticked and
+   * ticked again produced <em>two</em> durations, and a naive first-to-last would report the
+   * whole calendar span — wildly wrong exactly on the work that went badly, which is the work
+   * anybody is asking about.
+   *
+   * <p>A period opens when the checklist is attached, and again on every transition out of done.
+   * It closes on the transition into done. Anything still open at the end is not a duration and
+   * is counted as outstanding rather than as fast.
+   *
+   * @param transitions every event into or out of {@code done}, ascending by time. Ascending is
+   *     required, not a preference: the walk below treats order as the truth about what happened.
+   */
+  public static List<StepTiming> perStep(
+      List<Steps.Definition> definitions,
+      List<Steps.StepList> lists,
+      List<Steps.Entry> entries,
+      List<Steps.Event> transitions) {
+
+    Map<UUID, Instant> attachedAt = new HashMap<>();
+    Map<UUID, Instant> listCreated = new HashMap<>();
+    for (Steps.StepList list : lists) {
+      listCreated.put(list.id(), list.createdAt());
+    }
+
+    Map<UUID, UUID> definitionOfEntry = new HashMap<>();
+    for (Steps.Entry entry : entries) {
+      definitionOfEntry.put(entry.id(), entry.definitionId());
+      // When the checklist was attached is when this step started being outstanding. There is no
+      // per-entry timestamp, and the list's is the honest stand-in: the entries are written in
+      // the same transaction as the list they belong to.
+      Instant created = listCreated.get(entry.stepListId());
+      if (created != null) {
+        attachedAt.put(entry.id(), created);
+      }
+    }
+
+    Map<UUID, List<Double>> daysByDefinition = new HashMap<>();
+    Map<UUID, Boolean> doneNow = new HashMap<>();
+    Map<UUID, Instant> openedAt = new HashMap<>(attachedAt);
+
+    for (Steps.Event event : transitions) {
+      UUID definitionId = definitionOfEntry.get(event.entryId());
+      if (definitionId == null) {
+        // An event for an entry that has since been deleted. Its history outlived its
+        // configuration, which is by design; it has nothing to be attributed to.
+        continue;
+      }
+
+      boolean into = event.to() == Steps.State.DONE;
+      boolean outOf = event.from() == Steps.State.DONE && !into;
+
+      if (into) {
+        Instant opened = openedAt.get(event.entryId());
+        if (opened != null && event.at() != null && !event.at().isBefore(opened)) {
+          daysByDefinition
+              .computeIfAbsent(definitionId, key -> new ArrayList<>())
+              .add(days(opened, event.at()));
+        }
+        openedAt.remove(event.entryId());
+        doneNow.put(event.entryId(), true);
+      } else if (outOf) {
+        // Un-ticked. A new period starts here, and the one that just ended has already been
+        // counted — which is what makes two goes read as two durations.
+        openedAt.put(event.entryId(), event.at());
+        doneNow.put(event.entryId(), false);
+      }
+    }
+
+    List<StepTiming> timings = new ArrayList<>();
+    for (Steps.Definition definition : definitions) {
+      List<Double> days = daysByDefinition.getOrDefault(definition.id(), List.of());
+
+      int outstanding = 0;
+      for (Map.Entry<UUID, UUID> entry : definitionOfEntry.entrySet()) {
+        if (entry.getValue().equals(definition.id())
+            && !Boolean.TRUE.equals(doneNow.get(entry.getKey()))) {
+          outstanding++;
+        }
+      }
+
+      timings.add(
+          new StepTiming(
+              definition.id(),
+              definition.name(),
+              median(days),
+              mean(days),
+              days.size(),
+              outstanding));
+    }
+
+    // Slowest first. A list of steps in configuration order buries the finding; the question
+    // being asked is which step the work sits at.
+    timings.sort(
+        Comparator.comparing(
+            StepTiming::medianDays, Comparator.nullsLast(Comparator.reverseOrder())));
     return timings;
   }
 
