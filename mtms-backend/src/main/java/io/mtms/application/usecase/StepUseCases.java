@@ -4,6 +4,8 @@ import io.mtms.application.Actor;
 import io.mtms.application.ServiceException;
 import io.mtms.application.port.AccessRepository;
 import io.mtms.application.port.OwnerRepository;
+import io.mtms.application.port.ProjectRepository;
+import io.mtms.application.port.StepData;
 import io.mtms.application.port.StepRepository;
 import io.mtms.application.port.SubModuleRepository;
 import io.mtms.domain.PermissionKey;
@@ -52,6 +54,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class StepUseCases {
 
   private final StepRepository steps;
+  private final ProjectRepository projects;
   private final SubModuleRepository subModules;
   private final AccessRepository access;
   private final OwnerRepository owners;
@@ -60,12 +63,14 @@ public class StepUseCases {
 
   public StepUseCases(
       StepRepository steps,
+      ProjectRepository projects,
       SubModuleRepository subModules,
       AccessRepository access,
       OwnerRepository owners,
       NotificationUseCases notifications,
       MutationSupport support) {
     this.steps = steps;
+    this.projects = projects;
     this.subModules = subModules;
     this.access = access;
     this.owners = owners;
@@ -407,6 +412,92 @@ public class StepUseCases {
     return applied;
   }
 
+
+  // ---------------------------------------------------------------------------
+  // Defaults for a newly created sub-module
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Copies a module's checklists onto a sub-module that has just been created.
+   *
+   * <p>The companion to {@link #applyToModule}, and the half it was missing. Bulk-apply solves
+   * "attach this to the two hundred sub-modules that already exist"; this solves the one created
+   * next month, which otherwise starts bare and depends on somebody remembering. A default that
+   * has to be remembered is not a default.
+   *
+   * <p>A checklist attached to the <em>module</em> is the template. That is not a new concept
+   * bolted on: {@link Scope} already says a module holds its own checklist until it has
+   * sub-modules, at which point they hold it instead — so copying down at the moment a
+   * sub-module appears is the rule being carried out rather than an exception to it.
+   *
+   * <p>Copied, never linked. Ticking a step on one sub-module must not tick it on forty, which
+   * is the same decision bulk-apply makes and for the same reason.
+   *
+   * <p>Silent and best-effort by design: creating a sub-module must not fail because the
+   * template is empty, or archived, or because no module row exists for the name yet. The
+   * audit line says how many were attached, and zero is a perfectly ordinary answer.
+   *
+   * @return how many checklists were attached.
+   */
+  @Transactional
+  public int applyModuleDefaults(Actor actor, UUID subModuleId, String moduleName) {
+    UUID projectId = actor.projectId();
+
+    Optional<Modules.Module> module =
+        projects.config(projectId).moduleNamed(moduleName).filter(found -> !found.isArchived());
+    if (module.isEmpty()) {
+      return 0;
+    }
+
+    StepData data = steps.load(projectId);
+    List<Steps.StepList> templates =
+        steps.listsFor(projectId, Scope.MODULE, module.get().id()).stream()
+            .filter(list -> !list.isArchived())
+            .toList();
+
+    int attached = 0;
+    for (Steps.StepList template : templates) {
+      Steps.ResolvedList resolved = data.resolveOne(template);
+      if (resolved.entries().isEmpty()) {
+        // A template with no steps on it would produce an empty checklist, which reads on the
+        // screen as a feature somebody forgot to finish rather than as nothing to do.
+        continue;
+      }
+
+      Steps.StepList copy =
+          new Steps.StepList(
+              UUID.randomUUID(),
+              projectId,
+              template.name(),
+              Scope.SUB_MODULE,
+              subModuleId,
+              template.enforceOrder(),
+              null,
+              Instant.now());
+      steps.insertList(copy);
+
+      int order = 0;
+      for (Steps.ResolvedEntry entry : resolved.entries()) {
+        steps.insertEntry(
+            new Steps.Entry(UUID.randomUUID(), copy.id(), entry.definition().id(), order++));
+      }
+      attached++;
+    }
+
+    if (attached > 0) {
+      support.record(
+          actor,
+          projectId,
+          Audit.Scope.MODULE,
+          "STEPS",
+          attached == 1
+              ? "checklist attached from the " + moduleName + " default"
+              : attached + " checklists attached from the " + moduleName + " defaults",
+          subModuleId,
+          null);
+    }
+    return attached;
+  }
   // ---------------------------------------------------------------------------
   // Ticking
   // ---------------------------------------------------------------------------
@@ -738,13 +829,15 @@ public class StepUseCases {
   /**
    * Proves the thing a list is being attached to is in this project.
    *
-   * <p><strong>Module scope is modelled but not yet reachable.</strong> The schema, the domain and
-   * this repository all carry it, because the rule is "the lowest level that exists" and a module
-   * with no sub-modules has to be able to hold its own checklist. What is missing is upstream: a
-   * module reaches the API as a <em>name</em> in the project's configuration and has no id on the
-   * wire, so there is nothing for a caller to attach a list to. Exposing module ids is its own
-   * change — it touches the configuration shape, the Configure screen and the matrix — and
-   * guessing one here would be worse than refusing. Refusing with the reason is what this does.
+   * <p><strong>Module scope became reachable on 17 Sept</strong>, when modules gained ids on the
+   * wire. This used to refuse it, for a reason that was true when it was written and stopped
+   * being true a day later: a module arrived as a name and there was nothing to attach a list to.
+   * It now resolves like the other two.
+   *
+   * <p>A module-scoped list is the module's <strong>template</strong>: {@link
+   * #applyModuleDefaults} copies it onto each sub-module as that sub-module is created. That is
+   * the rule in {@link Scope} rather than an addition to it — a module holds its own checklist
+   * until it has sub-modules, at which point they hold it instead.
    */
   private void requireScope(UUID projectId, Scope scopeType, UUID scopeId) {
     switch (scopeType) {
@@ -762,10 +855,11 @@ public class StepUseCases {
           throw ServiceException.notFound("That sub-activity is not in this project.");
         }
       }
-      case MODULE ->
-          throw ServiceException.validation(
-              "A checklist attaches to a sub-module or a sub-activity. Module-level checklists"
-                  + " are not available yet — a module has no id on the API, only a name.");
+      case MODULE -> {
+        if (projects.config(projectId).moduleById(scopeId).isEmpty()) {
+          throw ServiceException.notFound("That module is not in this project.");
+        }
+      }
     }
   }
 

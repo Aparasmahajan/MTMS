@@ -43,7 +43,15 @@ public record Snapshot(
      */
     List<Views.NotificationView> notifications,
     int unreadNotifications,
-    DriftViews.DriftView drift) {
+    DriftViews.DriftView drift,
+    /**
+     * How long work actually takes, per column, computed from the ticks themselves.
+     *
+     * <p>On the snapshot rather than its own endpoint because it is derived entirely from rows
+     * already assembled here: a separate call would re-read the same cells to answer a question
+     * this pass has the data for.
+     */
+    List<Views.ColumnTimingView> timing) {
 
   /**
    * @param permissions this user's effective permissions in <em>this</em> project. The client

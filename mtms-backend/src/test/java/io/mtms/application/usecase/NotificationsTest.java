@@ -91,7 +91,7 @@ class NotificationsTest {
 
     notifications = new NotificationUseCases(inbox, access, notifier);
     stepUseCases =
-        new StepUseCases(steps, subModules, access, ownerRows, notifications, support);
+        new StepUseCases(steps, projects, subModules, access, ownerRows, notifications, support);
     discussionUseCases =
         new DiscussionUseCases(discussions, subModules, access, notifications, support);
 

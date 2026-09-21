@@ -95,7 +95,23 @@ export default function AccessPage() {
     if (!meta?.reset_url) return;
 
     setNotice(
-      `Password reset link for ${meta.display_name}. It works once, it expires in seven days, and this is the only time it can be read — copy it before dismissing this: ${meta.reset_url}`,
+      `Password reset for ${meta.display_name}. ${meta.delivery_detail ?? ''} It works once, expires in seven days, and this is the only time the link can be read — copy it before dismissing this: ${meta.reset_url}`,
+    );
+  }
+
+  /**
+   * Corrects somebody's display name.
+   *
+   * The name only. The email address is the login identity, so changing it is an account
+   * migration rather than an edit and is deliberately not offered here.
+   */
+  async function renameUser(userId: string, current: string, email: string) {
+    const next = window.prompt(`Name for ${email}`, current);
+    if (next === null) return;
+    if (!next.trim() || next.trim() === current) return;
+
+    await apply(null, () =>
+      send<Snapshot>(`/api/v1/users/${userId}`, 'PATCH', { display_name: next.trim() }),
     );
   }
 
@@ -617,7 +633,33 @@ export default function AccessPage() {
           <tbody>
             {users.map((user) => (
               <tr key={user.id}>
-                <td style={{ whiteSpace: 'nowrap' }}>{user.display_name}</td>
+                <td style={{ whiteSpace: 'nowrap' }}>
+                  {user.display_name}
+                  {/*
+                    Only where the name is worth correcting. Several accounts carry an email
+                    address as their name because the console did not ask for one until 18 Sept,
+                    and nothing could change it until this existed.
+                  */}
+                  {canManageUsers ? (
+                    <button
+                      type="button"
+                      title={`Rename ${user.email}`}
+                      aria-label={`Rename ${user.email}`}
+                      onClick={() => void renameUser(user.id, user.display_name, user.email)}
+                      style={{
+                        marginLeft: 6,
+                        border: 0,
+                        background: 'transparent',
+                        padding: 0,
+                        cursor: 'pointer',
+                        fontSize: 11,
+                        color: 'var(--color-neutral-600)',
+                      }}
+                    >
+                      edit
+                    </button>
+                  ) : null}
+                </td>
                 <td className="mono" style={{ fontSize: 12 }}>
                   {user.email}
                 </td>

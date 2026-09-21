@@ -114,6 +114,7 @@ public class SnapshotService {
         snapshot.stepLibrary(),
         views,
         (int) inbox.stream().filter(Notifications.Notification::isUnread).count(),
-        snapshot.drift());
+        snapshot.drift(),
+        snapshot.timing());
   }
 }
