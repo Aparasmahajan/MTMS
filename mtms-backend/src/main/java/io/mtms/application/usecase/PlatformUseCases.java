@@ -98,6 +98,24 @@ public class PlatformUseCases {
     }
   }
 
+  /**
+   * Attempts delivery and reports what happened.
+   *
+   * <p>Never throws, and never fails its caller. Every use of it here runs after the account and
+   * its single-use link are already committed, and a relay refusing connections must not undo
+   * them. The outcome comes back so the screen can say whether anything was sent — "we emailed
+   * them" when nothing left the building is the version that loses invitations.
+   */
+  private Mailer.Delivery deliver(Mailer.Invitation invitation) {
+    try {
+      return mailer.sendInvitation(invitation);
+    } catch (RuntimeException failure) {
+      // A Mailer is not supposed to throw. If one does, it is still not allowed to undo the
+      // account that already exists.
+      return Mailer.Delivery.notSent("The mail transport failed, so nothing was sent.");
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Reading
   // ---------------------------------------------------------------------------
@@ -217,7 +235,8 @@ public class PlatformUseCases {
   // ---------------------------------------------------------------------------
 
   /** What the caller needs afterwards: the organisation, and the link to hand its admin. */
-  public record CreatedOrganisation(Tenancy.Tenant tenant, String adminEmail, String acceptUrl) {}
+  public record CreatedOrganisation(
+      Tenancy.Tenant tenant, String adminEmail, String acceptUrl, Mailer.Delivery delivery) {}
 
   /**
    * Creates an organisation, its role set, and an invitation for its first administrator.
@@ -332,16 +351,13 @@ public class PlatformUseCases {
 
     String acceptUrl = properties.appBaseUrl() + "/accept-invite?token=" + token;
 
-    // Delivery is attempted after the record exists and must never fail the request: the
-    // account and its single-use link are already real, and a mail outage should not undo them.
-    try {
-      mailer.sendInvitation(
-          new Mailer.Invitation(email, displayName, organisationName, acceptUrl));
-    } catch (RuntimeException failure) {
-      // Swallowed deliberately — the caller surfaces the link so an operator can pass it on.
-    }
+    // Attempted after the record exists and never allowed to fail the request: the account and
+    // its single-use link are already real, and a mail outage must not undo them. What happened
+    // is returned so the screen can say it, rather than asserting one or the other.
+    Mailer.Delivery delivery =
+        deliver(new Mailer.Invitation(email, displayName, organisationName, acceptUrl));
 
-    return new CreatedOrganisation(tenant, email, acceptUrl);
+    return new CreatedOrganisation(tenant, email, acceptUrl, delivery);
   }
 
   // ---------------------------------------------------------------------------
@@ -419,7 +435,12 @@ public class PlatformUseCases {
    *     nothing to send and {@code acceptUrl} is null.
    */
   public record AssignedAdministrator(
-      String email, String displayName, String where, boolean invited, String acceptUrl) {}
+      String email,
+      String displayName,
+      String where,
+      boolean invited,
+      String acceptUrl,
+      Mailer.Delivery delivery) {}
 
   /**
    * Makes somebody an administrator of one project.
@@ -545,16 +566,12 @@ public class PlatformUseCases {
         tenantId,
         "reissued the invitation link for " + user.email() + " in " + tenant.name());
 
-    try {
-      mailer.sendInvitation(
-          new Mailer.Invitation(user.email(), user.displayName(), tenant.name(), acceptUrl));
-    } catch (RuntimeException failure) {
-      // Same reasoning as the first invitation: the token is already real, and a mail outage
-      // must not undo it. The caller surfaces the link so an operator can pass it on.
-    }
+    Mailer.Delivery delivery =
+        deliver(
+            new Mailer.Invitation(user.email(), user.displayName(), tenant.name(), acceptUrl));
 
     return new AssignedAdministrator(
-        user.email(), user.displayName(), tenant.name(), true, acceptUrl);
+        user.email(), user.displayName(), tenant.name(), true, acceptUrl, delivery);
   }
 
   // ---------------------------------------------------------------------------
@@ -683,18 +700,15 @@ public class PlatformUseCases {
     // other member of the organisation can see.
     support.bumpEveryProjectIn(tenant.id());
 
-    if (acceptUrl != null) {
-      // After the record exists, and never allowed to fail the request: the account and its
-      // single-use link are already real, and a mail outage should not undo them.
-      try {
-        mailer.sendInvitation(
-            new Mailer.Invitation(email, displayName, tenant.name(), acceptUrl));
-      } catch (RuntimeException failure) {
-        // Swallowed deliberately — the caller surfaces the link so an operator can pass it on.
-      }
-    }
+    // Only somebody new has a link to send. An existing person was granted access and already
+    // has their own password, so there is nothing to deliver and saying so is the honest answer.
+    Mailer.Delivery delivery =
+        acceptUrl == null
+            ? Mailer.Delivery.notSent("They already had an account, so nothing needed sending.")
+            : deliver(new Mailer.Invitation(email, displayName, tenant.name(), acceptUrl));
 
-    return new AssignedAdministrator(email, displayName, where, acceptUrl != null, acceptUrl);
+    return new AssignedAdministrator(
+        email, displayName, where, acceptUrl != null, acceptUrl, delivery);
   }
 
   /** The revoke itself, for both scopes. */

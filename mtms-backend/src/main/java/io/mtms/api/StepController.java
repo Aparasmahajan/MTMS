@@ -86,8 +86,9 @@ public class StepController {
   // --- Configurations --------------------------------------------------------
 
   /**
-   * @param scopeType {@code sub_module} or {@code sub_activity}. Module-level checklists exist in
-   *     the model but have no id on this API yet — see {@code StepUseCases}.
+   * @param scopeType {@code module}, {@code sub_module} or {@code sub_activity}. A {@code module}
+   *     list is that module's <em>template</em>: it is copied onto every sub-module created on
+   *     that module from then on. Use bulk-apply for the sub-modules that already exist.
    * @param stepIds the steps, in the order they belong in this list. The order lives here, not on
    *     the step, so the same step can be first in one checklist and third in another.
    */

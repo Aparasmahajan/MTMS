@@ -15,6 +15,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -323,7 +324,12 @@ public class AccessUseCases {
    * display it; the service simply never sent it back, so inviting somebody from inside the app
    * appeared to do nothing at all.
    */
-  public record Invited(UUID invitationId, String email, String displayName, String acceptUrl) {}
+  public record Invited(
+      UUID invitationId,
+      String email,
+      String displayName,
+      String acceptUrl,
+      Mailer.Delivery delivery) {}
 
   public Invited invite(
       Actor actor, String email, String displayName, UUID roleId, boolean orgWide) {
@@ -364,19 +370,7 @@ public class AccessUseCases {
 
     String acceptUrl = properties.appBaseUrl() + "/accept-invite?token=" + token;
 
-    access
-        .findTenant(actor.tenantId())
-        .ifPresent(
-            tenant -> {
-              // Attempted, never allowed to fail the request: the account and its single-use
-              // link already exist by this point, and a mail outage must not undo them.
-              try {
-                mailer.sendInvitation(
-                    new Mailer.Invitation(email, displayName, tenant.name(), acceptUrl));
-              } catch (RuntimeException ignored) {
-                // Deliberate. The caller surfaces the link either way.
-              }
-            });
+    Mailer.Delivery delivery = deliver(actor.tenantId(), email, displayName, acceptUrl);
 
     support.emit(
         actor, projectId, Audit.DomainEventName.USER_INVITED, actor.tenantId().toString(),
@@ -386,7 +380,87 @@ public class AccessUseCases {
         actor, actor.projectId(), "ACCESS", displayName + " invited as " + role.name());
     support.bump(actor.projectId());
 
-    return new Invited(invitation.id(), email, displayName, acceptUrl);
+    return new Invited(invitation.id(), email, displayName, acceptUrl, delivery);
+  }
+
+  /**
+   * Attempts delivery and reports what happened.
+   *
+   * <p>Never throws, and never fails the caller. By this point the account and its single-use
+   * link are committed; a relay refusing connections must not undo them. The outcome is returned
+   * so the screen can say whether anything was sent, rather than asserting one or the other —
+   * "we emailed them" when nothing left the building is the version that loses invitations.
+   */
+  private Mailer.Delivery deliver(
+      UUID tenantId, String email, String displayName, String acceptUrl) {
+
+    Optional<Tenancy.Tenant> tenant = access.findTenant(tenantId);
+    if (tenant.isEmpty()) {
+      return Mailer.Delivery.notSent("That organisation could not be read, so nothing was sent.");
+    }
+
+    try {
+      return mailer.sendInvitation(
+          new Mailer.Invitation(email, displayName, tenant.get().name(), acceptUrl));
+    } catch (RuntimeException failure) {
+      // A Mailer is not supposed to throw. If one does, it is still not allowed to undo the
+      // account that already exists.
+      return Mailer.Delivery.notSent("The mail transport failed, so nothing was sent.");
+    }
+  }
+
+  /**
+   * Corrects somebody's display name.
+   *
+   * <p>Exists because of a gap that ran for a week: the platform console assigned administrators
+   * by email address and never asked for a name, so the server fell back to the address and four
+   * accounts ended up called <code>ritu.agnihotri@azalio.io</code>. Nothing in the application
+   * could then change it. The console asks now; this is what repairs what it already wrote.
+   *
+   * <p>The name only. Not the email address, which is the login identity and half of a
+   * uniqueness constraint — changing it is an account migration, not an edit, and it deserves to
+   * be asked for explicitly rather than arrived at through a text box labelled "name".
+   */
+  @Transactional
+  public void renameUser(Actor actor, UUID userId, String displayName) {
+    if (!actor.isSuperAdmin()) {
+      actor.require(PermissionKey.ADMIN_USERS_MANAGE);
+    }
+
+    Tenancy.User user =
+        access
+            .findUser(actor.tenantId(), userId)
+            .orElseThrow(
+                () -> ServiceException.notFound("That person is not in this organisation."));
+
+    String next = displayName == null ? "" : displayName.trim();
+    if (next.isEmpty()) {
+      throw ServiceException.validation("A name cannot be blank.");
+    }
+    if (next.length() > 120) {
+      throw ServiceException.validation("A name is at most 120 characters.");
+    }
+    if (next.equals(user.displayName())) {
+      return;
+    }
+
+    access.updateUser(
+        new Tenancy.User(
+            user.id(),
+            user.tenantId(),
+            user.email(),
+            next,
+            user.isSuperAdmin(),
+            user.status(),
+            user.lastLoginAt(),
+            user.createdAt()));
+
+    support.recordProjectChange(
+        actor,
+        actor.projectId(),
+        "ACCESS",
+        "renamed " + user.email() + " to " + next);
+    support.bump(actor.projectId());
   }
 
   /**
@@ -395,7 +469,8 @@ public class AccessUseCases {
    * @param resetUrl the single-use link. Shown once and never recoverable — the token is not
    *     stored, only its sha256 — so the caller has to surface it rather than log it and move on.
    */
-  public record PasswordReset(String email, String displayName, String resetUrl) {}
+  public record PasswordReset(
+      String email, String displayName, String resetUrl, Mailer.Delivery delivery) {}
 
   /**
    * Starts a password reset for somebody else.
@@ -449,26 +524,14 @@ public class AccessUseCases {
 
     String resetUrl = properties.appBaseUrl() + "/accept-invite?token=" + token;
 
-    access
-        .findTenant(actor.tenantId())
-        .ifPresent(
-            tenant -> {
-              // Attempted, never allowed to fail the request: the token is already real and a
-              // mail outage must not undo it. The caller surfaces the link regardless.
-              try {
-                mailer.sendInvitation(
-                    new Mailer.Invitation(
-                        user.email(), user.displayName(), tenant.name(), resetUrl));
-              } catch (RuntimeException ignored) {
-                // Deliberate.
-              }
-            });
+    Mailer.Delivery delivery =
+        deliver(actor.tenantId(), user.email(), user.displayName(), resetUrl);
 
     support.recordProjectChange(
         actor, actor.projectId(), "ACCESS", "password reset link issued for " + user.email());
     support.bump(actor.projectId());
 
-    return new PasswordReset(user.email(), user.displayName(), resetUrl);
+    return new PasswordReset(user.email(), user.displayName(), resetUrl, delivery);
   }
 
   // --- Roles -----------------------------------------------------------------

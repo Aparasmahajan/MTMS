@@ -22,6 +22,28 @@ spring:
   application:
     name: mtms-api
 
+  # Spring's own mail settings, wired from the mtms.mail.* block below so there is one place to
+  # configure mail rather than two that have to agree. Blank host is harmless: the autoconfigured
+  # sender is built either way, and SmtpMailer — the only thing that uses it — does not exist
+  # unless mtms.mail.host is set.
+  mail:
+    host: ${MTMS_MAIL_HOST:}
+    port: ${MTMS_MAIL_PORT:587}
+    username: ${MTMS_MAIL_USERNAME:}
+    password: ${MTMS_MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: ${MTMS_MAIL_STARTTLS:true}
+          # Without these two, a relay that is simply not there hangs the request that triggered
+          # the send. Ten seconds is long enough for a slow relay and short enough that nobody
+          # watches a spinner wondering whether the invitation was created.
+          connectiontimeout: 10000
+          timeout: 10000
+          writetimeout: 10000
+
   lifecycle:
     # Finish in-flight requests before the process exits, so a rolling deploy does not
     # answer a click with a connection reset.
@@ -69,6 +91,32 @@ mtms:
 
   ticket-base-url: https://tms.internal/browse
   app-base-url: http://localhost:3000
+
+  # Email for invitations and password resets.
+  #
+  # Unset — and unset is the default — those links are written to the log and shown on the screen
+  # that created them, for an administrator to pass on by hand. That works, and it is why links
+  # kept getting lost: nothing arrives unless a person relays it.
+  #
+  # Set `host` and SmtpMailer takes over. The other SMTP settings are Spring's own
+  # (spring.mail.*) and are wired from these below, so there is one place to configure mail
+  # rather than two that have to agree.
+  #
+  #   MTMS_MAIL_HOST=smtp.example.com
+  #   MTMS_MAIL_PORT=587
+  #   MTMS_MAIL_USERNAME=mtms@example.com
+  #   MTMS_MAIL_PASSWORD=...          <- the server's environment file only, never the repository
+  #   MTMS_MAIL_FROM=mtms@example.com
+  #   MTMS_MAIL_STARTTLS=true
+  mail:
+    host: ${MTMS_MAIL_HOST:}
+    port: ${MTMS_MAIL_PORT:587}
+    username: ${MTMS_MAIL_USERNAME:}
+    password: ${MTMS_MAIL_PASSWORD:}
+    # The address recipients see. Blank means "use the username", which is what most relays
+    # require the envelope sender to be anyway.
+    from: ${MTMS_MAIL_FROM:}
+    starttls: ${MTMS_MAIL_STARTTLS:true}
 
   cors:
     allowed-origins:
