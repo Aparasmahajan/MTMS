@@ -13,22 +13,34 @@ Ports: **API 6011**, **web app 6010**. JAR: `mtms-api-1.0.0-SNAPSHOT.jar`.
 
 ---
 
-## Right now — shipping the 17 Sept release
+## Right now — shipping the 18 Sept release
 
-Both halves changed. **Two migrations run on the first start** (`V2__hideable_roles.sql`,
-`V3__notifications.sql`); both are additive — one nullable column and one new table — and Flyway
-applies them itself. Nothing to do by hand.
+**Deployed to HRMSPRODUCTION on 18 Sept and verified live** — both checksums matched on the
+server and pm2 restarted from them.
 
-One **optional** new setting, `MTMS_NOTIFICATIONS_WEBHOOK_URL`. Leave it unset: notifications go
-to an in-app inbox either way, and unset simply means that is the only channel.
+Both halves changed. **No migration and no new setting**: the schema is untouched and
+`mtms.env` needs nothing added, so a plain deploy is the whole job.
+
+What is in it:
+
+- Somebody made administrator of a **newly created** project could not sign in at all. Fixed —
+  see todo.md for why an already-configured project worked and a new one did not.
+- The project switcher now lists only the projects that person can actually open.
+- **"Their name"** beside each assign box in the console — people onboarded there were being
+  recorded under their email address.
+- **Password reset**: a Reset button per active person on the Access screen, issuing a
+  single-use link. Nobody ever sets anybody else's password.
+- Inviting from inside the app used to appear to do nothing — the link is now returned and
+  displayed.
+- Invitation links no longer carry the domain twice.
 
 The artefacts currently built in the repo:
 
 | | Bytes | md5 |
 |---|---|---|
-| `mtms-api-1.0.0-SNAPSHOT.jar` | 79,824,563 | `45073e6f512aa910cc0fa948e3d646a0` |
-| `mtms-frontend.tar.gz` | 4,605,284 | `84f86251f8b2585185ab81dfdcdbe6f4` |
-| `.next/BUILD_ID` | | `rIfMheShkn90rlQSoQvAw` |
+| `mtms-api-1.0.0-SNAPSHOT.jar` | 79,829,070 | `e490cb83283b8ee5e02c46731c1fedc8` |
+| `mtms-frontend.tar.gz` | 4,605,596 | `087bd4d410927c735a0693a51e93aab0` |
+| `.next/BUILD_ID` | | `eXy8UOfJN1kCtJQc9ekmo` |
 
 **One command** [local] — builds, tests, copies, checksums both ends, refuses on a mismatch,
 restarts and verifies:
@@ -55,12 +67,16 @@ Only if both match the table above:
 
 ```bash
 mv ~/mtms/$JAR $API_DIR/ && mv ~/mtms/$WEB $WEB_DIR/
-pkill -u $USER -f "$JAR"; pkill -u $USER -f "node.*server.js"
-sleep 2
+pm2 stop mtms-api mtms-web
 cd $WEB_DIR && rm -rf dist-frontend && tar -xzf $WEB
-cd $API_DIR && set -a && . ./mtms.env && set +a && nohup java -jar $JAR > api.log 2>&1 &
-cd $WEB_DIR/dist-frontend && PORT=$WEB_PORT HOSTNAME=0.0.0.0 nohup node server.js > ../web.log 2>&1 &
+pm2 restart mtms-api mtms-web --update-env && pm2 save
 ```
+
+> **Not `nohup`.** Both apps run under pm2 on HRMSPRODUCTION. The `nohup ... &` version of
+> these two lines is what caused the 502s that appeared a day or two after a release: nothing
+> watched the process, so one signal took the site down until somebody logged in. The `nohup`
+> commands are still further down this file for a machine without pm2 — see
+> `DEPLOYMENT.md` section 7 before using them.
 
 **Watch the first start.** This is the one where the migrations run:
 
@@ -204,11 +220,11 @@ bundle instead:
 
 ```bash
 # [server] the build identity — changes on every build
-cat $WEB_DIR/dist-frontend/.next/BUILD_ID
+cat $WEB_DIR/dist-frontend/.next/BUILD_ID     # 18 Sept release: eXy8UOfJN1kCtJQc9ekmo
 
 # [server] does the bundle contain something only THIS release has?
-grep -rl "What this project calls things" $WEB_DIR/dist-frontend/.next/server 2>/dev/null
-grep -rl "Invitation links issued here" $WEB_DIR/dist-frontend/.next/server 2>/dev/null
+grep -rl "Their name" $WEB_DIR/dist-frontend/.next/server 2>/dev/null
+grep -rl "Issue a single-use link" $WEB_DIR/dist-frontend/.next/server 2>/dev/null
 ```
 
 Each should print a `page.js` path. Nothing printed means the old bundle is still in place —
@@ -220,11 +236,55 @@ around the old ones.
 401, never 404. A 404 means the old JAR is running.
 
 ```bash
-# [server]
-for p in /api/v1/steps/library /api/v1/config/vocabulary; do
+# [server] — 18 Sept release added the last one
+for p in /api/v1/steps/library /api/v1/config/vocabulary \
+         /api/v1/users/00000000-0000-0000-0000-000000000000/reset-password; do
   printf '%s -> %s\n' "$p" \
     "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:$API_PORT$p)"
 done
+```
+
+### After: is pm2 actually supervising both?
+
+`release.sh restart` takes the pm2 path only if pm2 already knows these apps, and **falls back
+to `nohup` in silence** if it does not. A deploy can therefore succeed and quietly put the pair
+back on the footing that produced the 502s.
+
+```bash
+# [server] both listed, both online, restart counter not climbing on its own
+pm2 list
+```
+
+`mtms-api` and `mtms-web` missing means pm2 is not managing them: run
+`bash ~/mtms/install-pm2.sh` once, then deploy again.
+
+Two things `pm2 list` does **not** tell you, and both have caught us:
+
+- **Online says nothing about which build.** `pm2 start ecosystem.config.js` restarts whatever
+  is on disk, so it is perfectly happy to bring the *old* JAR back up. Check the checksums
+  above.
+- **A matching tarball does not mean it was unpacked.** pm2 runs `dist-frontend`, not the
+  `.tar.gz` beside it. Check `BUILD_ID`.
+
+If the tarball is right but `BUILD_ID` is stale, unpack and restart the web app only:
+
+```bash
+# [server]
+cd $WEB_DIR && rm -rf dist-frontend && tar -xzf $WEB && pm2 restart mtms-web
+```
+
+The `rm -rf` is not tidiness: `tar` merges into an existing `dist-frontend` rather than
+replacing it, so the old chunks stay and the directory listing lies about which build is there.
+
+### After: changed a setting in mtms.env?
+
+`pm2 restart --update-env` does **not** re-read `ecosystem.config.js`, and that file is what
+parses `mtms.env`. A plain restart keeps the environment it was started with, so a new or
+changed variable is silently ignored.
+
+```bash
+# [server]
+cd ~/mtms && pm2 start ecosystem.config.js --update-env && pm2 save
 ```
 
 ---
@@ -283,7 +343,20 @@ systemctl is-active mtms-api          # prints: active | failed | inactive
 
 ## 2. Reading the logs
 
-**Started with `release.sh` / `nohup`** — plain files: [server]
+**Under pm2** — which is how HRMSPRODUCTION runs: [server]
+
+```bash
+pm2 logs mtms-api                      # the API, live
+pm2 logs mtms-web                      # the web app, live
+pm2 logs mtms-api --lines 200 --nostream
+pm2 list                               # up? and how many times has it restarted?
+```
+
+These append and survive a restart. That matters: the `nohup` logs below are opened with `>`,
+not `>>`, so every restart truncated them — which is why the first outage left no evidence of
+what killed the process.
+
+**Started with `nohup`** — plain files, on a machine without pm2: [server]
 
 ```bash
 tail -f $API_DIR/api.log               # the API, live
@@ -437,33 +510,46 @@ the status check.
 
 ### The same thing by hand [server]
 
-If `release.sh` is not on the server, this is what it does:
+If `release.sh` is not on the server, this is what it does — **under pm2, which is what
+HRMSPRODUCTION runs**:
 
 ```bash
-# 1. Stop. -u $USER so this cannot reach another account's processes on a shared box.
-pkill -u $USER -f mtms-api-1.0.0-SNAPSHOT.jar
-pkill -u $USER -f "node.*server.js"
-sleep 2
+# 1. Stop both. Stopped, not restarted: the web bundle is replaced in step 2, and
+#    server.js resolves its chunks from that directory at request time — swap it under a
+#    live process and every asset 404s until the next restart.
+pm2 stop mtms-api mtms-web
 
 # 2. Unpack the web app. The tarball contains dist-frontend/, so remove the old one first —
 #    tar will merge into it otherwise and leave stale chunks behind that nothing serves but
 #    that make the directory listing lie about which build is there.
 cd $WEB_DIR && rm -rf dist-frontend && tar -xzf mtms-frontend.tar.gz
 
-# 3. Start the API
-cd $API_DIR && set -a && . ./mtms.env && set +a
-nohup java -jar $JAR > api.log 2>&1 &
+# 3. Start both again, and write the process list pm2 replays on boot.
+pm2 restart mtms-api mtms-web --update-env
+pm2 save
 
-# 4. Start the web app. It MUST run from inside dist-frontend — server.js resolves
-#    .next/static relative to its own directory, and started from anywhere else the page
-#    renders with no CSS and no JS, which reads as a broken build.
-cd $WEB_DIR/dist-frontend
-PORT=$WEB_PORT HOSTNAME=0.0.0.0 nohup node server.js > ../web.log 2>&1 &
-
-# 5. Check. Twelve seconds is what this server has needed.
+# 4. Check. Twelve seconds is what this server has needed.
 sleep 12 && cd ~/mtms && ./release.sh status
 ```
 
+Note what step 3 does **not** do: `--update-env` refreshes the environment from the shell pm2
+is invoked from, it does not re-read `ecosystem.config.js`, and that file is what parses
+`mtms.env`. After changing a setting there, use `pm2 start ecosystem.config.js --update-env`
+instead — see §0a.
+
+### Only if pm2 is not managing them
+
+`pm2 list` not showing `mtms-api` and `mtms-web` means the pair is unsupervised. Put them
+under pm2 rather than reaching for `nohup`:
+
+```bash
+bash ~/mtms/install-pm2.sh
+```
+
+`nohup` blocks `SIGHUP` and nothing else. Nothing watches the process, nothing restarts it
+after a crash or an OOM kill, and the symptom is a 502 from nginx a day or two after a release
+— nginx proxies to 6010 only, so the moment the Next.js process goes, the site is down until
+somebody signs in and starts it by hand. That is the bug pm2 exists to fix; do not undo it.
 ### Under systemd
 
 ```bash

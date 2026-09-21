@@ -71,6 +71,34 @@ export default function AccessPage() {
         .join(', ')}${previewLabels.length > 5 ? `, +${previewLabels.length - 5} more` : ''}`
     : '';
 
+
+  /**
+   * Starts a password reset for somebody else.
+   *
+   * Nobody sets anybody's password: the server issues a single-use link and the person chooses
+   * their own. So the link is the whole product of this action, it is shown once, and it cannot
+   * be recovered afterwards — the server keeps only a one-way hash of it. Hence the confirm
+   * before, and the notice that has to be read rather than dismissed.
+   */
+  async function resetPassword(userId: string, who: string) {
+    if (
+      !window.confirm(
+        `Issue a password reset link for ${who}?\n\nTheir current password keeps working until they use the link. Any earlier link stops working now.`,
+      )
+    ) {
+      return;
+    }
+
+    const meta = await apply(null, () =>
+      send<Snapshot>(`/api/v1/users/${userId}/reset-password`, 'POST'),
+    );
+    if (!meta?.reset_url) return;
+
+    setNotice(
+      `Password reset link for ${meta.display_name}. It works once, it expires in seven days, and this is the only time it can be read — copy it before dismissing this: ${meta.reset_url}`,
+    );
+  }
+
   async function sendInvitation() {
     if (!email.trim() || !roleId) return;
     const meta = await apply(null, () =>
@@ -86,7 +114,11 @@ export default function AccessPage() {
       setDisplayName('');
       // The link is surfaced whatever the transport did: it is single-use and it works,
       // and a delivery that only logged would otherwise leave the admin with nothing.
-      const link = `${window.location.origin}${meta.accept_url}`;
+      //
+      // Used as sent. The server builds it from MTMS_APP_BASE_URL — the setting that exists
+      // because the service cannot see its own public address behind a proxy — so prefixing
+      // the page's origin here is what produced links carrying the domain twice.
+      const link = String(meta.accept_url);
       setNotice(
         meta.delivery_state === 'sent'
           ? `Invitation sent. ${String(meta.delivery_detail)} The link, if you need it: ${link}`
@@ -579,6 +611,7 @@ export default function AccessPage() {
               <th>Role</th>
               <th>Scope</th>
               <th>State</th>
+              {canManageUsers ? <th>Password</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -593,6 +626,28 @@ export default function AccessPage() {
                 </td>
                 <td style={{ fontSize: 13, color: 'var(--color-neutral-700)' }}>{user.scope}</td>
                 <td style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>{user.status}</td>
+                {canManageUsers ? (
+                  <td>
+                    {/*
+                      Only for somebody with a password to reset. An invited account has none
+                      yet — that case is a reissued invitation, and the server says so rather
+                      than pretending the two are the same thing.
+                    */}
+                    {user.status === 'active' ? (
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ fontSize: 12, padding: '2px 10px' }}
+                        title={`Issue a single-use link for ${user.email} to choose a new password`}
+                        onClick={() => void resetPassword(user.id, user.display_name)}
+                      >
+                        Reset
+                      </button>
+                    ) : (
+                      <span style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>—</span>
+                    )}
+                  </td>
+                ) : null}
               </tr>
             ))}
           </tbody>
