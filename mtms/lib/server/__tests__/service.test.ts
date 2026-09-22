@@ -314,7 +314,7 @@ describe('permissions', () => {
     await refused(cloneFromLibrary(viewer, project, entry), 'forbidden');
     await refused(
       inviteUser(viewer, project, {
-        email: 'new@mahajan.com',
+        email: 'new@mail.com',
         displayName: 'New',
         roleId: await roleId('viewer'),
         scopeProjectId: project,
@@ -414,17 +414,17 @@ describe('granting permissions', () => {
 describe('inviting a user', () => {
   it('creates the account, the membership and the invitation', async () => {
     const result = await inviteUser(admin, project, {
-      email: 'N.Desai2@mahajan.com',
+      email: 'N.Desai2@mail.com',
       displayName: 'Aditya',
       roleId: await roleId('qa'),
       scopeProjectId: project,
     });
 
-    expect(result.email).toBe('n.desai2@mahajan.com');
+    expect(result.email).toBe('n.desai2@mail.com');
     expect(result.inviteToken).toBeTruthy();
 
     const store = await getStore();
-    const user = store.users.find((candidate) => candidate.email === 'n.desai2@mahajan.com');
+    const user = store.users.find((candidate) => candidate.email === 'n.desai2@mail.com');
     expect(user?.status).toBe('invited');
     expect(user?.password_hash).toBe('');
     expect(user?.invite_token_hash).toBeTruthy();
@@ -433,7 +433,7 @@ describe('inviting a user', () => {
     ).toBe(true);
 
     const snapshot = await snapshotFor(admin);
-    expect(snapshot.invitations.some((invite) => invite.email === 'n.desai2@mahajan.com')).toBe(true);
+    expect(snapshot.invitations.some((invite) => invite.email === 'n.desai2@mail.com')).toBe(true);
   });
 
   it('refuses a role holding permissions the actor lacks', async () => {
@@ -444,7 +444,7 @@ describe('inviting a user', () => {
 
     const error = await refused(
       inviteUser(admin, project, {
-        email: 'new@mahajan.com',
+        email: 'new@mail.com',
         displayName: 'New',
         roleId: await roleId('release'),
         scopeProjectId: project,

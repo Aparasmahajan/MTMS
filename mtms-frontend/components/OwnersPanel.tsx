@@ -49,11 +49,14 @@ export function OwnersPanel({
   function assign() {
     if (!userId) return;
     void apply(null, () =>
+      // snake_case, because the wire is snake_case: the service runs Jackson with SNAKE_CASE,
+      // so a camelCase key does not bind and arrives as null. That is not a compile error on
+      // either side — it fails at run time with a message about the missing value.
       send<Snapshot>('/api/v1/owners', 'POST', {
-        scopeType,
-        scopeId,
-        roleId: roleId || null,
-        userId,
+        scope_type: scopeType,
+        scope_id: scopeId,
+        role_id: roleId || null,
+        user_id: userId,
       }),
     ).then((result) => {
       if (result) setUserId('');

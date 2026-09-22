@@ -9,7 +9,7 @@ import { send } from '@/lib/client/api';
 import { optimisticAdvance } from '@/lib/client/optimistic';
 import { STATUS_VOCABULARY, TONE_STYLE } from '@/lib/shared/vocabulary';
 import { groupColumns } from '@/lib/shared/views';
-import type { CellView, ColumnView, ModuleView, Snapshot } from '@/lib/shared/views';
+import type { CellView, ColumnView, SubModuleView, Snapshot } from '@/lib/shared/views';
 
 /**
  * The module matrix — the spreadsheet, made editable.
@@ -47,7 +47,7 @@ const READINESS_FILTERS = ['All', 'Loaded in prod', 'Partial', 'Not started', 'H
 type ReadinessFilter = (typeof READINESS_FILTERS)[number];
 
 function MatrixScreen() {
-  const { snapshot, apply, can, reasonFor, setNotice, moduleHref } = useTracker();
+  const { snapshot, apply, can, reasonFor, setNotice, subModuleHref } = useTracker();
   const router = useRouter();
   const params = useSearchParams();
 
@@ -82,20 +82,20 @@ function MatrixScreen() {
   }
 
   const shown = useMemo(() => {
-    let modules = snapshot.modules;
-    if (nodeFilter !== 'All') modules = modules.filter((module) => module.node_type === nodeFilter);
+    let modules = snapshot.sub_modules;
+    if (nodeFilter !== 'All') modules = modules.filter((module) => module.module_name === nodeFilter);
     if (readyFilter === 'Loaded in prod') modules = modules.filter((module) => module.readiness === 100);
     else if (readyFilter === 'Partial')
       modules = modules.filter((module) => module.readiness > 0 && module.readiness < 100);
     else if (readyFilter === 'Not started') modules = modules.filter((module) => module.readiness === 0);
     else if (readyFilter === 'Has blanks') modules = modules.filter((module) => module.blank_count > 0);
     return modules;
-  }, [snapshot.modules, nodeFilter, readyFilter]);
+  }, [snapshot.sub_modules, nodeFilter, readyFilter]);
 
-  const groups = snapshot.config.node_types
+  const groups = snapshot.config.module_names
     .map((nodeType) => ({
       nodeType,
-      rows: shown.filter((module) => module.node_type === nodeType),
+      rows: shown.filter((module) => module.module_name === nodeType),
     }))
     .filter((group) => group.rows.length > 0);
 
@@ -108,7 +108,7 @@ function MatrixScreen() {
     });
   }
 
-  function advance(module: ModuleView, cell: CellView, subactivityId: string | null) {
+  function advance(module: SubModuleView, cell: CellView, subactivityId: string | null) {
     if (!editable) {
       setNotice(reasonFor('deliverable.update'));
       return;
@@ -128,8 +128,8 @@ function MatrixScreen() {
         ),
       () =>
         send<Snapshot>('/api/v1/cells', 'PATCH', {
-          module_id: module.id,
-          subactivity_id: subactivityId,
+          sub_module_id: module.id,
+          sub_activity_id: subactivityId,
           column_key: cell.column_key,
         }),
     );
@@ -156,7 +156,7 @@ function MatrixScreen() {
         total +
         group.rows.length +
         group.rows.reduce(
-          (subs, module) => subs + (expanded.has(module.id) ? module.subactivities.length : 0),
+          (subs, module) => subs + (expanded.has(module.id) ? module.sub_activities.length : 0),
           0,
         ),
       0,
@@ -175,10 +175,10 @@ function MatrixScreen() {
         }}
       >
         <div>
-          <h1>Module matrix</h1>
+          <h1>SubModule matrix</h1>
           <div className="lede">
             One row per module — a node type plus an activity. Open a module to reach its
-            subactivities; a module cell is a roll-up of them. Every change is stamped with who and
+            sub_activities; a module cell is a roll-up of them. Every change is stamped with who and
             when.
           </div>
         </div>
@@ -189,7 +189,7 @@ function MatrixScreen() {
               Node type
             </div>
             <div style={{ display: 'flex', gap: 'var(--space-1)', flexWrap: 'wrap' }}>
-              {['All', ...snapshot.config.node_types].map((nodeType) => (
+              {['All', ...snapshot.config.module_names].map((nodeType) => (
                 <Chip
                   key={nodeType}
                   label={nodeType}
@@ -264,7 +264,7 @@ function MatrixScreen() {
         {/*
           A real grid, not a table of divs. Screen readers announce "row 4 of 23, column
           6 of 17" only if the roles and the counts are here — and the counts have to be
-          the *whole* grid, including the group headers and any expanded subactivities,
+          the *whole* grid, including the group headers and any expanded sub_activities,
           which is why they are computed rather than taken from `groups.length`.
         */}
         <div
@@ -308,7 +308,7 @@ function MatrixScreen() {
                   letterSpacing: '.11em',
                 }}
               >
-                Module — node + activity
+                SubModule — node + activity
               </div>
               <div
                 role="columnheader"
@@ -472,7 +472,7 @@ function MatrixScreen() {
 
                 {group.rows.map((module) => {
                   const isOpen = expanded.has(module.id);
-                  const hasSubs = module.subactivities.length > 0;
+                  const hasSubs = module.sub_activities.length > 0;
 
                   return (
                     <div key={module.id}>
@@ -500,7 +500,7 @@ function MatrixScreen() {
                             wordBreak: 'break-word',
                           }}
                         >
-                          <Link href={moduleHref(module.id)} style={{ color: 'inherit' }}>
+                          <Link href={subModuleHref(module.id)} style={{ color: 'inherit' }}>
                             {module.name}
                           </Link>
                           <div
@@ -530,7 +530,7 @@ function MatrixScreen() {
                                   font: 'inherit',
                                 }}
                               >
-                                {isOpen ? '−' : '+'} {module.subactivities.length} subactivities
+                                {isOpen ? '−' : '+'} {module.sub_activities.length} sub_activities
                               </button>
                             ) : null}
                             {module.closed ? (
@@ -611,7 +611,7 @@ function MatrixScreen() {
                       </div>
 
                       {isOpen
-                        ? module.subactivities.map((subactivity) => (
+                        ? module.sub_activities.map((subactivity) => (
                             <div
                               key={subactivity.id}
                               role="row"
@@ -713,7 +713,7 @@ function MatrixScreen() {
 
       <div style={{ marginTop: 'var(--space-3)', fontSize: 12, color: 'var(--color-neutral-600)' }}>
         {editable
-          ? 'Click a cell to advance it through that column’s statuses. A module cell with subactivities is a roll-up — clicking it opens them.'
+          ? 'Click a cell to advance it through that column’s statuses. A module cell with sub_activities is a roll-up — clicking it opens them.'
           : reasonFor('deliverable.update') + ' — cells are read-only for you.'}{' '}
         A deliverable loaded per environment carries one tick per environment, each recorded
         independently: prod can be ticked with lab blank, because lab was down when the window

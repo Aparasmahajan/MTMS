@@ -15,6 +15,8 @@ import io.mtms.domain.model.Projects;
 import io.mtms.domain.model.Scope;
 import io.mtms.domain.model.Tenancy;
 import io.mtms.infrastructure.mail.LoggingMailer;
+import io.mtms.infrastructure.notify.LoggingNotifier;
+import io.mtms.infrastructure.persistence.memory.InMemoryNotificationRepository;
 import io.mtms.infrastructure.persistence.memory.InMemoryAccessRepository;
 import io.mtms.infrastructure.persistence.memory.InMemoryDatabase;
 import io.mtms.infrastructure.persistence.memory.InMemoryDiscussionRepository;
@@ -84,6 +86,11 @@ class RolesAndOwnersTest {
             new ScryptPasswordHasher(),
             new LoggingMailer(),
             support,
+            // Real, not a stub: inviting and resetting now write a notification to the issuer's
+            // own inbox, and a null here would have turned that into a NullPointerException on
+            // a path every one of these tests goes through.
+            new NotificationUseCases(
+                new InMemoryNotificationRepository(db), access, new LoggingNotifier()),
             new MtmsProperties("https://tms.internal/browse", "http://localhost:6010"));
     owners = new OwnerUseCases(ownerRows, subModules, access, support);
 

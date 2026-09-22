@@ -23,6 +23,10 @@ export default function DashboardPage() {
   // panel is hidden entirely until at least one column has something finished to measure.
   const timing = (snapshot.timing ?? []).filter((row) => row.median_days != null);
 
+  // The steps are the accurate half — measured from an append-only history rather than from
+  // cells that keep only their last change. Slowest first, already sorted by the server.
+  const stepTiming = (snapshot.step_timing ?? []).filter((row) => row.median_days != null);
+
   const stats = useMemo(() => {
     const fullyDone = subModules.filter((subModule) => subModule.readiness === 100).length;
     const notStarted = subModules.filter((subModule) => subModule.readiness === 0).length;
@@ -416,7 +420,88 @@ export default function DashboardPage() {
                 >
                   Median days, so one abandoned {words.subModule.lower} does not distort the
                   figure. Anything unfinished is left out rather than counted as instant, which is
-                  why the count beside each row matters.
+                  why the count beside each row matters. A cell records only its last change, so a
+                  deliverable corrected later reads as having taken longer — the steps below do
+                  not have that problem.
+                </div>
+              </Blueprint>
+            </>
+          ) : null}
+
+          {/*
+            The accurate half.
+
+            Steps keep every transition, so this pairs each "became outstanding" with the tick
+            that ended it: a step ticked, un-ticked and ticked again contributes two durations
+            rather than one long span — which is the reading that goes most wrong exactly on the
+            work that went badly, and that is the work anybody is asking about.
+          */}
+          {stepTiming.length > 0 ? (
+            <>
+              <SectionHeading>Slowest steps</SectionHeading>
+              <Blueprint>
+                <div
+                  style={{
+                    fontSize: 14,
+                    lineHeight: 1.5,
+                    marginBottom: 'var(--space-4)',
+                    textWrap: 'pretty',
+                  }}
+                >
+                  Days from a checklist being attached to the step being ticked, across every
+                  checklist it appears on. Slowest first.
+                </div>
+
+                {stepTiming.map((row) => (
+                  <div
+                    key={row.definition_id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      gap: 'var(--space-3)',
+                      padding: 'var(--space-2) 0',
+                      borderTop: '1px solid var(--color-divider)',
+                    }}
+                  >
+                    <span
+                      className="tabular"
+                      style={{
+                        fontFamily: 'var(--font-heading)',
+                        fontWeight: 600,
+                        fontSize: 20,
+                        width: 56,
+                        flex: 'none',
+                      }}
+                    >
+                      {row.median_days}
+                    </span>
+                    <span style={{ flex: 1, fontSize: 13, textWrap: 'pretty' }}>{row.name}</span>
+                    <span
+                      className="tabular"
+                      style={{ fontSize: 12, color: 'var(--color-neutral-600)', flex: 'none' }}
+                      title={
+                        row.outstanding > 0
+                          ? `${row.outstanding} still waiting, so not counted`
+                          : 'nothing is waiting on this step'
+                      }
+                    >
+                      {row.completions} done
+                      {row.outstanding > 0 ? `, ${row.outstanding} waiting` : ''}
+                    </span>
+                  </div>
+                ))}
+
+                <div
+                  style={{
+                    marginTop: 'var(--space-3)',
+                    fontSize: 12,
+                    color: 'var(--color-neutral-600)',
+                    textWrap: 'pretty',
+                  }}
+                >
+                  Read from the step history, which is never rewritten. A step ticked, un-ticked
+                  and ticked again counts as two goes rather than one long wait — so rework shows
+                  up here instead of being averaged away.
                 </div>
               </Blueprint>
             </>

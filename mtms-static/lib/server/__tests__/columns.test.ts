@@ -83,7 +83,7 @@ describe('setting the statuses a column can take', () => {
 
   it('leaves cells that already hold a now-disallowed status exactly as they are', async () => {
     // Four seeded cells hold FNI "Pending": one on 33_LIC_LOADING_IN_SBC, and one on
-    // each of the CFX module's three subactivities.
+    // each of the CFX module's three sub_activities.
     expect((await column('fni')).off_vocabulary).toBe(0);
 
     await setColumnStatuses(admin, project, 'fni', ['completed']);
@@ -107,8 +107,8 @@ describe('setting the statuses a column can take', () => {
     await setColumnStatuses(admin, project, 'fni', ['completed']);
 
     const snapshot = buildSnapshot(await getStore(), admin, project);
-    const view = snapshot.modules.find((candidate) => candidate.id === module)!;
-    const first = view.subactivities[0]!;
+    const view = snapshot.sub_modules.find((candidate) => candidate.id === module)!;
+    const first = view.sub_activities[0]!;
     expect(first.cells.find((cell) => cell.column_key === 'fni')?.status).toBe('pending');
 
     await advanceCell(admin, project, {
@@ -118,8 +118,8 @@ describe('setting the statuses a column can take', () => {
     });
 
     const after = buildSnapshot(await getStore(), admin, project);
-    const updated = after.modules.find((candidate) => candidate.id === module)!;
-    expect(updated.subactivities[0]!.cells.find((cell) => cell.column_key === 'fni')?.status).toBe(
+    const updated = after.sub_modules.find((candidate) => candidate.id === module)!;
+    expect(updated.sub_activities[0]!.cells.find((cell) => cell.column_key === 'fni')?.status).toBe(
       'completed',
     );
     expect(after.config.columns.find((candidate) => candidate.key === 'fni')?.off_vocabulary).toBe(3);
@@ -194,14 +194,14 @@ describe('reordering columns', () => {
 
   it('reorders the matrix without touching any cell', async () => {
     const before = buildSnapshot(await getStore(), admin, project);
-    const readiness = before.modules.map((module) => module.readiness);
+    const readiness = before.sub_modules.map((module) => module.readiness);
 
     await moveColumn(admin, project, 'fni', 'up');
 
     const after = buildSnapshot(await getStore(), admin, project);
-    expect(after.modules.map((module) => module.readiness)).toEqual(readiness);
+    expect(after.sub_modules.map((module) => module.readiness)).toEqual(readiness);
     // Each module's cells follow the new column order.
-    for (const module of after.modules) {
+    for (const module of after.sub_modules) {
       expect(module.cells.map((cell) => cell.column_key)).toEqual(
         after.config.columns.map((entry) => entry.key),
       );

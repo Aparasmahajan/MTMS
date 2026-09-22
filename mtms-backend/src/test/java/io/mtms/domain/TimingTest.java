@@ -84,6 +84,156 @@ class TimingTest {
   }
 
   @Nested
+  @DisplayName("Per step, from the append-only history")
+  class PerStep {
+
+    private final UUID definitionId = UUID.randomUUID();
+    private final UUID listId = UUID.randomUUID();
+    private final UUID entryId = UUID.randomUUID();
+
+    private io.mtms.domain.model.Steps.Definition definition() {
+      return new io.mtms.domain.model.Steps.Definition(
+          definitionId, PROJECT, "CIQ received", "", Set.of(), null, START);
+    }
+
+    private io.mtms.domain.model.Steps.StepList list(Instant createdAt) {
+      return new io.mtms.domain.model.Steps.StepList(
+          listId,
+          PROJECT,
+          "Standard checks",
+          io.mtms.domain.model.Scope.SUB_MODULE,
+          UUID.randomUUID(),
+          false,
+          null,
+          createdAt);
+    }
+
+    private io.mtms.domain.model.Steps.Entry entry() {
+      return new io.mtms.domain.model.Steps.Entry(entryId, listId, definitionId, 0);
+    }
+
+    private io.mtms.domain.model.Steps.Event event(
+        io.mtms.domain.model.Steps.State from,
+        io.mtms.domain.model.Steps.State to,
+        int daysLater) {
+      return new io.mtms.domain.model.Steps.Event(
+          UUID.randomUUID(),
+          entryId,
+          from,
+          to,
+          false,
+          null,
+          null,
+          "someone",
+          START.plus(Duration.ofDays(daysLater)));
+    }
+
+    @Test
+    @DisplayName("measures from the checklist being attached to the tick")
+    void oneGo() {
+      List<Timing.StepTiming> timings =
+          Timing.perStep(
+              List.of(definition()),
+              List.of(list(START)),
+              List.of(entry()),
+              List.of(
+                  event(
+                      io.mtms.domain.model.Steps.State.TODO,
+                      io.mtms.domain.model.Steps.State.DONE,
+                      11)));
+
+      assertEquals(11.0, timings.get(0).medianDays());
+      assertEquals(1, timings.get(0).completions());
+      assertEquals(0, timings.get(0).outstanding());
+    }
+
+    @Test
+    @DisplayName("ticked, un-ticked and ticked again is two durations, not one long span")
+    void reTickIsTwoDurations() {
+      // Attached day 0. Ticked day 2. Un-ticked day 20. Ticked again day 23.
+      //
+      // The whole reason this reads events rather than cells: a first-to-last reading would
+      // report 23 days, which is wildly wrong exactly on the work that went badly — and that is
+      // the work anybody is asking about. The true answer is two goes of 2 and 3 days.
+      List<Timing.StepTiming> timings =
+          Timing.perStep(
+              List.of(definition()),
+              List.of(list(START)),
+              List.of(entry()),
+              List.of(
+                  event(
+                      io.mtms.domain.model.Steps.State.TODO,
+                      io.mtms.domain.model.Steps.State.DONE,
+                      2),
+                  event(
+                      io.mtms.domain.model.Steps.State.DONE,
+                      io.mtms.domain.model.Steps.State.TODO,
+                      20),
+                  event(
+                      io.mtms.domain.model.Steps.State.TODO,
+                      io.mtms.domain.model.Steps.State.DONE,
+                      23)));
+
+      assertEquals(2, timings.get(0).completions(), "two goes, not one");
+      assertEquals(2.5, timings.get(0).medianDays(), "the median of 2 and 3, not 23");
+    }
+
+    @Test
+    @DisplayName("a step un-ticked and left that way is outstanding again")
+    void unTickedIsOutstandingAgain() {
+      List<Timing.StepTiming> timings =
+          Timing.perStep(
+              List.of(definition()),
+              List.of(list(START)),
+              List.of(entry()),
+              List.of(
+                  event(
+                      io.mtms.domain.model.Steps.State.TODO,
+                      io.mtms.domain.model.Steps.State.DONE,
+                      2),
+                  event(
+                      io.mtms.domain.model.Steps.State.DONE,
+                      io.mtms.domain.model.Steps.State.TODO,
+                      5)));
+
+      assertEquals(1, timings.get(0).completions(), "the first go still happened");
+      assertEquals(1, timings.get(0).outstanding(), "and it is waiting again now");
+    }
+
+    @Test
+    @DisplayName("a step never ticked has no answer and is counted as outstanding")
+    void neverTicked() {
+      List<Timing.StepTiming> timings =
+          Timing.perStep(
+              List.of(definition()), List.of(list(START)), List.of(entry()), List.of());
+
+      assertNull(timings.get(0).medianDays());
+      assertEquals(0, timings.get(0).completions());
+      assertEquals(1, timings.get(0).outstanding());
+    }
+
+    @Test
+    @DisplayName("blocking does not end a period — blocked is still not done")
+    void blockedIsNotDone() {
+      List<Timing.StepTiming> timings =
+          Timing.perStep(
+              List.of(definition()),
+              List.of(list(START)),
+              List.of(entry()),
+              // A block is not a done-transition, so it is not even in this list. The period
+              // stays open across it and the eventual tick measures the whole wait, which is
+              // the honest answer: being blocked is time the work sat there.
+              List.of(
+                  event(
+                      io.mtms.domain.model.Steps.State.BLOCKED,
+                      io.mtms.domain.model.Steps.State.DONE,
+                      8)));
+
+      assertEquals(8.0, timings.get(0).medianDays());
+    }
+  }
+
+  @Nested
   @DisplayName("What it refuses to claim")
   class Refusals {
 

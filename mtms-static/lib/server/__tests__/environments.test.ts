@@ -49,7 +49,7 @@ async function snapshot() {
 }
 
 async function moduleView(name: string) {
-  const view = (await snapshot()).modules.find((module) => module.name === name);
+  const view = (await snapshot()).sub_modules.find((module) => module.name === name);
   if (!view) throw new Error(`No module ${name} in the projection`);
   return view;
 }
@@ -130,7 +130,7 @@ describe('per-environment columns', () => {
 describe('switching an environment off', () => {
   it('takes its columns off the grid and out of the maths, keeping every cell', async () => {
     const before = await snapshot();
-    const labCells = before.modules.flatMap((module) =>
+    const labCells = before.sub_modules.flatMap((module) =>
       module.cells.filter((cell) => cell.column_key.endsWith('_lab')),
     );
 
@@ -144,16 +144,16 @@ describe('switching an environment off', () => {
     expect(after.config.environments.find((entry) => entry.key === 'lab')?.enabled).toBe(false);
 
     // The cells are still there, holding exactly what they held.
-    const stillThere = after.modules.flatMap((module) =>
+    const stillThere = after.sub_modules.flatMap((module) =>
       module.cells.filter((cell) => cell.column_key.endsWith('_lab')),
     );
     expect(stillThere.map((cell) => cell.status)).toEqual(labCells.map((cell) => cell.status));
   });
 
   it('leaves readiness alone, because lab never counted', async () => {
-    const before = (await snapshot()).modules.map((module) => module.readiness);
+    const before = (await snapshot()).sub_modules.map((module) => module.readiness);
     await setEnvironmentEnabled(admin, project, 'lab', false);
-    expect((await snapshot()).modules.map((module) => module.readiness)).toEqual(before);
+    expect((await snapshot()).sub_modules.map((module) => module.readiness)).toEqual(before);
   });
 
   it('stops counting a hidden environment that had been made to count', async () => {
@@ -173,11 +173,11 @@ describe('switching an environment off', () => {
     expect(after.config.columns.map((column) => column.key)).toEqual(
       before.config.columns.map((column) => column.key),
     );
-    expect(after.modules.map((module) => module.readiness)).toEqual(
-      before.modules.map((module) => module.readiness),
+    expect(after.sub_modules.map((module) => module.readiness)).toEqual(
+      before.sub_modules.map((module) => module.readiness),
     );
-    expect(after.modules.flatMap((module) => module.cells.map((cell) => cell.status))).toEqual(
-      before.modules.flatMap((module) => module.cells.map((cell) => cell.status)),
+    expect(after.sub_modules.flatMap((module) => module.cells.map((cell) => cell.status))).toEqual(
+      before.sub_modules.flatMap((module) => module.cells.map((cell) => cell.status)),
     );
   });
 

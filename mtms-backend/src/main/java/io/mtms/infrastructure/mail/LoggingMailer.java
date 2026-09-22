@@ -32,7 +32,40 @@ public class LoggingMailer implements Mailer {
         invitation.organisation(),
         invitation.acceptUrl());
 
-    return Delivery.notSent(
-        "No mail host is configured (MTMS_MAIL_HOST), so nothing was sent.");
+    return NOTHING_SENT;
   }
+
+  @Override
+  public Delivery sendPasswordReset(PasswordReset reset) {
+    log.info(
+        "Password reset for {} <{}> in {} ({}) — reset at: {}",
+        reset.displayName(),
+        reset.email(),
+        reset.organisation(),
+        reset.selfService() ? "requested at sign-in" : "issued by an administrator",
+        reset.resetUrl());
+
+    return NOTHING_SENT;
+  }
+
+  /**
+   * Logged and nothing else.
+   *
+   * <p>There is no link in this one, so there is nothing to relay by hand and no fallback worth
+   * offering. Without a mail host the warning simply does not reach the person — which is worth
+   * knowing, and is the strongest single argument for configuring one.
+   */
+  @Override
+  public Delivery sendPasswordChanged(PasswordChanged changed) {
+    log.info(
+        "Password changed for {} <{}> in {} — no notice sent, no mail host configured",
+        changed.displayName(),
+        changed.email(),
+        changed.organisation());
+
+    return NOTHING_SENT;
+  }
+
+  private static final Delivery NOTHING_SENT =
+      Delivery.notSent("No mail host is configured (MTMS_MAIL_HOST), so nothing was sent.");
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useTracker } from '@/components/TrackerProvider';
 import { Blueprint, PageTitle } from '@/components/primitives';
 import { StepsPanel } from '@/components/config/StepsPanel';
@@ -372,11 +373,54 @@ function Environments({
 }
 
 export default function ConfigurePage() {
-  const { snapshot, apply, can, reasonFor, words } = useTracker();
-  const { config, project } = snapshot;
+  const { snapshot, apply, can, reasonFor, words, setNotice } = useTracker();
+  const router = useRouter();
+  const { config, project, org } = snapshot;
   const [newColumn, setNewColumn] = useState('');
   const [perEnvironment, setPerEnvironment] = useState(false);
+  const [newProjectKey, setNewProjectKey] = useState('');
+  const [newProjectName, setNewProjectName] = useState('');
   const canConfig = can('project.config');
+
+  /*
+    Read from `me`, not from `permissions`.
+
+    Creating a project is an organisation-wide act and the service requires the grant to be held
+    organisation-wide, while `permissions` is the union of an org-wide role and a role on the
+    open project. Checking `can('project.create')` here would draw the form for somebody the
+    service is about to refuse, which is the exact failure gating exists to avoid.
+  */
+  const canCreateProjects = snapshot.me.can_create_projects;
+
+  /**
+   * Creates a project and lands on its Configure screen.
+   *
+   * Sends a name as well as a key, which the version in the header switcher did not — that one
+   * sent `{ key }` alone against a handler reading `(key, name, description)`, so every click
+   * failed on a NOT NULL column. The key doubles as the name when nothing is typed, because a
+   * project called CR_AUTOMATION is a perfectly good answer and forcing a second field before
+   * anything exists is friction for its own sake.
+   */
+  async function createProject() {
+    const key = newProjectKey.trim().toUpperCase();
+    if (!key) return;
+
+    const result = await apply(null, () =>
+      send<Snapshot>('/api/v1/projects', 'POST', {
+        key,
+        name: newProjectName.trim() || key,
+        description: '',
+      }),
+    );
+    if (!result) return;
+
+    setNewProjectKey('');
+    setNewProjectName('');
+    setNotice(
+      `${key} created, empty. Switch to it in the header, then set its deliverable columns here — a project arrives with no process of its own.`,
+    );
+    router.refresh();
+  }
 
   return (
     <div className="page page-narrow">
@@ -384,6 +428,93 @@ export default function ConfigurePage() {
         title={`Configure — ${project.key}`}
         lede="What a project admin sets. Another team stands up its own process here without a code change."
       />
+
+      {/*
+        Projects first, because it is the only thing on this screen that is not about the project
+        currently open — and because this is where the header switcher's broken NEW_PROJECT_KEY
+        box went. Shown to everybody rather than hidden from most: somebody looking for it should
+        find out where it lives and why they cannot use it, not conclude the feature was removed.
+      */}
+      <Blueprint style={{ marginBottom: 'var(--space-8)' }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'baseline',
+            justifyContent: 'space-between',
+            gap: 'var(--space-3)',
+            marginBottom: 'var(--space-3)',
+            flexWrap: 'wrap',
+          }}
+        >
+          <h4 className="section-heading" style={{ margin: 0 }}>
+            Projects in {org.name}
+          </h4>
+          <span style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>
+            {snapshot.projects.length}{' '}
+            {snapshot.projects.length === 1 ? 'project you can open' : 'projects you can open'}
+          </span>
+        </div>
+
+        <div
+          style={{
+            fontSize: 12,
+            color: 'var(--color-neutral-700)',
+            marginBottom: 'var(--space-3)',
+            textWrap: 'pretty',
+          }}
+        >
+          A new project arrives empty — no columns, no modules, no process. It belongs to{' '}
+          {org.name} rather than to any project, so creating one needs{' '}
+          <span className="mono">project.create</span> across the whole organisation: an
+          organisation administrator or a super admin. Holding it on one project is not enough,
+          because that says nothing about the organisation.
+        </div>
+
+        {canCreateProjects ? (
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void createProject();
+            }}
+            style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}
+          >
+            <input
+              className="input"
+              style={{ width: 200 }}
+              value={newProjectKey}
+              onChange={(event) => setNewProjectKey(event.target.value.toUpperCase())}
+              placeholder="NEW_PROJECT_KEY"
+              aria-label="New project key"
+            />
+            <input
+              className="input"
+              style={{ width: 240 }}
+              value={newProjectName}
+              onChange={(event) => setNewProjectName(event.target.value)}
+              placeholder="Name (defaults to the key)"
+              aria-label="New project name"
+            />
+            <button type="submit" className="btn btn-secondary" disabled={!newProjectKey.trim()}>
+              Create project
+            </button>
+            <span
+              style={{
+                fontSize: 12,
+                color: 'var(--color-neutral-600)',
+                alignSelf: 'center',
+                textWrap: 'pretty',
+              }}
+            >
+              Uppercase letters, digits and underscores, starting with a letter.
+            </span>
+          </form>
+        ) : (
+          <div style={{ fontSize: 12, color: 'var(--color-neutral-600)', textWrap: 'pretty' }}>
+            You do not administer {org.name}, so you cannot create a project here. A super admin
+            can also create one for any organisation from the platform console.
+          </div>
+        )}
+      </Blueprint>
 
       <Blueprint style={{ marginBottom: 'var(--space-8)' }}>
         <div
@@ -571,8 +702,8 @@ export default function ConfigurePage() {
               () =>
                 perEnvironment
                   ? send<Snapshot>('/api/v1/config/columns/grouped', 'POST', {
-                      groupKey: key,
-                      groupLabel: typed.slice(0, 12).toUpperCase(),
+                      group_key: key,
+                      group_label: typed.slice(0, 12).toUpperCase(),
                       full: typed,
                       allowed: [...STATUS_SETS.load],
                     })

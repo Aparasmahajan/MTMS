@@ -12,15 +12,26 @@ import type {
   Invitation,
   Link,
   Membership,
+  SubModule,
+  LibraryEntry,
   Module,
-  ModuleLibraryEntry,
+  Notification,
+  Owner,
+  StepComment,
+  StepDefinition,
+  StepEntry,
+  StepEvent,
+  StepList,
+  StepProgress,
+  Thread,
+  ThreadComment,
   PlatformAuditEntry,
   Project,
   ProjectConfig,
   RefreshToken,
   Role,
   Run,
-  Subactivity,
+  SubActivity,
   Tenant,
   UserWithSecret,
 } from '../shared/domain';
@@ -58,12 +69,12 @@ export interface StoreData {
   projects: Project[];
   project_config: ProjectConfig[];
   columns: DeliverableColumn[];
-  modules: Module[];
-  subactivities: Subactivity[];
+  sub_modules: SubModule[];
+  sub_activities: SubActivity[];
   cells: Cell[];
   audit: AuditEntry[];
   platform_audit: PlatformAuditEntry[];
-  library: ModuleLibraryEntry[];
+  library: LibraryEntry[];
   defects: Defect[];
   links: Link[];
   runs: Run[];
@@ -71,6 +82,31 @@ export interface StoreData {
   drift_observations: DriftObservation[];
   drift_reports: DriftReport[];
   drift_promotions: DriftPromotion[];
+
+  /**
+   * Modules as records, with ids.
+   *
+   * `project_config.module_names` is still the editable list. These rows are what a
+   * checklist, a set of owners or a discussion hangs off, and they are reconciled from the
+   * names — adding a name creates a record, and a record whose name is gone is archived
+   * rather than deleted, because rows already pointing at it have to keep resolving.
+   */
+  modules: Module[];
+
+  step_definitions: StepDefinition[];
+  step_lists: StepList[];
+  step_entries: StepEntry[];
+  /** Current state per entry. Derived from `step_events`, which is the authority. */
+  step_progress: StepProgress[];
+  /** Append-only, never edited. See the note on `StepEvent`. */
+  step_events: StepEvent[];
+  step_comments: StepComment[];
+
+  owners: Owner[];
+  threads: Thread[];
+  thread_comments: ThreadComment[];
+  notifications: Notification[];
+
   /** The outbox. Domain events wait here until a consumer drains them. */
   events: DomainEvent[];
 }
@@ -83,8 +119,13 @@ export interface StoreData {
  * 6: `preprod` joined the status vocabulary, so the seeded load columns cycle
  *    notloaded -> lab -> preprod -> prod. Columns store their own allowed set, so an
  *    existing store keeps the old three-step cycle until it reseeds.
+ * 8: the rename (`modules` became `sub_modules`, `node_types` became `module_names`), plus
+ *    modules as records and the tables behind checklists, owners, discussions and the inbox.
+ *    Both halves of that are why this is a version bump rather than a migration: every
+ *    existing document has the old field names, and nothing in a demo store is worth
+ *    migrating — it reseeds, which is the same thing the demo does on every build.
  */
-export const STORE_VERSION = 7;
+export const STORE_VERSION = 8;
 
 /** How many times a mutation is re-applied before a conflict is given up on. */
 const MAX_CONFLICT_RETRIES = 5;

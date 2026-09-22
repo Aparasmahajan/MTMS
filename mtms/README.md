@@ -1,4 +1,4 @@
-# MTMS — Mahajan Ticket Management System
+# MTMS — Organization Management System
 
 A web tracker for getting change activities into production. It replaces the DevOps
 spreadsheet where each row is an activity on a node type and each column is a deliverable
