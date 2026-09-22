@@ -12,6 +12,84 @@ and made changeable from a settings screen.
 
 ---
 
+## 0. Pending, as of 18 Sept
+
+The at-a-glance answer to "is anything still open?". Everything here is expanded on below or
+in `todo-next.md`; this is the index, so it is the one part of this file that has to stay
+true.
+
+### Blocked on a decision, not on code
+
+| | What has to be decided |
+|---|---|
+| ~~**Email**~~ | **Built 18 Sept.** `SmtpMailer` sends invitations and password resets; it exists only when `MTMS_MAIL_HOST` is set, so a deployment without a relay behaves exactly as before. All that is left is the host, port, credentials and from-address in `mtms.env` on the server — see `deploy/api.env.example`. The screen tells the truth either way: it says whether anything was actually sent, and shows the link regardless, because the server keeps only a hash of it |
+| **File attachments** on discussions | Where the bytes live: local disk, S3, or the database. An operational commitment, not a coding one |
+| **Custom fields** on the module screen | Nothing, except somebody naming a real field. A generic `(entity, key, value)` store invented first is how you get a schema nobody uses |
+
+### Small, unblocked, nobody has done them
+
+- ~~**No way to edit a person's name.**~~ Done 18 Sept. An `edit` control beside each name on
+  the Access screen, behind `PATCH /api/v1/users/{id}`. The name only — the email address is the
+  login identity and half of a uniqueness constraint, so changing it is an account migration
+  rather than an edit and is deliberately not offered. The four accounts carrying an address as
+  their name can be corrected in place now.
+- ~~**No default checklist for new sub-modules.**~~ Done 18 Sept. A checklist attached to a
+  **module** is that module's template, and is copied onto each sub-module as it is created.
+  Module scope had been modelled since the start and refused at the API for a reason that
+  stopped being true a day later, when modules gained ids on 17 Sept. Bulk-apply still covers
+  the sub-modules that already exist; this covers every one created from now on.
+- **`mtms-static` is two releases behind.** Still the old `node_type` / `Module` wording, and
+  none of the 16–18 Sept work. Fine as a standalone demo, but whether to keep maintaining it at
+  all is an open decision — `todo-next.md` §5.
+
+### Nobody has clicked most of it
+
+The largest item, and it is not a feature. Five real bugs were found on 18 Sept in half an
+hour of actually using the deployment — none of them findable by reading the code, four of them
+in the seam between the Java service and a frontend that was assumed to match it. See
+`todo-next.md` §0.
+
+**Everything built on 16 and 17 Sept is still unclicked**: the checklist panel, the wording
+editor, the owners panel, the discussion panel, the roles panel, the module screen and the
+inbox. Those five bugs all came from onboarding and project set-up, because that is as far as
+anybody has got.
+
+### Two questions waiting on an answer
+
+1. **If an admin deletes a role that steps are gated to, what happens?** As built: the record
+   stands, the step keeps its ticks and reads as *needing a role that no longer exists* until an
+   admin picks a new one. The alternative is to refuse the deletion. Both are defensible;
+   changing it later changes behaviour people have already seen. §6.
+2. **Too many settings is its own problem.** Columns, environments, stages, steps,
+   configurations, roles, owners, wording and role visibility are all adjustable now. Worth a
+   deliberate pass on what to hide until it is needed, before the settings become the product.
+   §3.
+
+### Built 18 Sept, from §5 and §3
+
+- ~~**Measure where the time actually goes**~~ — the one §5 called "the strongest candidate for
+  the thing that makes the product different". Built as `io.mtms.domain.Timing` and a *Where the
+  time goes* panel on the dashboard: median days per column, how much each column adds on the one
+  before it, and the count it is computed from. **Nobody fills anything in** — every tick already
+  carried its timestamp, so it has answers for work that finished months ago.
+
+  Three limitations are stated on the screen and in the class rather than buried: a cell keeps
+  only its *last* change, creation is not the same as starting, and unfinished work is excluded
+  rather than counted as instant. That last one is why "4 days, from 2 of 60" is printed rather
+  than "4 days". Seven tests, written from the angle of what somebody would wrongly believe.
+
+- ~~**A default checklist for new sub-modules**~~ (§3, open 1) — a checklist on a **module** is
+  now that module's template and is copied onto each sub-module as it is created.
+
+### Not pending — ideas, not backlog
+
+Releases, project templates, spreadsheet import, dependencies between sub-modules, blockers
+separate from defects, original-versus-current dates, generated status reports, API tokens and
+saved views. All in §5 and in `todo-next.md`; none of them agreed, none of them started. Asked on
+18 Sept which to build next, and time-in-stage was chosen over these.
+
+---
+
 ## 1. The shape of the product
 
 ```
@@ -540,17 +618,22 @@ Settled 11 Sept:
 
 ### Still open
 
-1. **Setting up 200 sub-modules by hand will not happen.** Needs a way to apply one list to
-   every sub-module of a node at once, and a default list for newly created sub-modules.
+Two of the three below were answered by later releases. Left in place because the reasoning is
+still worth reading; struck through where it has been dealt with.
 
-2. **Nobody gets told anything.** If step 2 waits for step 1, someone has to notice step 1
-   was ticked. A strict order makes notifications a requirement, not a nice extra.
+1. ~~**Setting up 200 sub-modules by hand will not happen.**~~ Half done. Bulk-apply shipped on
+   17 Sept (§2b) and copies a checklist onto every sub-module of a module. **Still missing: a
+   default list for newly created sub-modules**, so one added next month starts bare and has to
+   be remembered.
 
-3. **Too many settings is its own problem.** The app will soon have columns, environments,
-   stages, steps, configurations and roles — all adjustable. A settings screen nobody can
-   understand is how a flexible product loses the team that only wanted a checklist. Worth
-   a deliberate pass on what to hide until it is needed.
+2. ~~**Nobody gets told anything.**~~ Done 17 Sept (§2c). Every notification is written to an
+   in-app inbox in the same transaction as the thing it is about; a webhook is optional on top.
 
+3. **Too many settings is its own problem.** Still open, and more so than when it was written —
+   the app now has columns, environments, stages, steps, configurations, roles, owners, wording
+   and per-project role visibility, all adjustable. A settings screen nobody can understand is
+   how a flexible product loses the team that only wanted a checklist. Worth a deliberate pass
+   on what to hide until it is needed.
 ---
 
 ## 3a. The model, written out

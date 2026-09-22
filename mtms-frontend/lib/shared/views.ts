@@ -517,6 +517,39 @@ export interface Snapshot {
     reports: DriftReportView[];
     promotions: DriftPromotionView[];
   };
+  /**
+   * How long each column actually takes, computed from the ticks themselves — nobody fills
+   * anything in for this.
+   *
+   * Nulls are meaningful and must not be rendered as 0: a column nobody has finished yet has no
+   * median, and "no answer yet" is a different statement from "takes no time".
+   */
+  timing: ColumnTimingView[];
+}
+
+/**
+ * Every optional number here is `| null | undefined`, and both halves are load-bearing.
+ *
+ * The service runs Jackson with `default-property-inclusion: non_null`, so a null field is not
+ * sent as `null` — it is **absent from the JSON entirely** and arrives as `undefined`. Typing
+ * these as `number | null` alone compiles and then renders the string "undefined" on screen,
+ * because `undefined !== null` is true. Test any of them with `== null`, which catches both.
+ */
+export interface ColumnTimingView {
+  column_key: string;
+  label: string;
+  /** Days from a sub-module being created to this column being done. Absent when nothing is. */
+  median_days: number | null | undefined;
+  mean_days: number | null | undefined;
+  /**
+   * How much longer this takes than the column to its left — the closest thing to time spent at
+   * this stage. Absent on the first column, which has nothing to compare against. May be negative
+   * when the column order is a reading order rather than a sequence.
+   */
+  added_days: number | null | undefined;
+  measured: number;
+  /** Not finished here, so not in the figures. "4 days, from 2 of 60" means something else. */
+  outstanding: number;
 }
 
 // ---------------------------------------------------------------------------

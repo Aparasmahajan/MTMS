@@ -107,9 +107,27 @@ public class ProjectController {
             "email", invited.email(),
             "display_name", invited.displayName(),
             "accept_url", invited.acceptUrl(),
-            "delivery_state", "not_sent",
-            "delivery_detail",
-                "There is no mail transport configured, so nothing was sent."));
+            // What actually happened, not an assumption. "We emailed them" when nothing left
+            // the building is the version that loses invitations.
+            "delivery_state", invited.delivery().sent() ? "sent" : "not_sent",
+            "delivery_detail", invited.delivery().detail()));
+  }
+
+  public record RenameUserRequest(@NotBlank String displayName) {}
+
+  /**
+   * Corrects somebody's display name.
+   *
+   * <p>The name only — not the email address. That is the login identity and half of a uniqueness
+   * constraint, so changing it is an account migration rather than an edit and should be asked
+   * for as one.
+   */
+  @PatchMapping("/users/{id}")
+  public ApiResponse.Success<Snapshot> renameUser(
+      @PathVariable("id") UUID userId, @RequestBody RenameUserRequest request, Actor actor) {
+
+    access.renameUser(actor, userId, request.displayName());
+    return ApiResponse.ok(snapshots.of(actor));
   }
 
   /**
@@ -130,7 +148,9 @@ public class ProjectController {
         Map.of(
             "email", reset.email(),
             "display_name", reset.displayName(),
-            "reset_url", reset.resetUrl()));
+            "reset_url", reset.resetUrl(),
+            "delivery_state", reset.delivery().sent() ? "sent" : "not_sent",
+            "delivery_detail", reset.delivery().detail()));
   }
 
   public record GrantsRequest(List<String> permissions) {}
