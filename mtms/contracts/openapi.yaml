@@ -21,7 +21,7 @@ openapi: 3.1.0
 # and is checked against the caller's memberships.
 
 info:
-  title: MTMS — Mahajan Ticket Management System
+  title: MTMS — Organization Management System
   version: 1.0.0
   description: |
     Getting change activities into production: an editable, attributable deliverable matrix.

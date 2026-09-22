@@ -152,6 +152,24 @@ management:
       probes:
         enabled: true
       show-details: when-authorized
+  health:
+    # The mail relay is NOT part of this service's health, and switching it on by configuring
+    # a mail host once took the whole API "down" while it was serving every request correctly.
+    #
+    # Spring Boot registers a MailHealthIndicator the moment spring.mail.host is set, and it
+    # opens a real SMTP connection on every /actuator/health call. A relay that refuses
+    # authentication therefore turned the aggregate status to DOWN, /actuator/health to 503,
+    # and — because nginx and the deploy script both read that endpoint — made a working
+    # deployment look like a failed one.
+    #
+    # That is the opposite of how mail is treated everywhere else here: every send is wrapped,
+    # its failure swallowed and reported, and the caller told what happened, precisely so that
+    # an unreachable relay degrades one feature instead of taking the service with it. A health
+    # indicator that overrides that is the tail wagging the dog.
+    #
+    # It also costs an SMTP handshake per health poll, against a relay that rate-limits them.
+    mail:
+      enabled: ${MANAGEMENT_HEALTH_MAIL_ENABLED:false}
   metrics:
     tags:
       application: mtms-api

@@ -174,19 +174,24 @@ public class InMemoryAccessRepository implements AccessRepository {
     db.roles.add(role);
   }
 
+  /**
+   * Replaces a role's permissions and nothing else.
+   *
+   * <p>Through {@link #replaceRole}, like its two neighbours. It used to have its own copy of
+   * that loop and build the role with the eight-argument constructor, which defaults
+   * {@code archivedAt} to null — so changing a hidden role's permissions un-hid it, while the
+   * MySQL store, which updates the one column, did not. Two stores that disagree about what a
+   * write does are worse than one that is simply wrong: the tests run against this one and
+   * production runs against the other.
+   */
   @Override
   public void updateRolePermissions(UUID roleId, Set<PermissionKey> permissions) {
-    for (int i = 0; i < db.roles.size(); i++) {
-      Tenancy.Role role = db.roles.get(i);
-      if (role.id().equals(roleId)) {
-        db.roles.set(
-            i,
+    replaceRole(
+        roleId,
+        role ->
             new Tenancy.Role(
                 role.id(), role.tenantId(), role.key(), role.name(), role.note(),
-                role.description(), role.isSystem(), Set.copyOf(permissions)));
-        return;
-      }
-    }
+                role.description(), role.isSystem(), Set.copyOf(permissions), role.archivedAt()));
   }
 
   @Override

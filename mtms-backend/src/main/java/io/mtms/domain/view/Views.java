@@ -144,8 +144,38 @@ public final class Views {
       boolean hidden,
       int memberCount) {}
 
+  /**
+   * One person in the organisation, as the Access screen's organisation table needs them.
+   *
+   * <p>More than a name and a status, because that table became a place to <em>manage</em>
+   * membership rather than only list it. What it needs and could not previously get: whether
+   * there is an organisation-wide row to edit, how many projects the person is on, and whether
+   * the reader is allowed to remove them.
+   *
+   * @param orgWideMembershipId the organisation-wide row, or null when there is none. Null, not
+   *     absent-meaning-false: the screen edits this row by id, and an id it does not have is the
+   *     difference between showing a role picker and showing a grant button.
+   * @param projectCount how many projects they are on by a per-project membership. Org-wide
+   *     access is not counted here — it is the other field — because "on every project" and
+   *     "on four projects" are different facts and adding them together hides both.
+   * @param removable false when the reader may not remove them from the organisation, with
+   *     {@code lockedReason} saying why. Gating rather than hiding: a control that vanishes
+   *     teaches nothing, and the three reasons here (it is you, they are a super admin, they
+   *     are already removed) are all things worth reading.
+   */
   public record OrgUserView(
-      String id, String displayName, String email, String roleName, String scope, String status) {}
+      String id,
+      String displayName,
+      String email,
+      String roleName,
+      String scope,
+      String status,
+      String orgWideMembershipId,
+      String orgWideRoleId,
+      int projectCount,
+      boolean superAdmin,
+      boolean removable,
+      String lockedReason) {}
 
   /**
    * One person's access to the project currently open.
@@ -321,5 +351,23 @@ public final class Views {
       Double meanDays,
       Double addedDays,
       int measured,
+      int outstanding) {}
+
+  /**
+   * How long one step takes, from the append-only history rather than from current state.
+   *
+   * <p>The accurate counterpart to {@link ColumnTimingView}: a cell keeps only its last change,
+   * step events are never rewritten. A step ticked, un-ticked and ticked again contributes two
+   * durations here and would be one long span there.
+   *
+   * @param completions how many times it was finished, not how many exist. Two goes count twice,
+   *     because hiding the rework hides the reason somebody asked.
+   */
+  public record StepTimingView(
+      String definitionId,
+      String name,
+      Double medianDays,
+      Double meanDays,
+      int completions,
       int outstanding) {}
 }

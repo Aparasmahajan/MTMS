@@ -68,7 +68,7 @@ function SignInCard() {
         <div className="kicker">MTMS · Flow One</div>
         <h2 style={{ margin: '0 0 var(--space-2)' }}>Sign in</h2>
         <div className="lede" style={{ marginBottom: 'var(--space-6)' }}>
-          Mahajan Ticket Management System
+          Organization Management System
         </div>
 
         <form
@@ -93,7 +93,7 @@ function SignInCard() {
               type="email"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
-              placeholder="name@mahajan.com"
+              placeholder="name@mail.com"
               autoComplete="username"
             />
           </label>

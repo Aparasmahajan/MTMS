@@ -7,5 +7,5 @@ import { cloneFromLibrary } from '@/lib/server/service';
  */
 export const POST = withAuth<{ id: string }>(async ({ actor, projectId, params, snapshot }) => {
   const result = await cloneFromLibrary(actor, projectId, params.id);
-  return ok(await snapshot(), { module_id: result.moduleId, node_type: result.nodeType });
+  return ok(await snapshot(), { sub_module_id: result.moduleId, module_name: result.nodeType });
 });

@@ -224,7 +224,7 @@ export default function PlatformPage() {
             style={{ width: 220 }}
             value={adminEmail}
             onChange={(event) => setAdminEmail(event.target.value)}
-            placeholder="First admin, name@mahajan.com"
+            placeholder="First admin, name@mail.com"
             aria-label="Administrator email"
           />
           <input

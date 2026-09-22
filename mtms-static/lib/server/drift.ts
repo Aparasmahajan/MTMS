@@ -7,7 +7,7 @@ import {
   type DriftVerdict,
 } from '../shared/domain';
 import { toneOf } from '../shared/vocabulary';
-import type { DriftRowView, DriftWarningView, ModuleView } from '../shared/views';
+import type { DriftRowView, DriftWarningView, SubModuleView } from '../shared/views';
 import { promotionGate as computeGate } from '../shared/promotion';
 import type { StoreData } from './store';
 
@@ -156,7 +156,7 @@ export function driftRows(store: StoreData, projectId: string): DriftRowView[] {
 export function driftWarnings(
   store: StoreData,
   projectId: string,
-  modules: readonly ModuleView[],
+  subModules: readonly SubModuleView[],
 ): DriftWarningView[] {
   const warnings: DriftWarningView[] = [];
   const entries = resolve(store, projectId);
@@ -254,7 +254,7 @@ export function driftWarnings(
     // the hashes say prod is not what was verified.
     const verdict = verdictFor(entry.byEnvironment);
     if (verdict !== 'In step') {
-      const claiming = modules.filter((module) => {
+      const claiming = subModules.filter((module) => {
         const cell = module.cells.find((candidate) => candidate.column_key === entry.prodColumnKey);
         return cell ? toneOf(cell.status) === 'done' : false;
       });
@@ -356,9 +356,9 @@ export function confirmPromotions(store: StoreData, projectId: string, at: strin
 export function promotionGate(
   store: StoreData,
   projectId: string,
-  modules: readonly ModuleView[],
+  subModules: readonly SubModuleView[],
   rows: readonly DriftRowView[],
 ) {
   const columns = store.columns.filter((column) => column.project_id === projectId);
-  return computeGate(columns, modules, rows);
+  return computeGate(columns, subModules, rows);
 }

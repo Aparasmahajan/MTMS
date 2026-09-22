@@ -8,7 +8,7 @@ import { Blueprint, SectionHeading, StatusMarker } from '@/components/primitives
 import { send } from '@/lib/client/api';
 import { optimisticAdvance } from '@/lib/client/optimistic';
 import { toneOf, TONE_STYLE } from '@/lib/shared/vocabulary';
-import { cellPresentation, formatStamp, type ModuleView, type Snapshot } from '@/lib/shared/views';
+import { cellPresentation, formatStamp, type SubModuleView, type Snapshot } from '@/lib/shared/views';
 
 /**
  * The module screen — everything about one module, and the only place the FNI chain
@@ -30,7 +30,7 @@ function subactivityActionStyle(enabled: boolean) {
   } as const;
 }
 
-function blockersFor(module: ModuleView): string[] {
+function blockersFor(module: SubModuleView): string[] {
   const blockers: string[] = [];
   if (module.readiness !== 100) {
     blockers.push('DevOps has not confirmed every deliverable loaded in prod');
@@ -43,7 +43,7 @@ function blockersFor(module: ModuleView): string[] {
 export function ModuleScreen() {
   const { id } = useParams<{ id: string }>();
   const { snapshot, apply, can, reasonFor, setNotice } = useTracker();
-  const module = snapshot.modules.find((candidate) => candidate.id === id);
+  const module = snapshot.sub_modules.find((candidate) => candidate.id === id);
 
   const [linkType, setLinkType] = useState(snapshot.config.link_types[0] ?? 'RITM');
   const [linkLabel, setLinkLabel] = useState('');
@@ -77,7 +77,7 @@ export function ModuleScreen() {
     if (!cell) return;
     if (cell.rolled_up) {
       setNotice(
-        'That value is rolled up from the subactivities and cannot be edited directly. Change it on the matrix, under this module.',
+        'That value is rolled up from the sub_activities and cannot be edited directly. Change it on the matrix, under this module.',
       );
       return;
     }
@@ -89,8 +89,8 @@ export function ModuleScreen() {
       (current) => optimisticAdvance(current, module!.id, null, columnKey, current.me.display_name),
       () =>
         send<Snapshot>('/api/v1/cells', 'PATCH', {
-          module_id: module!.id,
-          subactivity_id: null,
+          sub_module_id: module!.id,
+          sub_activity_id: null,
           column_key: columnKey,
         }),
     );
@@ -110,7 +110,7 @@ export function ModuleScreen() {
       ok: !blockers.includes('FNI final submission is not complete'),
     },
     {
-      label: 'PM marks FNI done — closes the module and its subactivities',
+      label: 'PM marks FNI done — closes the module and its sub_activities',
       by: module.closed
         ? `${module.closed_by ?? 'PM'}, closed`
         : 'waiting on the PM',
@@ -124,7 +124,7 @@ export function ModuleScreen() {
         <Link href="/matrix" style={{ color: 'inherit' }}>
           {snapshot.project.key}
         </Link>{' '}
-        / {module.node_type}
+        / {module.module_name}
       </div>
 
       <div
@@ -148,7 +148,7 @@ export function ModuleScreen() {
               flexWrap: 'wrap',
             }}
           >
-            <span className="tag tag-accent">{module.node_type}</span>
+            <span className="tag tag-accent">{module.module_name}</span>
             <span style={{ fontSize: 13, color: 'var(--color-neutral-700)' }}>
               {module.readiness}% of counted deliverables in prod
               {stage ? ` · ${stage.label}` : ''}
@@ -377,7 +377,7 @@ export function ModuleScreen() {
                     <div style={{ fontSize: 13 }}>{column.full}</div>
                     <div style={{ fontSize: 11, color: 'var(--color-neutral-600)' }}>
                       {cell.rolled_up
-                        ? `rolled up from ${cell.subactivity_count} subactivities`
+                        ? `rolled up from ${cell.sub_activity_count} sub_activities`
                         : view.stamp}
                       {column.counts ? '' : ' · does not count toward prod'}
                       {column.environment ? ` · ${column.environment}` : ''}
@@ -393,7 +393,7 @@ export function ModuleScreen() {
 
           <SectionHeading>Subactivities</SectionHeading>
           <div className="bordered">
-            {module.subactivities.map((subactivity) => {
+            {module.sub_activities.map((subactivity) => {
               const editing = renaming?.id === subactivity.id;
               return (
                 <div
@@ -417,7 +417,7 @@ export function ModuleScreen() {
                         }
                         void apply(null, () =>
                           send<Snapshot>(
-                            `/api/v1/modules/${module.id}/subactivities/${subactivity.id}`,
+                            `/api/v1/modules/${module.id}/sub_activities/${subactivity.id}`,
                             'PATCH',
                             { name: value },
                           ),
@@ -476,7 +476,7 @@ export function ModuleScreen() {
                           disabled={!canEdit}
                           title={
                             canEdit
-                              ? module.subactivities.length === 1
+                              ? module.sub_activities.length === 1
                                 ? 'Removing the last subactivity gives the module its own row back, keeping what it currently shows'
                                 : `Remove ${subactivity.name} and its deliverable row`
                               : reasonFor('module.edit')
@@ -484,7 +484,7 @@ export function ModuleScreen() {
                           onClick={() =>
                             void apply(null, () =>
                               send<Snapshot>(
-                                `/api/v1/modules/${module.id}/subactivities/${subactivity.id}`,
+                                `/api/v1/modules/${module.id}/sub_activities/${subactivity.id}`,
                                 'DELETE',
                               ),
                             )
@@ -499,7 +499,7 @@ export function ModuleScreen() {
                 </div>
               );
             })}
-            {module.subactivities.length === 0 ? (
+            {module.sub_activities.length === 0 ? (
               <div style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 13, color: 'var(--color-neutral-600)' }}>
                 None.
               </div>
@@ -510,7 +510,7 @@ export function ModuleScreen() {
                 event.preventDefault();
                 if (!newSubactivity.trim()) return;
                 void apply(null, () =>
-                  send<Snapshot>(`/api/v1/modules/${module.id}/subactivities`, 'POST', {
+                  send<Snapshot>(`/api/v1/modules/${module.id}/sub_activities`, 'POST', {
                     name: newSubactivity.trim(),
                   }),
                 ).then((result) => {
@@ -539,7 +539,7 @@ export function ModuleScreen() {
                 title={
                   canEdit
                     ? module.closed
-                      ? 'This module is closed. Reopen it before changing its subactivities.'
+                      ? 'This module is closed. Reopen it before changing its sub_activities.'
                       : undefined
                     : reasonFor('module.edit')
                 }
@@ -557,15 +557,15 @@ export function ModuleScreen() {
               textWrap: 'pretty',
             }}
           >
-            {module.subactivities.length
+            {module.sub_activities.length
               ? 'The module row on the matrix is a roll-up: a column only counts as done when every subactivity is done. Edit the subactivity cells on the matrix.'
-              : 'This module has no subactivities — its deliverable row is tracked directly. Adding the first one turns that row into a roll-up and carries the deliverables it already holds onto that subactivity.'}
+              : 'This module has no sub_activities — its deliverable row is tracked directly. Adding the first one turns that row into a roll-up and carries the deliverables it already holds onto that subactivity.'}
           </div>
 
           <SectionHeading>Defects on this module</SectionHeading>
           <div className="bordered">
             {snapshot.defects
-              .filter((defect) => defect.module_id === module.id)
+              .filter((defect) => defect.sub_module_id === module.id)
               .map((defect) => (
                 <div
                   key={defect.id}
@@ -599,7 +599,7 @@ export function ModuleScreen() {
                   </div>
                 </div>
               ))}
-            {snapshot.defects.filter((defect) => defect.module_id === module.id).length === 0 ? (
+            {snapshot.defects.filter((defect) => defect.sub_module_id === module.id).length === 0 ? (
               <div style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 13, color: 'var(--color-neutral-600)' }}>
                 None raised.
               </div>
@@ -728,7 +728,7 @@ export function ModuleScreen() {
           <SectionHeading first>Change history</SectionHeading>
           <div className="bordered">
             {snapshot.audit
-              .filter((entry) => entry.module_id === module.id)
+              .filter((entry) => entry.sub_module_id === module.id)
               .slice(0, 8)
               .map((entry) => (
                 <div
@@ -761,7 +761,7 @@ export function ModuleScreen() {
                   </span>
                 </div>
               ))}
-            {snapshot.audit.filter((entry) => entry.module_id === module.id).length === 0 ? (
+            {snapshot.audit.filter((entry) => entry.sub_module_id === module.id).length === 0 ? (
               <div style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 12, color: 'var(--color-neutral-600)' }}>
                 No changes recorded against this module.
               </div>

@@ -15,8 +15,8 @@ import { expect, test, type Page } from '@playwright/test';
  * A RITM cell that this row owns.
  *
  * Two exclusions, both load-bearing. RITM is a two-status cycle, so one click has an
- * unambiguous result. The `rolled up` filter skips modules with subactivities: their row is
- * derived, and clicking it opens the subactivities rather than advancing anything. Those
+ * unambiguous result. The `rolled up` filter skips modules with sub_activities: their row is
+ * derived, and clicking it opens the sub_activities rather than advancing anything. Those
  * buttons are *not* disabled — they are still clickable, just for a different purpose — so
  * filtering on `:disabled` does not catch them, and a suite that used one would be asserting
  * that a navigation control fails to edit.
@@ -28,7 +28,7 @@ const STORAGE_KEY = 'mtms.static.snapshot.v1';
 
 async function openMatrix(page: Page) {
   await page.goto('/matrix');
-  await expect(page.getByRole('heading', { name: 'Module matrix' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'SubModule matrix' })).toBeVisible();
 }
 
 /**
@@ -70,7 +70,7 @@ test('an edit survives a reload', async ({ page }) => {
   const afterClick = await ritmStatus(page);
 
   await page.reload();
-  await expect(page.getByRole('heading', { name: 'Module matrix' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'SubModule matrix' })).toBeVisible();
 
   expect(await ritmStatus(page)).toBe(afterClick);
   expect(afterClick).not.toBe(before);
@@ -122,6 +122,6 @@ test('what is stored is a real snapshot, not just what is on screen', async ({ p
   // Reading it back matters: the screen could look right while the stored copy was stale or
   // truncated, and the next reload would silently lose the edit.
   const snapshot = JSON.parse(stored as string);
-  expect(snapshot.modules.length).toBeGreaterThan(0);
+  expect(snapshot.sub_modules.length).toBeGreaterThan(0);
   expect(snapshot.audit[0].label).toBe('RITM');
 });

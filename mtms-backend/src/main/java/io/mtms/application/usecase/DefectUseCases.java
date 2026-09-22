@@ -51,10 +51,10 @@ public class DefectUseCases {
             UUID.randomUUID(),
             projectId,
             subModuleId,
-            Defects.Phase.fromWire(phase),
+            phaseOf(phase),
             ticketKey == null ? "" : ticketKey,
             childReqId == null ? "" : childReqId,
-            Defects.Severity.fromWire(severity),
+            severityOf(severity),
             description,
             actor.who(),
             null,
@@ -98,8 +98,7 @@ public class DefectUseCases {
 
     if (status != null || !assigneePresent) {
       actor.require(PermissionKey.DEFECT_TRANSITION);
-      Defects.Status next =
-          status == null ? defect.status().next() : Defects.Status.fromWire(status);
+      Defects.Status next = status == null ? defect.status().next() : statusOf(status);
 
       updated = withStatus(updated, next);
 
@@ -158,5 +157,42 @@ public class DefectUseCases {
         defect.id(), defect.projectId(), defect.subModuleId(), defect.phase(), defect.ticketKey(),
         defect.childReqId(), defect.severity(), defect.description(), defect.raisedBy(),
         assignee, defect.status(), defect.createdAt());
+  }
+
+  /**
+   * Turns a wire value into a phase, or refuses it clearly.
+   *
+   * <p>The enum throws {@link IllegalArgumentException} for anything it does not recognise, and
+   * that reaches the API boundary as a **500** — "Something went wrong on our side" — for what is
+   * plainly a bad request. A 500 is a claim about whose fault it is, and it is the one that wakes
+   * somebody up. {@code DiscussionController} already converts its scope the same way; this is
+   * the same guard on the two enums that were still unprotected.
+   *
+   * <p>The refusal names the accepted values, because the caller cannot see the enum.
+   */
+  private static Defects.Phase phaseOf(String wire) {
+    try {
+      return Defects.Phase.fromWire(wire);
+    } catch (IllegalArgumentException unknown) {
+      throw ServiceException.validation(
+          "A defect is raised against \"Staging test\", \"Preprod test\" or \"Prod deployment\".");
+    }
+  }
+
+  private static Defects.Severity severityOf(String wire) {
+    try {
+      return Defects.Severity.fromWire(wire);
+    } catch (IllegalArgumentException unknown) {
+      throw ServiceException.validation("A severity is \"High\", \"Med\" or \"Low\".");
+    }
+  }
+
+  private static Defects.Status statusOf(String wire) {
+    try {
+      return Defects.Status.fromWire(wire);
+    } catch (IllegalArgumentException unknown) {
+      throw ServiceException.validation(
+          "A defect is \"Open\", \"Investigating\" or \"Fixed\".");
+    }
   }
 }

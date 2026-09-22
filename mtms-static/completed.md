@@ -1,4 +1,4 @@
-# Completed — MTMS (Mahajan Ticket Management System)
+# Completed — MTMS (Organization Management System)
 
 App root: `tracker/mtms/`. Standalone Next.js app; TMS is a **reference**, not a
 dependency — nothing is imported from it and the TMS repo is untouched.
@@ -321,7 +321,7 @@ configured, so nothing was sent. Send them this single-use link: …"*.
 
 ## Part 4.5 — renamed to MTMS
 
-The portal is **MTMS — Mahajan Ticket Management System**. Changed in the package name and
+The portal is **MTMS — Organization Management System**. Changed in the package name and
 description, the browser title, the sign-in card, the invitation email, the development
 JWT fallback, the test temp-directory prefix, and all three markdown files. The app
 directory moved `tracker/prod-tracker/` → `tracker/mtms/`.

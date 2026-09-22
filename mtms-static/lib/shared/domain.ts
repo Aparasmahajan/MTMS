@@ -70,6 +70,14 @@ export const Role = z.object({
   note: z.string().default(''),
   description: z.string().default(''),
   is_system: z.boolean().default(false),
+  /**
+   * Not offered in any picker — owner teams, "who may tick this step", the member role
+   * selector. Hidden rather than deleted, because rows already pointing at it have to keep
+   * rendering with a name, and an admin needs something to click to bring it back.
+   *
+   * A project with no QA team hides QA; it does not delete a role whose history matters.
+   */
+  hidden: z.boolean().default(false),
   permissions: z.array(z.enum(PERMISSION_KEYS)).default([]),
 });
 export type Role = z.infer<typeof Role>;
@@ -101,6 +109,20 @@ export const Project = z.object({
   configured: z.boolean().default(false),
   archived: z.boolean().default(false),
   created_at: isoDateTime,
+
+  /**
+   * What this project calls its three levels.
+   *
+   * CR_AUTOMATION says "Node" and "Activity"; another team will say something else entirely.
+   * Stored per project rather than written into the code, which is the difference between a
+   * tracker for one team and a product any team can pick up.
+   *
+   * Defaulted rather than required, so an existing project reads back with the generic words
+   * instead of failing to parse.
+   */
+  module_label: z.string().min(1).max(40).default('Module'),
+  sub_module_label: z.string().min(1).max(40).default('Sub-module'),
+  sub_activity_label: z.string().min(1).max(40).default('Sub-activity'),
 });
 export type Project = z.infer<typeof Project>;
 
@@ -181,7 +203,7 @@ export type Environment = z.infer<typeof Environment>;
  */
 export const ProjectConfig = z.object({
   project_id: uuid,
-  node_types: z.array(z.string().min(1).max(40)).default([]),
+  module_names: z.array(z.string().min(1).max(40)).default([]),
   stages: z.array(Stage).default([]),
   owners: z.array(z.string().min(1).max(120)).default([]),
   link_types: z.array(z.string().min(1).max(40)).default([]),
@@ -189,7 +211,7 @@ export const ProjectConfig = z.object({
 });
 export type ProjectConfig = z.infer<typeof ProjectConfig>;
 
-export const ConfigList = z.enum(['node_types', 'stages', 'owners', 'link_types']);
+export const ConfigList = z.enum(['modules', 'stages', 'owners', 'link_types']);
 export type ConfigList = z.infer<typeof ConfigList>;
 
 // ---------------------------------------------------------------------------
@@ -197,14 +219,14 @@ export type ConfigList = z.infer<typeof ConfigList>;
 // ---------------------------------------------------------------------------
 
 /**
- * A module is a node type plus an activity, global within a project.
+ * A sub-module is a module plus an activity, global within a project.
  * `CFX + 128_TGRP_CONFIGURATION_IN_CFX` and `SBC + 128_TGRP_CONFIGURATION_IN_SBC`
  * are two different modules, tracked separately.
  */
-export const Module = z.object({
+export const SubModule = z.object({
   id: uuid,
   project_id: uuid,
-  node_type: z.string().min(1).max(40),
+  module_name: z.string().min(1).max(40),
   name: z.string().min(1).max(240),
   /** The library entry this was cloned from, if any. */
   library_entry_id: uuid.nullable().default(null),
@@ -216,27 +238,27 @@ export const Module = z.object({
   fni_closed_by: z.string().nullable().default(null),
   created_at: isoDateTime,
 });
-export type Module = z.infer<typeof Module>;
+export type SubModule = z.infer<typeof SubModule>;
 
 /**
- * A subactivity carries its own full deliverable row. A module with subactivities has
+ * A subActivity carries its own full deliverable row. A module with sub-activities has
  * no editable row of its own — its cells are a roll-up.
  */
-export const Subactivity = z.object({
+export const SubActivity = z.object({
   id: uuid,
-  module_id: uuid,
+  sub_module_id: uuid,
   name: z.string().min(1).max(240),
   order_index: z.number().int().nonnegative().default(0),
 });
-export type Subactivity = z.infer<typeof Subactivity>;
+export type SubActivity = z.infer<typeof SubActivity>;
 
 /**
  * Cells live in a narrow table, never as a wide row per module, because columns are
- * user-configurable. `subactivity_id: null` is the module's own row.
+ * user-configurable. `sub_activity_id: null` is the module's own row.
  */
 export const Cell = z.object({
-  module_id: uuid,
-  subactivity_id: uuid.nullable().default(null),
+  sub_module_id: uuid,
+  sub_activity_id: uuid.nullable().default(null),
   column_key: z.string(),
   status: z.string(),
   changed_by: z.string().nullable().default(null),
@@ -246,7 +268,7 @@ export type Cell = z.infer<typeof Cell>;
 
 /**
  * What kind of thing changed. A deliverable status is only part of the record: who
- * created a module, who broke it into subactivities and who changed the columns are all
+ * created a module, who broke it into sub-activities and who changed the columns are all
  * things a release manager has to be able to answer months later.
  */
 export const AuditScope = z.enum(['cell', 'module', 'project']);
@@ -256,8 +278,8 @@ export const AuditEntry = z.object({
   id: uuid,
   project_id: uuid,
   /** null for a project-level change, such as a column being added. */
-  module_id: uuid.nullable().default(null),
-  subactivity_id: uuid.nullable().default(null),
+  sub_module_id: uuid.nullable().default(null),
+  sub_activity_id: uuid.nullable().default(null),
   scope: AuditScope,
   /** The column label for a cell change; otherwise a short tag: MODULE, CONFIG, ACCESS. */
   label: z.string(),
@@ -269,17 +291,17 @@ export const AuditEntry = z.object({
 export type AuditEntry = z.infer<typeof AuditEntry>;
 
 /** A module built once, then cloned into a project. Cloning never touches the entry. */
-export const ModuleLibraryEntry = z.object({
+export const LibraryEntry = z.object({
   id: uuid,
   tenant_id: uuid,
-  node_type: z.string().min(1).max(40),
+  module_name: z.string().min(1).max(40),
   name: z.string().min(1).max(240),
   version: z.string().max(20).default('v1'),
-  subactivity_names: z.array(z.string()).default([]),
+  sub_activity_names: z.array(z.string()).default([]),
   /** How many projects currently hold a clone. Maintained by the service. */
   used_in_projects: z.number().int().nonnegative().default(0),
 });
-export type ModuleLibraryEntry = z.infer<typeof ModuleLibraryEntry>;
+export type LibraryEntry = z.infer<typeof LibraryEntry>;
 
 // ---------------------------------------------------------------------------
 // Defects
@@ -301,7 +323,7 @@ export const DEFECT_STATUS_ORDER: DefectStatus[] = ['Open', 'Investigating', 'Fi
 export const Defect = z.object({
   id: uuid,
   project_id: uuid,
-  module_id: uuid,
+  sub_module_id: uuid,
   phase: DefectPhase,
   ticket_key: z.string().max(40).default(''),
   /** CHILD_REQ_ID — a bare integer identifying the run. Optional. */
@@ -321,7 +343,7 @@ export type Defect = z.infer<typeof Defect>;
 
 export const Link = z.object({
   id: uuid,
-  module_id: uuid,
+  sub_module_id: uuid,
   type: z.string().min(1).max(40),
   label: z.string().min(1).max(160),
   url: z.string().min(1).max(600),
@@ -344,7 +366,7 @@ export const Artifact = z.object({
 /** A run is identified by CHILD_REQ_ID — a bare integer. */
 export const Run = z.object({
   id: uuid,
-  module_id: uuid,
+  sub_module_id: uuid,
   child_req_id: z.string(),
   phases: z.array(RunPhase).default([]),
   artifacts: z.array(Artifact).default([]),
@@ -505,7 +527,7 @@ export type RefreshToken = z.infer<typeof RefreshToken>;
  */
 export const DomainEventName = z.enum([
   'cell.changed',
-  'module.closed',
+  'subModule.closed',
   'defect.raised',
   'defect.transitioned',
   'deployment.confirmed',
@@ -561,3 +583,195 @@ export const Invitation = z.object({
   accepted_at: isoDateTime.nullable().default(null),
 });
 export type Invitation = z.infer<typeof Invitation>;
+
+// ---------------------------------------------------------------------------
+// Steps, owners, discussions and notifications
+// ---------------------------------------------------------------------------
+//
+// These four exist in `mtms-backend` as nine `step_*` tables plus `owners`, `threads`,
+// `thread_comments` and `notifications`. They are modelled here so the static build can
+// demonstrate them — this file is the store, `views.ts` is the wire, and only the wire has
+// to match the Java service field for field.
+//
+// The wire is what a client sees, so it is the thing that must not drift. The store behind
+// it is this implementation's own business, which is why these live here and not in
+// `mtms-frontend`: that app has no store at all.
+
+/**
+ * The three levels a checklist, an owner or a discussion can attach to.
+ *
+ * The rule is "the lowest level that exists", the same one the matrix uses for cells: a
+ * module with no sub-modules holds its own; once it has sub-modules, they hold it instead.
+ */
+export const Scope = z.enum(['module', 'sub_module', 'sub_activity']);
+export type Scope = z.infer<typeof Scope>;
+
+/**
+ * A module as a record rather than a bare name.
+ *
+ * `project_config.module_names` is still the editable list; this is the row that gives each
+ * one an id, so a checklist, a set of owners and a discussion have something to hang off.
+ */
+export const Module = z.object({
+  id: uuid,
+  project_id: uuid,
+  name: z.string().min(1).max(40),
+  description: z.string().max(500).default(''),
+  order_index: z.number().int().nonnegative(),
+  archived_at: isoDateTime.nullable().default(null),
+});
+export type Module = z.infer<typeof Module>;
+
+/** One step in the project's library, written once and reusable on any number of checklists. */
+export const StepDefinition = z.object({
+  id: uuid,
+  project_id: uuid,
+  name: z.string().min(1).max(120),
+  description: z.string().max(500).default(''),
+  /**
+   * Who may tick it. Empty means nobody can — which is the safe direction when the last
+   * allowed role is deleted, because the alternative is a gate that silently opens.
+   */
+  role_ids: z.array(uuid).default([]),
+  archived_at: isoDateTime.nullable().default(null),
+  created_at: isoDateTime,
+});
+export type StepDefinition = z.infer<typeof StepDefinition>;
+
+/**
+ * One named checklist attached to one thing.
+ *
+ * A list scoped to a **module** is that module's template: it is copied onto each sub-module
+ * as the sub-module is created.
+ */
+export const StepList = z.object({
+  id: uuid,
+  project_id: uuid,
+  name: z.string().min(1).max(120),
+  scope_type: Scope,
+  scope_id: uuid,
+  /** When true, a step cannot be ticked until every step before it is done. */
+  enforce_order: z.boolean().default(false),
+  archived_at: isoDateTime.nullable().default(null),
+  created_at: isoDateTime,
+});
+export type StepList = z.infer<typeof StepList>;
+
+/** A definition's place on one checklist. The order lives here, not on the definition. */
+export const StepEntry = z.object({
+  id: uuid,
+  step_list_id: uuid,
+  definition_id: uuid,
+  order_index: z.number().int().nonnegative(),
+});
+export type StepEntry = z.infer<typeof StepEntry>;
+
+export const StepState = z.enum(['todo', 'done', 'blocked']);
+export type StepState = z.infer<typeof StepState>;
+
+/** Where an entry stands now. A fast lookup derived from the events, never the authority. */
+export const StepProgress = z.object({
+  entry_id: uuid,
+  state: StepState,
+  blocked_reason: z.string().max(500).nullable().default(null),
+  changed_by: z.string().nullable().default(null),
+  changed_at: isoDateTime.nullable().default(null),
+});
+export type StepProgress = z.infer<typeof StepProgress>;
+
+/**
+ * Every tick and un-tick ever made. Append-only, and the truth.
+ *
+ * This is what lets the timing figures report a step ticked, un-ticked and ticked again as
+ * two durations rather than one long span — the reading that goes most wrong precisely on
+ * the work that went badly.
+ */
+export const StepEvent = z.object({
+  id: uuid,
+  entry_id: uuid,
+  from_state: StepState,
+  to_state: StepState,
+  /** An admin acting for a role that was unavailable. Recorded as what it is. */
+  is_override: z.boolean().default(false),
+  reason: z.string().max(500).nullable().default(null),
+  by: z.string(),
+  at: isoDateTime,
+});
+export type StepEvent = z.infer<typeof StepEvent>;
+
+export const StepComment = z.object({
+  id: uuid,
+  entry_id: uuid,
+  author_user_id: uuid,
+  author: z.string(),
+  body: z.string().min(1).max(2000),
+  created_at: isoDateTime,
+});
+export type StepComment = z.infer<typeof StepComment>;
+
+/**
+ * One person owning one thing, optionally as part of a team.
+ *
+ * `role_id` null is the overall owner. Set, it is that team's owner — the dev owner, the QA
+ * owner — which is what makes "several owners, per role, at every level" rows rather than
+ * columns.
+ */
+export const Owner = z.object({
+  id: uuid,
+  project_id: uuid,
+  scope_type: Scope,
+  scope_id: uuid,
+  user_id: uuid,
+  role_id: uuid.nullable().default(null),
+  created_at: isoDateTime,
+});
+export type Owner = z.infer<typeof Owner>;
+
+/** A topic raised on a module, sub-module or sub-activity. */
+export const Thread = z.object({
+  id: uuid,
+  project_id: uuid,
+  scope_type: Scope,
+  scope_id: uuid,
+  title: z.string().min(1).max(200),
+  created_by_user_id: uuid,
+  created_by: z.string(),
+  created_at: isoDateTime,
+  resolved_at: isoDateTime.nullable().default(null),
+});
+export type Thread = z.infer<typeof Thread>;
+
+export const ThreadComment = z.object({
+  id: uuid,
+  thread_id: uuid,
+  author_user_id: uuid,
+  author: z.string(),
+  body: z.string().min(1).max(4000),
+  /** Users named with @ in the body, resolved at write time so a later rename cannot break it. */
+  mentions: z.array(uuid).default([]),
+  created_at: isoDateTime,
+});
+export type ThreadComment = z.infer<typeof ThreadComment>;
+
+export const NotificationKind = z.enum(['mention', 'step.blocked', 'step.ready']);
+export type NotificationKind = z.infer<typeof NotificationKind>;
+
+/**
+ * One person's inbox row.
+ *
+ * Written in the same transaction as the thing it is about, so a deployment with no webhook
+ * and no mail relay is not one with broken notifications — it is one where the inbox is the
+ * only channel, and the inbox is complete.
+ */
+export const Notification = z.object({
+  id: uuid,
+  tenant_id: uuid,
+  user_id: uuid,
+  kind: NotificationKind,
+  title: z.string().min(1).max(200),
+  body: z.string().max(1000).default(''),
+  link: z.string().nullable().default(null),
+  created_at: isoDateTime,
+  read_at: isoDateTime.nullable().default(null),
+});
+export type Notification = z.infer<typeof Notification>;

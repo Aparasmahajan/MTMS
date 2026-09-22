@@ -112,7 +112,42 @@ public class JdbcStepRepository implements StepRepository {
              ORDER BY c.created_at
             """,
             Rows.STEP_COMMENT,
-            projectId));
+            projectId),
+        doneTransitions(projectId));
+  }
+
+  /**
+   * Every transition into or out of {@code done}, oldest first.
+   *
+   * <p>A second read of {@code step_events}, and deliberately not the one above. That one is
+   * capped at the most recent {@value #EVENT_LIMIT} and ordered <em>descending</em>, because it
+   * feeds screens that show the last handful per step. Computing how long work takes from a
+   * truncated, recency-biased sample would produce confident figures that quietly describe only
+   * the last fortnight — which is worse than not answering, because nothing on the screen would
+   * say so.
+   *
+   * <p><strong>Uncapped, and that is the point.</strong> What bounds it is not a LIMIT but the
+   * filter: only ticks and un-ticks, never blocks or comments, so it is a fraction of the table
+   * and grows with work actually completed rather than with activity. A team finishing two
+   * hundred sub-modules of five steps each produces a few thousand rows of five columns.
+   *
+   * <p>Ascending is required rather than preferred: {@code Timing.perStep} walks these in order
+   * and treats that order as the truth about what happened.
+   */
+  private List<Steps.Event> doneTransitions(UUID projectId) {
+    return jdbc.query(
+        """
+        SELECT ev.*, u.display_name AS by_name
+          FROM step_events ev
+          JOIN step_list_entries e ON e.id = ev.step_list_entry_id
+          JOIN step_lists l ON l.id = e.step_list_id
+          LEFT JOIN users u ON u.id = ev.by_user_id
+         WHERE l.project_id = ?
+           AND (ev.to_state = 'done' OR ev.from_state = 'done')
+         ORDER BY ev.at ASC
+        """,
+        Rows.STEP_EVENT,
+        projectId);
   }
 
   // --- The library -----------------------------------------------------------

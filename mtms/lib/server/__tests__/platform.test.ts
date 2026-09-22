@@ -65,7 +65,7 @@ describe('who is a super admin', () => {
 });
 
 describe('creating an organisation', () => {
-  async function create(name = 'Northern Grid', adminEmail = 'lead@mahajan.com') {
+  async function create(name = 'Northern Grid', adminEmail = 'lead@mail.com') {
     return createOrganisation(await actorFor(ADMIN), { name, adminEmail, adminName: 'A. Lead' });
   }
 
@@ -116,7 +116,7 @@ describe('creating an organisation', () => {
     const { tenant } = await create();
     expect(tenant.slug).toBe('northern-grid');
 
-    await refused(create('Northern  Grid', 'other@mahajan.com'), 'conflict');
+    await refused(create('Northern  Grid', 'other@mail.com'), 'conflict');
   });
 
   it('refuses a name-less organisation and a non-email admin', async () => {
@@ -147,7 +147,7 @@ describe('creating a project inside an organisation', () => {
     const actor = await actorFor(ADMIN);
     const { tenant } = await createOrganisation(actor, {
       name: 'Northern Grid',
-      adminEmail: 'lead@mahajan.com',
+      adminEmail: 'lead@mail.com',
     });
 
     const { projectId, key } = await createOrganisationProject(actor, tenant.id, {
@@ -184,7 +184,7 @@ describe('creating a project inside an organisation', () => {
 
     const { tenant } = await createOrganisation(actor, {
       name: 'Northern Grid',
-      adminEmail: 'lead@mahajan.com',
+      adminEmail: 'lead@mail.com',
     });
     // The same key in a different organisation is a different project entirely.
     const created = await createOrganisationProject(actor, tenant.id, { key: 'CR_AUTOMATION' });
@@ -206,7 +206,7 @@ describe('suspending an organisation', () => {
     const actor = await actorFor(ADMIN);
     const { tenant } = await createOrganisation(actor, {
       name: 'Northern Grid',
-      adminEmail: 'lead@mahajan.com',
+      adminEmail: 'lead@mail.com',
     });
     await createOrganisationProject(actor, tenant.id, { key: 'CMDB' });
 
@@ -232,7 +232,7 @@ describe('suspending an organisation', () => {
     const actor = await actorFor(ADMIN);
     const { tenant } = await createOrganisation(actor, {
       name: 'Northern Grid',
-      adminEmail: 'lead@mahajan.com',
+      adminEmail: 'lead@mail.com',
     });
 
     await setOrganisationStatus(actor, tenant.id, 'suspended');
@@ -262,7 +262,7 @@ describe('the platform view', () => {
     const actor = await actorFor(ADMIN);
     const { tenant } = await createOrganisation(actor, {
       name: 'Orphan Works',
-      adminEmail: 'lead@mahajan.com',
+      adminEmail: 'lead@mail.com',
     });
 
     await mutate((store) => {

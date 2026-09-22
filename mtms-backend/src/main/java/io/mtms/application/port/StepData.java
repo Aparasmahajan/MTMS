@@ -26,10 +26,21 @@ public record StepData(
     List<Steps.Entry> entries,
     List<Steps.Progress> progress,
     List<Steps.Event> events,
-    List<Steps.Comment> comments) {
+    List<Steps.Comment> comments,
+    /**
+     * Every transition into or out of done, oldest first and <strong>not capped</strong>.
+     *
+     * <p>Separate from {@code events} because that list is the most recent few hundred, newest
+     * first, for screens showing recent activity per step. Measuring how long work takes from a
+     * truncated, recency-biased sample would give confident numbers describing only the last
+     * fortnight, with nothing on the screen to say so. This one is filtered rather than capped —
+     * ticks and un-ticks only — so it grows with work completed rather than with activity.
+     */
+    List<Steps.Event> doneTransitions) {
 
   public static StepData empty() {
-    return new StepData(List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+    return new StepData(
+        List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
   }
 
   /**
