@@ -23,11 +23,22 @@ public class SubModuleUseCases {
   private final SubModuleRepository modules;
   private final MutationSupport support;
 
+  /**
+   * Only for {@link StepUseCases#applyModuleDefaults}, and deliberately the whole use case rather
+   * than the repository: copying a checklist is a decision about what a default means, not a
+   * write, and a second copy of that decision here is how the two would drift apart.
+   */
+  private final StepUseCases steps;
+
   public SubModuleUseCases(
-      ProjectRepository projects, SubModuleRepository modules, MutationSupport support) {
+      ProjectRepository projects,
+      SubModuleRepository modules,
+      MutationSupport support,
+      StepUseCases steps) {
     this.projects = projects;
     this.modules = modules;
     this.support = support;
+    this.steps = steps;
   }
 
   @Transactional
@@ -49,6 +60,14 @@ public class SubModuleUseCases {
     modules.insert(module);
     support.record(
         actor, projectId, Audit.Scope.MODULE, "MODULE", "module created", module.id(), null);
+
+    // Whatever checklist the module carries as its template is copied onto the new sub-module
+    // here. Bulk-apply covers the sub-modules that already exist; without this, one created
+    // next month starts bare and depends on somebody remembering — and a default that has to be
+    // remembered is not a default. Silent when the module has no template, which is the common
+    // case and must not turn creating a sub-module into an error.
+    steps.applyModuleDefaults(actor, module.id(), moduleName);
+
     support.bump(projectId);
     return module.id();
   }

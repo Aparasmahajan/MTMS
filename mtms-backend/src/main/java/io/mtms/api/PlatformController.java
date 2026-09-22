@@ -67,7 +67,9 @@ public class PlatformController {
         Map.of(
             "tenant_id", created.tenant().id().toString(),
             "admin_email", created.adminEmail(),
-            "accept_url", created.acceptUrl()));
+            "accept_url", created.acceptUrl(),
+            "delivery_state", created.delivery().sent() ? "sent" : "not_sent",
+            "delivery_detail", created.delivery().detail()));
   }
 
   public record CreateProjectRequest(@NotBlank String key, String name, String description) {}
@@ -193,6 +195,8 @@ public class PlatformController {
     meta.put("where", assigned.where());
     meta.put("invited", assigned.invited());
     meta.put("accept_url", assigned.acceptUrl());
+    meta.put("delivery_state", assigned.delivery().sent() ? "sent" : "not_sent");
+    meta.put("delivery_detail", assigned.delivery().detail());
     return meta;
   }
 

@@ -19,6 +19,10 @@ export default function DashboardPage() {
   const router = useRouter();
   const { sub_modules: subModules, config } = snapshot;
 
+  // Only the columns that have produced an answer. A row of dashes teaches nothing, and the
+  // panel is hidden entirely until at least one column has something finished to measure.
+  const timing = (snapshot.timing ?? []).filter((row) => row.median_days != null);
+
   const stats = useMemo(() => {
     const fullyDone = subModules.filter((subModule) => subModule.readiness === 100).length;
     const notStarted = subModules.filter((subModule) => subModule.readiness === 0).length;
@@ -320,6 +324,103 @@ export default function DashboardPage() {
               </Link>
             ))}
           </div>
+
+          {/*
+            Where the time goes.
+
+            Nobody fills any of this in. Every tick already carries the moment it was made and
+            every sub-module the moment it was created, so these are facts the application has
+            been recording since the first tick — which is the whole point: most tools cannot
+            answer this because they rely on estimates people stop updating.
+
+            Shown only once something has finished. A panel of dashes teaches nothing and takes
+            up the space where the honest answer ("not yet") belongs.
+          */}
+          {timing.length > 0 ? (
+            <>
+              <SectionHeading>Where the time goes</SectionHeading>
+              <Blueprint>
+                <div
+                  style={{
+                    fontSize: 14,
+                    lineHeight: 1.5,
+                    marginBottom: 'var(--space-4)',
+                    textWrap: 'pretty',
+                  }}
+                >
+                  Measured from the ticks, not from anybody&rsquo;s estimate. Days from a{' '}
+                  {words.subModule.lower} being created to that deliverable being finished, and
+                  how much each one adds on top of the one before it.
+                </div>
+
+                {timing.map((row) => (
+                  <div
+                    key={row.column_key}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      gap: 'var(--space-3)',
+                      padding: 'var(--space-2) 0',
+                      borderTop: '1px solid var(--color-divider)',
+                    }}
+                  >
+                    <span
+                      className="tabular"
+                      style={{
+                        fontFamily: 'var(--font-heading)',
+                        fontWeight: 600,
+                        fontSize: 20,
+                        width: 56,
+                        flex: 'none',
+                        // Null is not zero. A column nobody has finished has no answer yet.
+                        color:
+                          row.median_days == null
+                            ? 'var(--color-neutral-500)'
+                            : 'var(--color-text)',
+                      }}
+                    >
+                      {row.median_days == null ? '—' : row.median_days}
+                    </span>
+                    <span style={{ flex: 1, fontSize: 13, textWrap: 'pretty' }}>
+                      {row.label}
+                      {row.added_days != null ? (
+                        <span style={{ color: 'var(--color-neutral-600)' }}>
+                          {' '}
+                          · {row.added_days > 0 ? '+' : ''}
+                          {row.added_days}d on the previous column
+                        </span>
+                      ) : null}
+                    </span>
+                    <span
+                      className="tabular"
+                      style={{ fontSize: 12, color: 'var(--color-neutral-600)', flex: 'none' }}
+                      title={
+                        row.outstanding > 0
+                          ? `${row.outstanding} not finished here, so not counted`
+                          : 'every one is finished here'
+                      }
+                    >
+                      from {row.measured}
+                      {row.outstanding > 0 ? ` of ${row.measured + row.outstanding}` : ''}
+                    </span>
+                  </div>
+                ))}
+
+                <div
+                  style={{
+                    marginTop: 'var(--space-3)',
+                    fontSize: 12,
+                    color: 'var(--color-neutral-600)',
+                    textWrap: 'pretty',
+                  }}
+                >
+                  Median days, so one abandoned {words.subModule.lower} does not distort the
+                  figure. Anything unfinished is left out rather than counted as instant, which is
+                  why the count beside each row matters.
+                </div>
+              </Blueprint>
+            </>
+          ) : null}
 
           {/*
             The recent-changes panel that sat here was dropped on 15 Sept. It duplicated the
