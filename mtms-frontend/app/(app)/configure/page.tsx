@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import type { CSSProperties } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTracker } from '@/components/TrackerProvider';
 import { Blueprint, PageTitle } from '@/components/primitives';
@@ -9,14 +10,7 @@ import { WordingPanel } from '@/components/config/WordingPanel';
 import { send } from '@/lib/client/api';
 import type { ConfigList, Environment } from '@/lib/shared/domain';
 import { PROD_ENVIRONMENT } from '@/lib/shared/domain';
-import {
-  isStatusKey,
-  statusEntry,
-  STATUS_SETS,
-  STATUS_VOCABULARY,
-  TONE_DESCRIPTION,
-  TONE_STYLE,
-} from '@/lib/shared/vocabulary';
+import { statusEntry, STATUS_SETS, STATUS_VOCABULARY, TONE_DESCRIPTION, TONE_STYLE } from '@/lib/shared/vocabulary';
 import { columnDisplayLabel } from '@/lib/shared/views';
 import type { ColumnView, Snapshot } from '@/lib/shared/views';
 
@@ -142,17 +136,51 @@ function ConfigSet({
   );
 }
 
+/** The two shapes "loaded" comes in — one column per environment, or one column alone. */
 /**
- * The statuses a column may take, as a toggle per entry in the shared vocabulary.
- *
- * Turning one off never rewrites cells that already hold it — see `setColumnStatuses`.
- * Those cells keep their recorded status and are counted back here, so the consequence
- * of the change is visible on the screen that made it.
+ * The four families a status can belong to, each shown as its own dropdown. "Loaded"
+ * spans both named backend sets (`simple` and `load` — see `STATUS_SETS`) because to
+ * somebody configuring a column they are the same idea at two granularities, not two
+ * different ideas.
  */
-function StatusSubset({ column }: { column: ColumnView }) {
+interface StatusGroup {
+  key: string;
+  label: string;
+  members: string[];
+}
+
+const STATUS_GROUPS: StatusGroup[] = [
+  { key: 'created', label: 'Created', members: ['notcreated', 'created'] },
+  { key: 'loaded', label: 'Loaded', members: ['loaded', 'lab', 'preprod', 'prod'] },
+  { key: 'completion', label: 'Completion', members: ['pending', 'completed'] },
+  { key: 'raised', label: 'Raised', members: ['notraised', 'raised'] },
+];
+
+/** A dropdown summary, drawn the same way whether it is open or something inside it is checked. */
+function groupSummaryStyle(active: boolean): CSSProperties {
+  return {
+    fontSize: 12,
+    padding: '2px 8px',
+    borderRadius: 0,
+    border: `1px solid ${active ? 'var(--color-text)' : 'var(--color-neutral-300)'}`,
+    background: active ? 'var(--color-accent-100)' : 'transparent',
+    color: active ? 'var(--color-text)' : 'var(--color-neutral-600)',
+    cursor: 'pointer',
+  };
+}
+
+/**
+ * The statuses a column may take: one dropdown per family (Created, Loaded, Completion,
+ * Raised), each a checklist of that family's own values. Nothing about a column limits it
+ * to one family — checking "Created" in one dropdown and "Pending" in another is a valid,
+ * genuinely mixed column, not an error state to warn about.
+ *
+ * The line below is a plain read-out of `allowed` — whatever is checked, across every
+ * dropdown, in the order it is stored.
+ */
+function StatusSetEditor({ column }: { column: ColumnView }) {
   const { apply, can, reasonFor, setNotice } = useTracker();
   const canConfig = can('project.config');
-  const selectable = Object.keys(STATUS_VOCABULARY).filter(isStatusKey);
 
   function toggle(key: string) {
     if (!canConfig) {
@@ -173,60 +201,142 @@ function StatusSubset({ column }: { column: ColumnView }) {
   }
 
   return (
-    <div style={{ display: 'flex', gap: 'var(--space-1)', flexWrap: 'wrap' }}>
-      {selectable.map((key) => {
-        const on = column.allowed.includes(key);
-        const entry = statusEntry(key);
-        return (
-          <button
-            key={key}
-            type="button"
-            aria-pressed={on}
-            disabled={!canConfig}
-            title={
-              canConfig
-                ? `${on ? 'Remove' : 'Add'} ${entry.label} ${on ? 'from' : 'to'} ${columnDisplayLabel(column)}`
-                : reasonFor('project.config')
-            }
-            onClick={() => toggle(key)}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-              fontSize: 12,
-              padding: '1px 7px',
-              borderRadius: 0,
-              border: `1px solid ${on ? 'var(--color-text)' : 'var(--color-neutral-300)'}`,
-              background: on ? 'var(--color-accent-100)' : 'transparent',
-              color: on ? 'var(--color-text)' : 'var(--color-neutral-600)',
-              cursor: canConfig ? 'pointer' : 'not-allowed',
-              opacity: canConfig ? 1 : 0.6,
-            }}
-          >
-            <span aria-hidden className="mono">
-              {entry.mark}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', minWidth: 260 }}>
+      <div style={{ display: 'flex', gap: 'var(--space-1)', flexWrap: 'wrap' }}>
+        {STATUS_GROUPS.map((group) => {
+          const checkedCount = group.members.filter((key) => column.allowed.includes(key)).length;
+          return (
+            <details key={group.key} style={{ position: 'relative' }}>
+              <summary style={groupSummaryStyle(checkedCount > 0)}>
+                {group.label}
+                {checkedCount > 0 ? ` (${checkedCount})` : ''}
+              </summary>
+              <div
+                style={{
+                  position: 'absolute',
+                  zIndex: 5,
+                  top: '100%',
+                  left: 0,
+                  marginTop: 2,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 'var(--space-1)',
+                  minWidth: 170,
+                  background: 'var(--color-bg)',
+                  border: '1px solid var(--color-neutral-400)',
+                  padding: 'var(--space-2)',
+                }}
+              >
+                {group.members.map((key) => {
+                  const on = column.allowed.includes(key);
+                  const entry = statusEntry(key);
+                  return (
+                    <label
+                      key={key}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        fontSize: 12,
+                        cursor: canConfig ? 'pointer' : 'not-allowed',
+                        opacity: canConfig ? 1 : 0.6,
+                      }}
+                    >
+                      <input type="checkbox" checked={on} disabled={!canConfig} onChange={() => toggle(key)} />
+                      <span aria-hidden className="mono">
+                        {entry.mark}
+                      </span>
+                      {entry.label}
+                    </label>
+                  );
+                })}
+              </div>
+            </details>
+          );
+        })}
+      </div>
+
+      <div style={{ display: 'flex', gap: 'var(--space-1)', flexWrap: 'wrap' }}>
+        {column.allowed.map((key) => {
+          const entry = statusEntry(key);
+          return (
+            <span
+              key={key}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                fontSize: 12,
+                padding: '1px 7px',
+                color: 'var(--color-neutral-700)',
+              }}
+            >
+              <span aria-hidden className="mono">
+                {entry.mark}
+              </span>
+              {entry.label}
             </span>
-            {entry.label}
-          </button>
-        );
-      })}
-      {column.off_vocabulary > 0 ? (
-        <div
-          style={{
-            width: '100%',
-            marginTop: 'var(--space-1)',
-            fontSize: 11,
-            color: 'var(--color-neutral-700)',
-            textWrap: 'pretty',
-          }}
-        >
-          {column.off_vocabulary} {column.off_vocabulary === 1 ? 'cell holds' : 'cells hold'} a status
-          this column no longer allows. They keep what was recorded — clicking one moves it into the
-          list above.
-        </div>
-      ) : null}
+          );
+        })}
+      </div>
     </div>
   );
+}
+
+interface DeliverableGroup {
+  /** The group key, or the column's own key when it stands alone. */
+  key: string;
+  /** The spanning header — `FILECR`, or the column's own label when it stands alone. */
+  label: string;
+  subtitle: string;
+  /** "counts" summary shown next to the header — one line per group, not per row. */
+  countsSummary: string;
+  /** One member for a plain column; one per environment for a grouped deliverable. */
+  members: ColumnView[];
+}
+
+/**
+ * Folds the flat column list into the runs the matrix itself groups under one header —
+ * same rule as `groupColumns` in `lib/shared/views.ts` (a contiguous run sharing a
+ * `group_key`) — but keeps hidden columns in the list. `groupColumns` drops them because
+ * a hidden header has nothing to span on the matrix; here an admin needs to see a hidden
+ * column to switch its environment back on.
+ */
+/** Strips the per-environment suffix `full` carries (" — loaded on lab") for a group's
+ *  shared subtitle — every member has its own copy of that sentence, one per environment,
+ *  and the group heading needs the one part they all agree on. */
+function groupSubtitle(column: ColumnView): string {
+  return column.group_key ? column.full.replace(/\s*—\s*loaded on \w+$/i, '') : column.full;
+}
+
+function deliverableGroups(columns: readonly ColumnView[]): DeliverableGroup[] {
+  const groups: DeliverableGroup[] = [];
+  for (const column of columns) {
+    const key = column.group_key ?? column.key;
+    const last = groups[groups.length - 1];
+    if (last && last.key === key && column.group_key) {
+      last.members.push(column);
+    } else {
+      groups.push({
+        key,
+        label: column.group_label ?? column.label,
+        subtitle: groupSubtitle(column),
+        countsSummary: '',
+        members: [column],
+      });
+    }
+  }
+  for (const group of groups) {
+    const first = group.members[0] as ColumnView;
+    const counted = group.members.filter((member) => member.counts).length;
+    group.countsSummary =
+      group.members.length === 1
+        ? first.counts
+          ? 'Counts toward prod'
+          : 'Informational'
+        : `${counted} of ${group.members.length} counts toward prod`;
+  }
+  return groups;
 }
 
 /**
@@ -535,129 +645,117 @@ export default function ConfigurePage() {
           </span>
         </div>
 
-        <div style={{ overflowX: 'auto' }}>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Order</th>
-                <th>Column</th>
-                <th>What it is</th>
-                <th>Statuses it can take</th>
-                <th>Counts toward prod</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {config.columns.map((column, index) => (
-                <tr key={column.key}>
-                  <td style={{ whiteSpace: 'nowrap' }}>
-                    <div style={{ display: 'flex', gap: 2 }}>
-                      {(['up', 'down'] as const).map((direction) => {
-                        const stuck =
-                          direction === 'up' ? index === 0 : index === config.columns.length - 1;
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+          {deliverableGroups(config.columns).map((group) => (
+            <div
+              key={group.key}
+              style={{ border: '1px solid var(--color-divider)', padding: 'var(--space-3) var(--space-4)' }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  justifyContent: 'space-between',
+                  gap: 'var(--space-3)',
+                  marginBottom: 'var(--space-2)',
+                  flexWrap: 'wrap',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+                  <span
+                    style={{
+                      fontFamily: 'var(--font-heading)',
+                      fontSize: 14,
+                      letterSpacing: '.06em',
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    {group.label}
+                  </span>
+                  <span style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>{group.subtitle}</span>
+                </div>
+                <span style={{ fontSize: 11, color: 'var(--color-neutral-600)', whiteSpace: 'nowrap' }}>
+                  {group.countsSummary}
+                </span>
+              </div>
+
+              {group.members.map((member, index) => (
+                <div
+                  key={member.key}
+                  style={{
+                    padding: 'var(--space-2) 0',
+                    borderTop: index === 0 ? 'none' : '1px solid var(--color-divider)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
+                    <div
+                      style={{
+                        width: 90,
+                        flex: 'none',
+                        fontSize: 13,
+                        paddingTop: 3,
+                        // A hidden column is still listed — it is how you find it to bring
+                        // it back, and its cells are still there behind it.
+                        opacity: member.active ? 1 : 0.5,
+                      }}
+                    >
+                      {group.members.length > 1 ? member.label : columnDisplayLabel(member)}
+                      {member.active ? null : (
+                        <div style={{ fontSize: 11, color: 'var(--color-neutral-600)', textWrap: 'pretty' }}>
+                          hidden
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={{ flex: '1 1 260px', minWidth: 220 }}>
+                      <StatusSetEditor column={member} />
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 2, alignSelf: 'flex-start' }}>
+                      {(['informational', 'counts'] as const).map((mode) => {
+                        const active = mode === 'counts' ? member.counts : !member.counts;
                         return (
                           <button
-                            key={direction}
+                            key={mode}
                             type="button"
-                            className="mono"
-                            disabled={!canConfig || stuck}
+                            disabled={!canConfig}
+                            aria-pressed={active}
                             title={
                               canConfig
-                                ? `Move ${columnDisplayLabel(column)} ${direction === 'up' ? 'earlier' : 'later'} on the matrix`
+                                ? 'Whether this column enters the readiness percentage'
                                 : reasonFor('project.config')
                             }
-                            aria-label={`Move ${columnDisplayLabel(column)} ${direction === 'up' ? 'earlier' : 'later'}`}
                             onClick={() =>
                               void apply(null, () =>
-                                send<Snapshot>(`/api/v1/config/columns/${column.key}`, 'PATCH', {
-                                  move: direction,
+                                send<Snapshot>(`/api/v1/config/columns/${member.key}`, 'PATCH', {
+                                  counts: mode === 'counts',
                                 }),
                               )
                             }
                             style={{
-                              width: 20,
-                              height: 20,
-                              padding: 0,
-                              fontSize: 11,
-                              lineHeight: 1,
+                              fontSize: 12,
+                              color: active ? 'var(--color-text)' : 'var(--color-neutral-500)',
+                              border: `1px solid ${active ? 'var(--color-neutral-400)' : 'var(--color-neutral-300)'}`,
                               borderRadius: 0,
-                              border: '1px solid var(--color-neutral-400)',
-                              background: 'transparent',
-                              color: 'var(--color-neutral-700)',
-                              cursor: canConfig && !stuck ? 'pointer' : 'not-allowed',
-                              opacity: canConfig && !stuck ? 1 : 0.35,
+                              background: active ? 'var(--color-accent-100)' : 'transparent',
+                              padding: '1px 8px',
+                              cursor: canConfig ? 'pointer' : 'not-allowed',
                             }}
                           >
-                            {direction === 'up' ? '←' : '→'}
+                            {mode}
                           </button>
                         );
                       })}
                     </div>
-                  </td>
-                  <td
-                    style={{
-                      fontFamily: 'var(--font-heading)',
-                      fontSize: 15,
-                      letterSpacing: '.06em',
-                      textTransform: 'uppercase',
-                      whiteSpace: 'nowrap',
-                      // A hidden column is still listed — it is how you find it to bring
-                      // it back, and its cells are still there behind it.
-                      opacity: column.active ? 1 : 0.5,
-                    }}
-                  >
-                    {columnDisplayLabel(column)}
-                  </td>
-                  <td style={{ fontSize: 13 }}>
-                    {column.full}
-                    {column.active ? null : (
-                      <span style={{ color: 'var(--color-neutral-600)' }}>
-                        {' '}
-                        — hidden, its environment is switched off
-                      </span>
-                    )}
-                  </td>
-                  <td style={{ minWidth: 260 }}>
-                    <StatusSubset column={column} />
-                  </td>
-                  <td>
-                    <button
-                      type="button"
-                      disabled={!canConfig}
-                      title={
-                        canConfig
-                          ? 'Toggle whether this column enters the readiness percentage'
-                          : reasonFor('project.config')
-                      }
-                      onClick={() =>
-                        void apply(null, () =>
-                          send<Snapshot>(`/api/v1/config/columns/${column.key}`, 'PATCH', {
-                            counts: !column.counts,
-                          }),
-                        )
-                      }
-                      style={{
-                        fontSize: 13,
-                        color: 'var(--color-neutral-700)',
-                        border: '1px solid var(--color-neutral-400)',
-                        borderRadius: 0,
-                        background: column.counts ? 'var(--color-accent-100)' : 'transparent',
-                        padding: '1px 8px',
-                        cursor: canConfig ? 'pointer' : 'not-allowed',
-                      }}
-                    >
-                      {column.counts ? 'counts' : 'informational'}
-                    </button>
-                  </td>
-                  <td>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                     <button
                       type="button"
                       disabled={!canConfig}
                       title={canConfig ? undefined : reasonFor('project.config')}
                       onClick={() =>
-                        void apply(null, () =>
-                          send<Snapshot>(`/api/v1/config/columns/${column.key}`, 'DELETE'),
-                        )
+                        void apply(null, () => send<Snapshot>(`/api/v1/config/columns/${member.key}`, 'DELETE'))
                       }
                       style={{
                         fontSize: 12,
@@ -669,11 +767,11 @@ export default function ConfigurePage() {
                     >
                       remove
                     </button>
-                  </td>
-                </tr>
+                  </div>
+                </div>
               ))}
-            </tbody>
-          </table>
+            </div>
+          ))}
         </div>
 
         {/*

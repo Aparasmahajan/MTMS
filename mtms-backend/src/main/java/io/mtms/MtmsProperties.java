@@ -10,9 +10,12 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param appBaseUrl where invitation links point. Needed because the service does not know its
  *     own public address behind a proxy, and it is the whole address — a caller should send the
  *     link exactly as given rather than prefixing anything to it.
+ * @param seedOnEmptyDatabase seed the demo organisation when the database has no tenants.
+ *     Convenient in development, and something you would turn off before pointing this at
+ *     anything real.
  */
 @ConfigurationProperties(prefix = "mtms")
-public record MtmsProperties(String ticketBaseUrl, String appBaseUrl) {
+public record MtmsProperties(String ticketBaseUrl, String appBaseUrl, boolean seedOnEmptyDatabase) {
 
   public MtmsProperties {
     ticketBaseUrl = ticketBaseUrl == null ? "https://tms.internal/browse" : ticketBaseUrl;
