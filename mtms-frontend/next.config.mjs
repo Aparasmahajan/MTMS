@@ -19,7 +19,7 @@ const isDemo = process.env.NEXT_PUBLIC_DEMO === '1';
  * is never compiled in — only this private hop is, and it is the same on every machine, so
  * one build still works on localhost, on an IP, and on a domain later.
  */
-const apiProxyTarget = process.env.API_PROXY_TARGET ?? 'http://localhost:6011';
+const apiProxyTarget = process.env.API_PROXY_TARGET ?? 'https://mtms.azalio.io';
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
