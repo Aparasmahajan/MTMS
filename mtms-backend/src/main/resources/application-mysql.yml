@@ -15,7 +15,7 @@ spring:
     # column type, so every DATETIME(6) in this schema holds UTC and the connection has to
     # agree — otherwise the driver converts using whatever the server's zone happens to be
     # and timestamps shift by hours depending on where the database is hosted.
-    url: ${DATABASE_URL:jdbc:mysql://localhost:3311/mtms}
+    url: ${DATABASE_URL:jdbc:mysql://localhost:3306/mtms?sessionVariables=time_zone='%2B00:00'&characterEncoding=utf8&rewriteBatchedStatements=true}
     username: ${DATABASE_USER:mtms}
     password: ${DATABASE_PASSWORD:mtms}
     hikari:
@@ -69,6 +69,3 @@ mtms:
     publisher: kafka
   security:
     secure-cookies: true
-  # False by default: a real database is not something to auto-seed. Local dev turns
-  # this on for itself via MTMS_SEED_ON_EMPTY_DATABASE in .env, never here.
-  seed-on-empty-database: false
