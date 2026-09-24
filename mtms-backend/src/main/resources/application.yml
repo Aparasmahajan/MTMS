@@ -70,10 +70,6 @@ spring:
 mtms:
   # memory | postgres
   storage: memory
-  # Seed the demo organisation when the store has no tenants yet. Off by default in the
-  # mysql profile (application-mysql.yml) — see DEPLOYMENT.md, "A fresh database has no
-  # way in".
-  seed-on-empty-database: true
   # memory | redis
   cache:
     type: memory
