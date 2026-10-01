@@ -133,6 +133,9 @@ public final class Views {
    *     bring it back.
    * @param memberCount how many people hold it. Hiding a role somebody still holds is refused,
    *     and the screen says why before they try.
+   * @param memberNames who they are, alphabetical. Lets a hover say more than a count without
+   *     a second request — there are never more than a few dozen people in one of these
+   *     organisations, so sending the names costs nothing worth saving.
    */
   public record RoleView(
       String id,
@@ -142,7 +145,8 @@ public final class Views {
       List<String> permissions,
       boolean isSystem,
       boolean hidden,
-      int memberCount) {}
+      int memberCount,
+      List<String> memberNames) {}
 
   /**
    * One person in the organisation, as the Access screen's organisation table needs them.

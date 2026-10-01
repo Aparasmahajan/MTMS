@@ -206,7 +206,7 @@ function StatusSetEditor({ column }: { column: ColumnView }) {
         {STATUS_GROUPS.map((group) => {
           const checkedCount = group.members.filter((key) => column.allowed.includes(key)).length;
           return (
-            <details key={group.key} style={{ position: 'relative' }}>
+            <details key={group.key} name={`status-groups-${column.key}`} style={{ position: 'relative' }}>
               <summary style={groupSummaryStyle(checkedCount > 0)}>
                 {group.label}
                 {checkedCount > 0 ? ` (${checkedCount})` : ''}
@@ -657,7 +657,9 @@ export default function ConfigurePage() {
                   alignItems: 'baseline',
                   justifyContent: 'space-between',
                   gap: 'var(--space-3)',
-                  marginBottom: 'var(--space-2)',
+                  marginBottom: 'var(--space-3)',
+                  paddingBottom: 'var(--space-2)',
+                  borderBottom: '1px solid var(--color-divider)',
                   flexWrap: 'wrap',
                 }}
               >
@@ -665,9 +667,11 @@ export default function ConfigurePage() {
                   <span
                     style={{
                       fontFamily: 'var(--font-heading)',
-                      fontSize: 14,
-                      letterSpacing: '.06em',
+                      fontSize: 19,
+                      fontWeight: 700,
+                      letterSpacing: '.04em',
                       textTransform: 'uppercase',
+                      color: 'var(--color-text)',
                     }}
                   >
                     {group.label}

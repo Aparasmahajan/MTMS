@@ -146,6 +146,8 @@ export interface RoleView {
   hidden: boolean;
   /** How many people hold it. Hiding a role somebody holds is refused; the screen says so first. */
   member_count: number;
+  /** Who they are, alphabetical — for a hover to say more than the count without another request. */
+  member_names: string[];
 }
 
 /**

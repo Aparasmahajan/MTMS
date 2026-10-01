@@ -690,24 +690,36 @@ public final class SnapshotProjection {
    * different lists and the screens guessing which one they wanted.
    */
   private List<Views.RoleView> roleViews(AccessData access) {
+    Map<UUID, String> namesById =
+        access.users().stream()
+            .collect(java.util.stream.Collectors.toMap(Tenancy.User::id, Tenancy.User::displayName));
+
     return access.roles().stream()
         .sorted(
             Comparator.comparing(Tenancy.Role::isHidden)
                 .thenComparing(Tenancy.Role::name, String.CASE_INSENSITIVE_ORDER))
         .map(
-            role ->
-                new Views.RoleView(
-                    role.id().toString(),
-                    role.key(),
-                    role.name(),
-                    role.note(),
-                    role.permissions().stream().map(PermissionKey::wire).sorted().toList(),
-                    role.isSystem(),
-                    role.isHidden(),
-                    (int)
-                        access.memberships().stream()
-                            .filter(membership -> membership.roleId().equals(role.id()))
-                            .count()))
+            role -> {
+              List<String> holderNames =
+                  access.memberships().stream()
+                      .filter(membership -> membership.roleId().equals(role.id()))
+                      .map(Tenancy.Membership::userId)
+                      .distinct()
+                      .map(namesById::get)
+                      .filter(java.util.Objects::nonNull)
+                      .sorted(String.CASE_INSENSITIVE_ORDER)
+                      .toList();
+              return new Views.RoleView(
+                  role.id().toString(),
+                  role.key(),
+                  role.name(),
+                  role.note(),
+                  role.permissions().stream().map(PermissionKey::wire).sorted().toList(),
+                  role.isSystem(),
+                  role.isHidden(),
+                  holderNames.size(),
+                  holderNames);
+            })
         .toList();
   }
 
