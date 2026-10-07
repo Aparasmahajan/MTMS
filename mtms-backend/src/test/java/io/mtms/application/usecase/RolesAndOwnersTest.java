@@ -91,7 +91,7 @@ class RolesAndOwnersTest {
             // a path every one of these tests goes through.
             new NotificationUseCases(
                 new InMemoryNotificationRepository(db), access, new LoggingNotifier()),
-            new MtmsProperties("https://tms.internal/browse", "http://localhost:6010"));
+            new MtmsProperties("https://tms.internal/browse", "http://localhost:6010", false));
     owners = new OwnerUseCases(ownerRows, subModules, access, support);
 
     projectId = UUID.randomUUID();

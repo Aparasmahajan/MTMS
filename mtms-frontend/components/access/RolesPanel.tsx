@@ -24,6 +24,73 @@ import type { Snapshot } from '@/lib/shared/views';
  * none, on purpose: the alternative is somebody granting more than they meant to by clicking
  * "add".
  */
+/**
+ * A count that says more on hover — the permissions or the people themselves, not just
+ * how many. Pure CSS positioning plus one bit of state per trigger; no portal, because
+ * nothing here needs to escape the row it is drawn in.
+ */
+function HoverList({
+  label,
+  items,
+  empty,
+  mono,
+}: {
+  label: string;
+  items: string[];
+  empty: string;
+  /** Permission keys read as code (`project.config`); names do not. */
+  mono?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <span
+      style={{ position: 'relative', display: 'inline-block' }}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <span style={{ textDecoration: 'underline dotted', textUnderlineOffset: 3, cursor: 'default' }}>
+        {label}
+      </span>
+      {open ? (
+        <div
+          role="tooltip"
+          style={{
+            position: 'absolute',
+            zIndex: 10,
+            top: '100%',
+            right: 0,
+            marginTop: 4,
+            minWidth: 180,
+            maxWidth: 260,
+            background: 'var(--color-bg)',
+            border: '1px solid var(--color-neutral-400)',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+            padding: 'var(--space-2) var(--space-3)',
+            textAlign: 'left',
+          }}
+        >
+          {items.length === 0 ? (
+            <span style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>{empty}</span>
+          ) : (
+            <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 3 }}>
+              {items.map((item) => (
+                <li
+                  key={item}
+                  className={mono ? 'mono' : undefined}
+                  style={{ fontSize: 12, color: 'var(--color-text)' }}
+                >
+                  {item}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : null}
+    </span>
+  );
+}
+
 export function RolesPanel() {
   const { snapshot, apply, can, reasonFor, setNotice } = useTracker();
   const canManage = can('admin.roles.manage');
@@ -86,9 +153,18 @@ export function RolesPanel() {
                 {role.note}
               </span>
               <span style={{ fontSize: 11, color: 'var(--color-neutral-600)', flex: 'none' }}>
-                {role.permissions.length}{' '}
-                {role.permissions.length === 1 ? 'permission' : 'permissions'} ·{' '}
-                {role.member_count} {role.member_count === 1 ? 'person' : 'people'}
+                <HoverList
+                  label={`${role.permissions.length} ${role.permissions.length === 1 ? 'permission' : 'permissions'}`}
+                  items={role.permissions}
+                  empty="No permissions granted yet."
+                  mono
+                />{' '}
+                ·{' '}
+                <HoverList
+                  label={`${role.member_count} ${role.member_count === 1 ? 'person' : 'people'}`}
+                  items={role.member_names}
+                  empty="Nobody holds this role yet."
+                />
                 {role.is_system ? ' · shipped' : ''}
               </span>
               <div style={{ display: 'flex', gap: 'var(--space-3)', flex: 'none' }}>

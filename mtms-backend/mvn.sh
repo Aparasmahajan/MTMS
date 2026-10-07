@@ -14,6 +14,17 @@
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
+cd "$(dirname "$0")"
+
+# Local-only overrides (DATABASE_URL, DATABASE_USER, ...) live in .env, gitignored,
+# never in this tracked script. Loaded here so a plain "./mvn.sh spring-boot:run
+# -Dspring-boot.run.profiles=mysql" picks them up without a separate export step.
+if [ -f .env ]; then
+  set -a
+  . ./.env
+  set +a
+fi
+
 MTMS_JAVA_HOME="${MTMS_JAVA_HOME:-$HOME/.jdks/ms-21.0.10}"
 MTMS_MAVEN_HOME="${MTMS_MAVEN_HOME:-/c/tmp/radius-tools/maven/apache-maven-3.9.9}"
 
@@ -31,5 +42,4 @@ fi
 export JAVA_HOME="$MTMS_JAVA_HOME"
 export PATH="$JAVA_HOME/bin:$MTMS_MAVEN_HOME/bin:$PATH"
 
-cd "$(dirname "$0")"
 exec mvn "$@"

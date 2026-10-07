@@ -591,13 +591,20 @@ export default function AccessPage() {
                         : reasonFor('project.members.manage')
                     }
                     aria-label={`Role for ${member.display_name}`}
-                    onChange={(event) =>
+                    onChange={(event) => {
+                      // Captured now, not read inside the callback below: `apply` queues work
+                      // behind a microtask, and by the time that runs, this controlled
+                      // <select> has already been re-rendered back to its old `value` prop
+                      // (nothing has updated `member.role_id` yet) — so `event.target.value`
+                      // read lazily in there would be the role being replaced, not the one
+                      // just picked. This is what made the dropdown look like it did nothing.
+                      const nextRoleId = event.target.value;
                       void apply(null, () =>
                         send<Snapshot>(`/api/v1/projects/members/${member.membership_id}`, 'PATCH', {
-                          role_id: event.target.value,
+                          role_id: nextRoleId,
                         }),
-                      )
-                    }
+                      );
+                    }}
                   >
                     {liveRoles.map((role) => (
                       <option key={role.id} value={role.id}>
@@ -860,15 +867,20 @@ export default function AccessPage() {
                                 : reasonFor('admin.users.manage')
                           }
                           aria-label={`Organisation-wide role for ${user.display_name}`}
-                          onChange={(event) =>
+                          onChange={(event) => {
+                            // Same reason as the project member select above: captured
+                            // synchronously so the deferred `apply` callback sends the role
+                            // just picked, not whatever this controlled <select> has been
+                            // reset back to by the time it runs.
+                            const nextRoleId = event.target.value;
                             void apply(null, () =>
                               send<Snapshot>(
                                 `/api/v1/organisation/members/${orgWide}`,
                                 'PATCH',
-                                { role_id: event.target.value },
+                                { role_id: nextRoleId },
                               ),
-                            )
-                          }
+                            );
+                          }}
                         >
                           {liveRoles.map((role) => (
                             <option key={role.id} value={role.id}>

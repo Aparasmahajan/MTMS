@@ -87,6 +87,8 @@ export default function PipelinePage() {
                     href={subModuleHref(subModule.id)}
                     style={{
                       border: '1px solid var(--color-neutral-400)',
+                      background: 'var(--color-surface)',
+                      boxShadow: 'var(--shadow-sm)',
                       padding: 'var(--space-3)',
                       color: 'inherit',
                       display: 'block',

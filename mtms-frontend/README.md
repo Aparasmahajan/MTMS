@@ -15,7 +15,7 @@ cd ../mtms-frontend && npm run dev                 # :3000
 Sign in as `paras.mahajan@azalio.io` / `paras2002`.
 
 Copy `.env.example` to `.env.local` if the service is anywhere other than
-`http://localhost:6011`.
+`https://mtms.azalio.io`.
 
 ## What changed when the API moved out
 
