@@ -5,17 +5,15 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 /**
  * Application settings, bound from {@code mtms.*}.
  *
- * @param ticketBaseUrl defects link out to the real ticket system rather than copying it. This
- *     is the prefix the ticket key is appended to.
- * @param appBaseUrl where invitation links point. Needed because the service does not know its
- *     own public address behind a proxy, and it is the whole address — a caller should send the
- *     link exactly as given rather than prefixing anything to it.
- * @param seedOnEmptyDatabase seed the demo organisation when the database has no tenants.
- *     Convenient in development, and something you would turn off before pointing this at
- *     anything real.
+ * <p>There is deliberately no {@code seedOnEmptyDatabase} here. It existed to switch on a demo
+ * seeder that created an organisation, a project and a first account on an empty database; both
+ * were removed once the real database was populated, and both came back once through a revert.
+ * A flag whose only job is to arm a component that no longer exists is a flag somebody will
+ * eventually set. See {@code DEPLOYMENT.md} for what to do with a genuinely fresh database —
+ * the answer is {@code deploy/bootstrap.sql}, which is explicit about what it creates.
  */
 @ConfigurationProperties(prefix = "mtms")
-public record MtmsProperties(String ticketBaseUrl, String appBaseUrl, boolean seedOnEmptyDatabase) {
+public record MtmsProperties(String ticketBaseUrl, String appBaseUrl) {
 
   public MtmsProperties {
     ticketBaseUrl = ticketBaseUrl == null ? "https://tms.internal/browse" : ticketBaseUrl;
