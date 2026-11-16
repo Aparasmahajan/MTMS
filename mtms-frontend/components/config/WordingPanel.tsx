@@ -64,8 +64,20 @@ export function WordingPanel() {
     });
   }, [project.module_label, project.sub_module_label, project.sub_activity_label]);
 
-  function save(key: (typeof FIELDS)[number]['key'], value: string) {
-    void apply(null, () => send<Snapshot>('/api/v1/config/vocabulary', 'PATCH', { [key]: value }));
+  /**
+   * Saves one box.
+   *
+   * Keyed by `read`, the snake_case name, not by `key`. The wire is snake_case — the service
+   * runs Jackson with SNAKE_CASE — so `{ moduleLabel: ... }` does not bind to anything. Every
+   * field then arrived null, and because every field on this request is legitimately optional
+   * (the screen saves one box at a time) the service had nothing to reject: it answered **200
+   * and changed nothing**. A silent success is the worst of the failure modes, which is why the
+   * two names are kept apart on FIELDS rather than one being derived from the other in passing.
+   */
+  function save(wireKey: (typeof FIELDS)[number]['read'], value: string) {
+    void apply(null, () =>
+      send<Snapshot>('/api/v1/config/vocabulary', 'PATCH', { [wireKey]: value }),
+    );
   }
 
   return (
@@ -118,7 +130,7 @@ export function WordingPanel() {
                 onBlur={(event) => {
                   const value = event.target.value.trim();
                   if (value === project[field.read]) return;
-                  save(field.key, value);
+                  save(field.read, value);
                 }}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') event.currentTarget.blur();

@@ -40,19 +40,35 @@ What is in it:
   this is the one part of the release that needs anything added to `mtms.env`.
 - **A module's checklist is now a template** — it is copied onto every sub-module created on
   that module from then on. Bulk-apply already covered the ones that exist.
-- **"Where the time goes"** on the dashboard: how long each column actually takes, computed
-  from the ticks. Nobody fills anything in for it.
+- **"Where the time goes"** and **"Slowest steps"** on the dashboard: how long each column and
+  each step actually take, computed from the ticks. Nobody fills anything in for either. The
+  step figures read the append-only event history, so a step ticked, un-ticked and ticked again
+  counts as two goes rather than one long wait.
 - Inviting from inside the app used to appear to do nothing — the link is now returned and
   displayed.
 - Invitation links no longer carry the domain twice.
+- **Ten operations from 16–17 Sept never worked at all**, because the frontend sent camelCase
+  keys on a wire that is snake_case, so the fields arrived null: creating a checklist, adding a
+  step to one, reordering one, bulk-applying one, enforcing order, creating a step with roles,
+  assigning an owner, starting a discussion, adding a grouped column, and renaming what the
+  project calls things. All fixed, and `npm test` now fails the build if a camelCase key is
+  ever sent again.
+- **Ticking one permission on the Access grid wiped every other permission on that role**, and
+  answered 200. The endpoint took the whole set; the screen has always sent one toggle. QA went
+  from five permissions to none. It takes a toggle now, and no missing field is defaulted.
+- Raising a defect with an unrecognised severity or phase returned **500** — "something went
+  wrong on our side" — for what is plainly a bad request. Now a 422 that names the accepted
+  values.
+- Changing a hidden role's permissions **un-hid it**, in the in-memory store only. The two stores
+  disagreed about what one write does, and the tests run against the one production does not.
 
 The artefacts currently built in the repo:
 
 | | Bytes | md5 |
 |---|---|---|
-| `mtms-api-1.0.0-SNAPSHOT.jar` | 80,594,869 | `6d2d92da579a7e1a96fc98957149e0d5` |
-| `mtms-frontend.tar.gz` | 4,606,885 | `fb82cbff1bd3d0281f1dfb81c6983b69` |
-| `.next/BUILD_ID` | | `dCVWaGHB85IWicxw5p1BP` |
+| `mtms-api-1.0.0-SNAPSHOT.jar` | 80,601,119 | `a56c4558a988a54310291ee29f465d8f` |
+| `mtms-frontend.tar.gz` | 4,609,301 | `44cecccc284d80af2a18835a7550679c` |
+| `.next/BUILD_ID` | | `EwwFABHKHJd2jhT7RzDUX` |
 
 **One command** [local] — builds, tests, copies, checksums both ends, refuses on a mismatch,
 restarts and verifies:
@@ -98,7 +114,7 @@ curl -s -o /dev/null -w 'api %{http_code}
 ' http://localhost:$API_PORT/actuator/health
 curl -s -o /dev/null -w 'web %{http_code}
 ' http://localhost:$WEB_PORT/login
-cat $WEB_DIR/dist-frontend/.next/BUILD_ID                      # dCVWaGHB85IWicxw5p1BP
+cat $WEB_DIR/dist-frontend/.next/BUILD_ID                      # EwwFABHKHJd2jhT7RzDUX
 grep -rl "Where the time goes" $WEB_DIR/dist-frontend/.next/server   # should print a page.js
 curl -s -o /dev/null -w 'reset %{http_code}
 ' -X POST http://localhost:$API_PORT/api/v1/users/00000000-0000-0000-0000-000000000000/reset-password
@@ -106,15 +122,64 @@ curl -s -o /dev/null -w 'reset %{http_code}
 
 The last line must be **401, not 404**. 404 means the old JAR is still running.
 
-**In the browser:** the dashboard has a *Where the time goes* panel; Access has an `edit` beside
-each name and a *Reset* button per active person; and the platform console's assign boxes have a
-*Their name* field.
+**In the browser:** the dashboard has *Where the time goes* and *Slowest steps* panels; Access has
+an `edit` beside each name and a *Reset* button per active person; and the platform console's
+assign boxes have a *Their name* field.
 
-> **Five real bugs were found on 18 Sept in half an hour of actually using the deployment** —
-> none of them findable by reading the code, and four in the seam between the Java service and a
-> frontend that was assumed to match it. All are fixed and in this build. What still has not been
-> clicked is everything built on 16 and 17 Sept: checklists, the wording editor, owners,
-> discussions, the roles panel, the module screen and the inbox. See `todo-next.md` §0.
+> **Eighteen real bugs in two days, and not one was findable by reading the code.** Five came
+> from using the deployment on 18 Sept; thirteen from auditing and then exercising every
+> operation on 19 Sept. Both halves compile, and neither language can see across the gap between
+> them. Five of the eighteen produced no error at all — the worst two answered **200** while
+> doing nothing, or while silently destroying a role's permissions.
+>
+> Four things now guard it, and each catches a different half of the gap:
+>
+> | | |
+> |---|---|
+> | `mtms-frontend/lib/shared/__tests__/wire-contract.test.ts` | Build fails if a request body sends a camelCase key |
+> | `scripts/e2e-sweep.js` | Every write the UI can make, sent as the UI sends it — and re-read afterwards, so a 200 that changes nothing fails |
+> | `scripts/e2e-shape.js` | The other direction: fields the screens read that the service does not send |
+> | `scripts/e2e-access.js` | Membership, the profile, project creation and the forgotten-password route — asserting on what did **not** change as well as what did, and that the screen's answer matches the service's |
+>
+> The fourth exists because the first three all passed while the three bugs below were live.
+> Their question is "did the call succeed"; its question is "did it change the right amount of
+> the world", which is the only one that can tell *removed from a project* from *removed from
+> the organisation*. It found two bugs on its first run.
+>
+> All three scripts exit non-zero. They need a database with an account in it; credentials come
+> from the environment, defaulting to what `deploy/bootstrap.sql` creates:
+>
+> ```bash
+> MTMS_E2E_EMAIL=you@yourcompany.com MTMS_E2E_PASSWORD='...' node scripts/e2e-access.js
+> ```
+>
+> ```bash
+> node scripts/e2e-sweep.js && node scripts/e2e-shape.js && node scripts/e2e-access.js
+> ```
+>
+> Last run: **0 of 59 failed**, **0 of 64 failed**, and 0 missing fields.
+
+> ### A local service to run them against
+>
+> The scripts need somewhere to point. The default profile has no seed data at all, so it has
+> no account to sign in with — this is the combination that does, using the throwaway MySQL and
+> none of Redis, Kafka or a mail relay:
+>
+> ```bash
+> mtms-backend/scripts/mysql-dev.sh up && mtms-backend/scripts/mysql-dev.sh schema
+> ```
+>
+> ```bash
+> mysql -h 127.0.0.1 -P 13306 -u root mtms < deploy/bootstrap.sql
+> ```
+>
+> That prints an invitation link. Accept it to set a password, then start the service —
+> `baseline-on-migrate` is needed because the script applied the schema directly, so Flyway
+> finds tables and no history table:
+>
+> ```bash
+> cd mtms-backend && DATABASE_URL="jdbc:mysql://localhost:13306/mtms?sessionVariables=time_zone='%2B00:00'&characterEncoding=utf8" DATABASE_USER=root DATABASE_PASSWORD= ./mvn.sh spring-boot:run -Dspring-boot.run.profiles=mysql "-Dspring-boot.run.jvmArguments=-Dmtms.cache.type=memory -Dmtms.events.publisher=logging -Dmtms.security.secure-cookies=false -Dspring.flyway.baseline-on-migrate=true -Dspring.autoconfigure.exclude=org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration,org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration"
+> ```
 
 ---
 
@@ -224,7 +289,7 @@ bundle instead:
 
 ```bash
 # [server] the build identity — changes on every build
-cat $WEB_DIR/dist-frontend/.next/BUILD_ID     # 18 Sept release: dCVWaGHB85IWicxw5p1BP
+cat $WEB_DIR/dist-frontend/.next/BUILD_ID     # 18 Sept release: EwwFABHKHJd2jhT7RzDUX
 
 # [server] does the bundle contain something only THIS release has?
 grep -rl "Their name" $WEB_DIR/dist-frontend/.next/server 2>/dev/null
@@ -659,7 +724,7 @@ cd mtms-frontend && npm run dev
 > `next start -p 3000`. Only the packaged standalone server reads `PORT`, which is why the
 > server runs on 6010 and your laptop does not. Open <http://localhost:3000>.
 
-**Signing in locally.** `com.txt` recorded `parmahaj@mahajan.com` / `tracker`, which works only
+**Signing in locally.** `com.txt` recorded `parmahaj@mail.com` / `tracker`, which works only
 against a database that still has the old seed data. **A fresh database has no accounts at
 all** — the seeder was deleted on 16 Sept. See §9.
 

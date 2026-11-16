@@ -59,7 +59,7 @@ async function snapshotFor(actor: Actor) {
 
 async function moduleView(actor: Actor, name: string) {
   const snapshot = await snapshotFor(actor);
-  const view = snapshot.modules.find((module) => module.name === name);
+  const view = snapshot.sub_modules.find((module) => module.name === name);
   if (!view) throw new Error(`No module ${name} in the projection`);
   return view;
 }
@@ -129,7 +129,7 @@ describe('the FNI gate', () => {
 // ---------------------------------------------------------------------------
 
 describe('the roll-up guard', () => {
-  it('refuses to write a module cell that has subactivities under it', async () => {
+  it('refuses to write a module cell that has sub_activities under it', async () => {
     const module = await moduleId(MODULE_FULL_WITH_SUBS);
     const error = await refused(
       advanceCell(admin, project, {
@@ -141,14 +141,14 @@ describe('the roll-up guard', () => {
     );
 
     expect(error.message).toBe(
-      'This module has subactivities, so its row is a roll-up. Change the subactivity instead.',
+      'This module has sub_activities, so its row is a roll-up. Change the subactivity instead.',
     );
   });
 
   it('derives the module cell from the subactivity that was written', async () => {
     const module = await moduleId(MODULE_FULL_WITH_SUBS);
     const before = await moduleView(admin, MODULE_FULL_WITH_SUBS);
-    const first = before.subactivities[0]!;
+    const first = before.sub_activities[0]!;
     expect(before.cells.find((cell) => cell.column_key === 'filecr_prod')?.status).toBe('loaded');
 
     await advanceCell(admin, project, {
@@ -162,16 +162,16 @@ describe('the roll-up guard', () => {
     const cell = after.cells.find((candidate) => candidate.column_key === 'filecr_prod');
     expect(cell?.status).toBe('notloaded');
     expect(cell?.rolled_up).toBe(true);
-    expect(cell?.subactivity_count).toBe(2);
+    expect(cell?.sub_activity_count).toBe(2);
   });
 
-  it('applies the precedence rule when subactivities disagree', async () => {
-    // The seeded subactivities all carry the same row, so nothing in the fixture forces
+  it('applies the precedence rule when sub_activities disagree', async () => {
+    // The seeded sub_activities all carry the same row, so nothing in the fixture forces
     // the projection to resolve a blank against a not-done. Build that case: one
     // subactivity done, one not done, one never filled in. The blank has to win, or a
     // module with a forgotten cell would read as merely behind rather than unrecorded.
     const module = await moduleId(MODULE_PARTIAL_WITH_SUBS);
-    const subs = (await moduleView(admin, MODULE_PARTIAL_WITH_SUBS)).subactivities;
+    const subs = (await moduleView(admin, MODULE_PARTIAL_WITH_SUBS)).sub_activities;
     expect(subs).toHaveLength(3);
     expect(
       subs.every((sub) => sub.cells.find((cell) => cell.column_key === 'filecr_prod')?.status === BLANK),
@@ -286,7 +286,7 @@ describe('permissions', () => {
   it('lets a viewer read the project and nothing else', async () => {
     const snapshot = await snapshotFor(viewer);
     expect(snapshot.me.permissions).toEqual(['project.view']);
-    expect(snapshot.modules).toHaveLength(18);
+    expect(snapshot.sub_modules).toHaveLength(18);
   });
 
   it('refuses a viewer every mutation', async () => {
@@ -314,7 +314,7 @@ describe('permissions', () => {
     await refused(cloneFromLibrary(viewer, project, entry), 'forbidden');
     await refused(
       inviteUser(viewer, project, {
-        email: 'new@mahajan.com',
+        email: 'new@mail.com',
         displayName: 'New',
         roleId: await roleId('viewer'),
         scopeProjectId: project,
@@ -347,7 +347,7 @@ describe('permissions', () => {
     await confirmLoadedInProd(devops, project, module);
 
     const snapshot = await snapshotFor(admin);
-    const entries = snapshot.audit.filter((entry) => entry.module_id === module);
+    const entries = snapshot.audit.filter((entry) => entry.sub_module_id === module);
     expect(entries.length).toBeGreaterThan(0);
     expect(entries.every((entry) => entry.who === 'Narayana')).toBe(true);
     expect(entries[0]?.what).toContain('prod confirmation');
@@ -414,17 +414,17 @@ describe('granting permissions', () => {
 describe('inviting a user', () => {
   it('creates the account, the membership and the invitation', async () => {
     const result = await inviteUser(admin, project, {
-      email: 'N.Desai2@mahajan.com',
+      email: 'N.Desai2@mail.com',
       displayName: 'Aditya',
       roleId: await roleId('qa'),
       scopeProjectId: project,
     });
 
-    expect(result.email).toBe('n.desai2@mahajan.com');
+    expect(result.email).toBe('n.desai2@mail.com');
     expect(result.inviteToken).toBeTruthy();
 
     const store = await getStore();
-    const user = store.users.find((candidate) => candidate.email === 'n.desai2@mahajan.com');
+    const user = store.users.find((candidate) => candidate.email === 'n.desai2@mail.com');
     expect(user?.status).toBe('invited');
     expect(user?.password_hash).toBe('');
     expect(user?.invite_token_hash).toBeTruthy();
@@ -433,7 +433,7 @@ describe('inviting a user', () => {
     ).toBe(true);
 
     const snapshot = await snapshotFor(admin);
-    expect(snapshot.invitations.some((invite) => invite.email === 'n.desai2@mahajan.com')).toBe(true);
+    expect(snapshot.invitations.some((invite) => invite.email === 'n.desai2@mail.com')).toBe(true);
   });
 
   it('refuses a role holding permissions the actor lacks', async () => {
@@ -444,7 +444,7 @@ describe('inviting a user', () => {
 
     const error = await refused(
       inviteUser(admin, project, {
-        email: 'new@mahajan.com',
+        email: 'new@mail.com',
         displayName: 'New',
         roleId: await roleId('release'),
         scopeProjectId: project,
@@ -490,10 +490,10 @@ describe('removing a column', () => {
         group_key: null,
         group_label: null,
       });
-      store.modules.push({
+      store.sub_modules.push({
         id: 'module-cmdb',
         project_id: otherProject,
-        node_type: 'SBC',
+        module_name: 'SBC',
         name: 'A module in the other project',
         library_entry_id: null,
         owner: null,
@@ -503,8 +503,8 @@ describe('removing a column', () => {
         created_at: new Date().toISOString(),
       });
       store.cells.push({
-        module_id: 'module-cmdb',
-        subactivity_id: null,
+        sub_module_id: 'module-cmdb',
+        sub_activity_id: null,
         column_key: 'fni',
         status: 'completed',
         changed_by: null,
@@ -516,13 +516,13 @@ describe('removing a column', () => {
 
     const store = await getStore();
     const trackedModules = new Set(
-      store.modules.filter((module) => module.project_id === project).map((module) => module.id),
+      store.sub_modules.filter((module) => module.project_id === project).map((module) => module.id),
     );
     expect(
-      store.cells.some((cell) => trackedModules.has(cell.module_id) && cell.column_key === 'fni'),
+      store.cells.some((cell) => trackedModules.has(cell.sub_module_id) && cell.column_key === 'fni'),
     ).toBe(false);
     expect(
-      store.cells.some((cell) => cell.module_id === 'module-cmdb' && cell.column_key === 'fni'),
+      store.cells.some((cell) => cell.sub_module_id === 'module-cmdb' && cell.column_key === 'fni'),
     ).toBe(true);
 
     const snapshot = await snapshotFor(admin);
@@ -539,20 +539,20 @@ describe('cloning from the library', () => {
   it('leaves the library definition alone and starts every cell blank', async () => {
     const entryId = await libraryId(MODULE_PARTIAL_WITH_SUBS);
     const before = (await getStore()).library.find((entry) => entry.id === entryId)!;
-    const definition = [...before.subactivity_names];
+    const definition = [...before.sub_activity_names];
     const useCount = before.used_in_projects;
 
     const { moduleId: cloned, nodeType } = await cloneFromLibrary(admin, project, entryId);
 
     const store = await getStore();
     const after = store.library.find((entry) => entry.id === entryId)!;
-    expect(after.subactivity_names).toEqual(definition);
+    expect(after.sub_activity_names).toEqual(definition);
     expect(after.name).toBe(before.name);
     // The use count is a tally, not part of the definition — it does move.
     expect(after.used_in_projects).toBe(useCount + 1);
 
     expect(nodeType).toBe('CFX');
-    const subs = store.subactivities.filter((sub) => sub.module_id === cloned);
+    const subs = store.sub_activities.filter((sub) => sub.sub_module_id === cloned);
     expect(subs).toHaveLength(3);
 
     const cells = await cellsOf(cloned);
@@ -563,13 +563,13 @@ describe('cloning from the library', () => {
   it('adds the node type to the project when it is missing', async () => {
     await mutate((store) => {
       const config = store.project_config.find((entry) => entry.project_id === project)!;
-      config.node_types = config.node_types.filter((type) => type !== 'CFX');
+      config.module_names = config.module_names.filter((type) => type !== 'CFX');
     });
 
     await cloneFromLibrary(admin, project, await libraryId(MODULE_PARTIAL_WITH_SUBS));
 
     const snapshot = await snapshotFor(admin);
-    expect(snapshot.config.node_types).toContain('CFX');
+    expect(snapshot.config.module_names).toContain('CFX');
   });
 
   it('refuses a library entry that does not exist', async () => {
@@ -591,24 +591,24 @@ describe('the seeded projection', () => {
   it('matches the DevOps sheet it was built from', async () => {
     const snapshot = await snapshotFor(admin);
 
-    expect(snapshot.modules).toHaveLength(18);
+    expect(snapshot.sub_modules).toHaveLength(18);
     expect(snapshot.config.columns).toHaveLength(26);
 
-    const fullyInProd = snapshot.modules.filter((module) => module.readiness === 100);
+    const fullyInProd = snapshot.sub_modules.filter((module) => module.readiness === 100);
     expect(fullyInProd).toHaveLength(3);
 
-    const notStarted = snapshot.modules.filter((module) => module.readiness === 0);
+    const notStarted = snapshot.sub_modules.filter((module) => module.readiness === 0);
     expect(notStarted).toHaveLength(3);
 
-    const blanks = snapshot.modules.reduce((total, module) => total + module.blank_count, 0);
+    const blanks = snapshot.sub_modules.reduce((total, module) => total + module.blank_count, 0);
     expect(blanks).toBe(118);
   });
 
-  it('carries the CFX module at 58% across three subactivities', async () => {
+  it('carries the CFX module at 58% across three sub_activities', async () => {
     const view = await moduleView(admin, MODULE_PARTIAL_WITH_SUBS);
 
     expect(view.readiness).toBe(58);
-    expect(view.subactivities).toHaveLength(3);
+    expect(view.sub_activities).toHaveLength(3);
     expect(view.cells.every((cell) => cell.rolled_up)).toBe(true);
     expect(view.blank_count).toBe(8);
     expect(view.missing).toEqual(['FILECR·PROD', 'CLICR·PROD', 'NEMO', 'FNI', 'ACCESS']);
@@ -638,7 +638,7 @@ describe('the seeded projection', () => {
 
     // Every module carries a cell for them all the same — a column that does not count
     // is still tracked, it just does not gate prod.
-    for (const module of snapshot.modules) {
+    for (const module of snapshot.sub_modules) {
       expect(module.cells).toHaveLength(26);
     }
   });
@@ -647,7 +647,7 @@ describe('the seeded projection', () => {
     const snapshot = await snapshotFor(admin);
     expect(snapshot.config.stages).toHaveLength(6);
 
-    for (const module of snapshot.modules) {
+    for (const module of snapshot.sub_modules) {
       expect(module.stage_index).toBeGreaterThanOrEqual(0);
       expect(module.stage_index).toBeLessThan(6);
       expect(module.stage_index === 5).toBe(module.readiness === 100);
@@ -658,7 +658,7 @@ describe('the seeded projection', () => {
     const snapshot = await snapshotFor(admin);
     const counted = snapshot.config.columns.filter((column) => column.counts);
 
-    for (const module of snapshot.modules) {
+    for (const module of snapshot.sub_modules) {
       for (const column of counted) {
         const status = module.cells.find((cell) => cell.column_key === column.key)?.status ?? BLANK;
         expect(module.missing.includes(columnDisplayLabel(column))).toBe(toneOf(status) !== 'done');

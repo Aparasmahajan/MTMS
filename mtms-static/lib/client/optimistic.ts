@@ -1,6 +1,6 @@
 import { BLANK, nextStatus, readiness, rollUp, stageIndex, toneOf } from '@/lib/shared/vocabulary';
 import { columnDisplayLabel } from '@/lib/shared/views';
-import type { CellView, ColumnView, ModuleView, Snapshot } from '@/lib/shared/views';
+import type { CellView, ColumnView, SubModuleView, Snapshot } from '@/lib/shared/views';
 
 /**
  * The optimistic mirror of `advanceCell`.
@@ -20,12 +20,12 @@ export function optimisticAdvance(
   const column = snapshot.config.columns.find((candidate) => candidate.key === columnKey);
   if (!column) return snapshot;
 
-  const modules = snapshot.modules.map((module) => {
+  const modules = snapshot.sub_modules.map((module) => {
     if (module.id !== moduleId) return module;
 
     const at = new Date().toISOString();
 
-    const subactivities = module.subactivities.map((subactivity) => {
+    const sub_activities = module.sub_activities.map((subactivity) => {
       if (subactivity.id !== subactivityId) return subactivity;
       const cells = subactivity.cells.map((cell) =>
         cell.column_key === columnKey
@@ -55,7 +55,7 @@ export function optimisticAdvance(
         : module.cells.map((cell) => ({
             ...cell,
             status: rollUp(
-              subactivities.map(
+              sub_activities.map(
                 (subactivity) =>
                   subactivity.cells.find((entry) => entry.column_key === cell.column_key)?.status ??
                   BLANK,
@@ -63,10 +63,10 @@ export function optimisticAdvance(
             ),
           }));
 
-    return withDerived({ ...module, cells, subactivities }, snapshot.config.columns, snapshot.config.stages.length);
+    return withDerived({ ...module, cells, sub_activities }, snapshot.config.columns, snapshot.config.stages.length);
   });
 
-  return { ...snapshot, modules };
+  return { ...snapshot, sub_modules: modules };
 }
 
 /**
@@ -87,10 +87,10 @@ function readinessOf(cells: readonly CellView[], columns: readonly ColumnView[])
 
 /** Recomputes everything derived from a module's cells: readiness, stage, missing, blanks. */
 export function withDerived(
-  module: ModuleView,
+  module: SubModuleView,
   columns: readonly ColumnView[],
   stageCount: number,
-): ModuleView {
+): SubModuleView {
   const statusFor = (key: string): string =>
     module.cells.find((cell) => cell.column_key === key)?.status ?? BLANK;
 

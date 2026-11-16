@@ -38,7 +38,21 @@ public final class Notifications {
   public enum Kind {
     MENTION("mention"),
     STEP_BLOCKED("step.blocked"),
-    STEP_READY("step.ready");
+    STEP_READY("step.ready"),
+    /**
+     * Something about an account, addressed to the person who did it.
+     *
+     * <p>The odd one out, and worth saying why it does not break the rule above. The other three
+     * are "somebody is waiting for you" and are never sent to the person who caused them —
+     * being told about your own action is the fastest way to teach somebody to ignore a badge.
+     *
+     * <p>This one is <em>only</em> sent to the person who caused it, because it carries
+     * something they have to keep: a single-use password-reset link that the server can never
+     * show again, since it stores only the hash. Before this, that link appeared in a banner at
+     * the top of the screen and was gone the moment anything was clicked. The inbox is the one
+     * place in this application that remembers.
+     */
+    ACCOUNT("account");
 
     private final String wire;
 

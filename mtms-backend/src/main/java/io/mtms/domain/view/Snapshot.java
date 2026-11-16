@@ -51,13 +51,27 @@ public record Snapshot(
      * already assembled here: a separate call would re-read the same cells to answer a question
      * this pass has the data for.
      */
-    List<Views.ColumnTimingView> timing) {
+    List<Views.ColumnTimingView> timing,
+    /**
+     * How long each step takes, from the append-only event history.
+     *
+     * <p>Separate from {@link #timing} because it is measured differently and is the more
+     * trustworthy of the two: steps keep every transition, cells keep only the last one.
+     */
+    List<Views.StepTimingView> stepTiming) {
 
   /**
    * @param permissions this user's effective permissions in <em>this</em> project. The client
    *     uses them only to disable and explain controls; every one is re-checked server-side.
    * @param isSuperAdmin platform level, above every organisation, and deliberately not one of
    *     {@code permissions}. See {@code PermissionKey}.
+   * @param canCreateProjects whether this person may create a project, which is <em>not</em>
+   *     {@code permissions.contains("project.create")} and is the reason this field exists.
+   *     Permissions resolve as the union of an organisation-wide role and a role on the open
+   *     project, so that list says "may create a project <em>somewhere</em>" — and creating a
+   *     project is an organisation-wide act, so the server requires the grant to be held
+   *     organisation-wide. A screen reading the permission list alone would offer a control the
+   *     service then refuses, which is the one thing gating is supposed to prevent.
    */
   public record Me(
       String userId,
@@ -65,7 +79,8 @@ public record Snapshot(
       String email,
       List<String> roleNames,
       List<String> permissions,
-      boolean isSuperAdmin) {}
+      boolean isSuperAdmin,
+      boolean canCreateProjects) {}
 
   public record Org(String id, String name) {}
 

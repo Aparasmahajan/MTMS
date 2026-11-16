@@ -7,6 +7,7 @@ import { send } from '@/lib/client/api';
 import type { Snapshot } from '@/lib/shared/views';
 import { useTracker } from './TrackerProvider';
 import { ErrorBanner, Notice } from './primitives';
+import { InboxMenu } from './InboxMenu';
 
 /**
  * A single sticky header that wraps to a second line when the tabs do not fit.
@@ -18,16 +19,16 @@ import { ErrorBanner, Notice } from './primitives';
  */
 
 function tabsFor(snapshot: Snapshot): { label: string; href: string; match: string }[] {
-  const firstModule = snapshot.modules[0];
+  const firstSubModule = snapshot.sub_modules[0];
   return [
     { label: 'Dashboard', href: '/', match: '/' },
     { label: 'Defects', href: '/defects', match: '/defects' },
     { label: 'Matrix', href: '/matrix', match: '/matrix' },
     { label: 'Pipeline', href: '/pipeline', match: '/pipeline' },
     {
-      label: 'Module',
-      href: firstModule ? `/modules/${firstModule.id}` : '/matrix',
-      match: '/modules',
+      label: 'Sub-module',
+      href: firstSubModule ? `/sub-modules/${firstSubModule.id}` : '/matrix',
+      match: '/sub-modules',
     },
     { label: 'Library', href: '/library', match: '/library' },
     { label: 'Access', href: '/access', match: '/access' },
@@ -185,7 +186,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </span>
                 <span style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>
                   {project.configured
-                    ? `${project.module_count} modules`
+                    ? `${project.sub_module_count} modules`
                     : 'not configured'}
                 </span>
               </button>
@@ -312,6 +313,12 @@ export function AppShell({ children }: { children: ReactNode }) {
           <span aria-live="polite" style={{ minWidth: 44, textAlign: 'right', fontSize: 12 }}>
             {pending ? 'saving…' : ''}
           </span>
+          {/*
+            In the header rather than on a screen of its own. A notification people have to
+            navigate to is one they see on Friday, and two of the three kinds exist because
+            somebody is waiting.
+          */}
+          <InboxMenu />
           {isDemo ? (
             // The demo has no session, so the slot the signed-in user occupies becomes
             // the thing worth showing a client: the same screens as a different role,

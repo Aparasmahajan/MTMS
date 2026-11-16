@@ -49,10 +49,30 @@ export default function AccessPage() {
   const [scope, setScope] = useState('org');
   const [memberUserId, setMemberUserId] = useState('');
   const [memberRoleId, setMemberRoleId] = useState(roles[0]?.id ?? '');
+  const [orgGrantRoleId, setOrgGrantRoleId] = useState(roles[0]?.id ?? '');
 
-  const canManageRoles = can('admin.roles.manage');
+  /**
+   * A super admin can always edit roles, even holding no permission at all.
+   *
+   * This is the client half of the repair route in `AccessUseCases.setRolePermission`. A role
+   * wiped by the old grants endpoint takes `admin.roles.manage` with it, and without this the
+   * grid would sit disabled for the one account able to put it back — a server that allows the
+   * call and a screen that will not make it is the same as no fix.
+   */
+  const canManageRoles = can('admin.roles.manage') || snapshot.me.is_super_admin;
   const canManageUsers = can('admin.users.manage');
   const canManageMembers = can('project.members.manage');
+
+  /**
+   * Who may change who belongs to the organisation.
+   *
+   * Deliberately `admin.users.manage`, not `project.members.manage`. A project administrator
+   * administers a project; ending somebody's access to every project at once is a different job
+   * with a different blast radius, and the service enforces exactly this — see
+   * `AccessUseCases.removeFromOrganisation`. The super admin is folded in because the flag is
+   * set outside the application and grants no permission key on its own.
+   */
+  const canManageOrg = canManageUsers || snapshot.me.is_super_admin;
 
   // Only people who cannot already reach the project — an org-wide membership covers it.
   const alreadyHere = new Set(members.map((member) => member.user_id));
@@ -94,8 +114,12 @@ export default function AccessPage() {
     );
     if (!meta?.reset_url) return;
 
+    // "Copy it before dismissing this" used to be literally true, and it was a bad promise to
+    // have to make: dismiss the banner and the link was gone for good, repairable only by
+    // issuing another one and invalidating the first. The same link is now in the issuer's own
+    // inbox, so the banner can say where it went instead of demanding the reader act now.
     setNotice(
-      `Password reset for ${meta.display_name}. ${meta.delivery_detail ?? ''} It works once, expires in seven days, and this is the only time the link can be read — copy it before dismissing this: ${meta.reset_url}`,
+      `Password reset for ${meta.display_name}. ${meta.delivery_detail ?? ''} It works once and expires in seven days. The link is in your inbox (⚿, top right) if you need it again: ${meta.reset_url}`,
     );
   }
 
@@ -112,6 +136,80 @@ export default function AccessPage() {
 
     await apply(null, () =>
       send<Snapshot>(`/api/v1/users/${userId}`, 'PATCH', { display_name: next.trim() }),
+    );
+  }
+
+  /**
+   * Ends somebody's access to the whole organisation.
+   *
+   * The confirm spells out the difference from the button in the table above, because both read
+   * "remove" and they are not degrees of the same act. It also says what does *not* happen — the
+   * account is deactivated, not deleted, so their name stays on the comments, ticks and defects
+   * that carry it. A "delete" that left rows pointing at nothing would be the other option and is
+   * not one this application takes anywhere.
+   */
+  async function removeFromOrg(userId: string, who: string) {
+    if (
+      !window.confirm(
+        `Remove ${who} from ${org.name}?\n\nThis is not the same as removing them from a project. Every membership they hold goes, across every project, and they can no longer sign in.\n\nTheir name stays on the comments, ticks and defects they made — the account is deactivated, not deleted, and you can restore it here.`,
+      )
+    ) {
+      return;
+    }
+
+    await apply(null, () =>
+      send<Snapshot>(`/api/v1/organisation/members/user/${userId}`, 'DELETE'),
+    );
+  }
+
+  /** Lets a removed account sign in again. It comes back with nothing — access is granted separately. */
+  async function restoreUser(userId: string, who: string) {
+    if (
+      !window.confirm(
+        `Let ${who} sign in to ${org.name} again?\n\nThey come back with no access to any project. Whatever they had before is gone and has to be granted again — nobody stored it, on purpose.`,
+      )
+    ) {
+      return;
+    }
+
+    await apply(null, () =>
+      send<Snapshot>(`/api/v1/organisation/members/user/${userId}/restore`, 'POST'),
+    );
+  }
+
+  /** One role on every project, including projects nobody has created yet. */
+  async function grantOrgWide(userId: string, who: string) {
+    if (!orgGrantRoleId) return;
+    const role = roles.find((candidate) => candidate.id === orgGrantRoleId)?.name ?? 'that role';
+
+    if (
+      !window.confirm(
+        `Give ${who} ${role} on every project in ${org.name}?\n\nThis includes projects that do not exist yet. It is in addition to any access they already have on individual projects, never instead of it.`,
+      )
+    ) {
+      return;
+    }
+
+    await apply(null, () =>
+      send<Snapshot>('/api/v1/organisation/members', 'POST', {
+        user_id: userId,
+        role_id: orgGrantRoleId,
+      }),
+    );
+  }
+
+  /** Takes away the org-wide row only. Per-project memberships are untouched, and the confirm says so. */
+  async function revokeOrgWide(who: string, membershipId: string) {
+    if (
+      !window.confirm(
+        `Take away ${who}'s organisation-wide access?\n\nAny access they hold on individual projects is kept — this removes only the role that applies to every project. They stay in ${org.name}.`,
+      )
+    ) {
+      return;
+    }
+
+    await apply(null, () =>
+      send<Snapshot>(`/api/v1/organisation/members/${membershipId}`, 'DELETE'),
     );
   }
 
@@ -137,8 +235,8 @@ export default function AccessPage() {
       const link = String(meta.accept_url);
       setNotice(
         meta.delivery_state === 'sent'
-          ? `Invitation sent. ${String(meta.delivery_detail)} The link, if you need it: ${link}`
-          : `Invitation created. ${String(meta.delivery_detail)} Send them this single-use link: ${link}`,
+          ? `Invitation sent. ${String(meta.delivery_detail)} The link is also in your inbox (⚿, top right): ${link}`
+          : `Invitation created. ${String(meta.delivery_detail)} Send them this single-use link — it is in your inbox (⚿, top right) too: ${link}`,
       );
     }
   }
@@ -245,7 +343,7 @@ export default function AccessPage() {
             style={{ width: 220 }}
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            placeholder="name@mahajan.com"
+            placeholder="name@mail.com"
             aria-label="Email"
           />
           <input
@@ -459,8 +557,8 @@ export default function AccessPage() {
       <SectionHeading first>Members of {snapshot.project.key}</SectionHeading>
       <div style={{ marginBottom: 'var(--space-3)', fontSize: 12, color: 'var(--color-neutral-700)', textWrap: 'pretty' }}>
         Who can open this project. Organisation-wide access applies to every project, so it is
-        listed here but changed above. Nobody can give out a role holding more than they do
-        themselves, and nobody can change their own access.
+        listed here and changed in the organisation table below. Nobody can give out a role
+        holding more than they do themselves, and nobody can change their own access.
       </div>
 
       <div className="bordered" style={{ overflowX: 'auto', marginBottom: 'var(--space-4)' }}>
@@ -517,17 +615,28 @@ export default function AccessPage() {
                     disabled={!canManageMembers || !member.editable}
                     title={
                       canManageMembers
-                        ? member.locked_reason || `Remove ${member.display_name} from this project`
+                        ? member.locked_reason ||
+                          `Remove ${member.display_name} from ${snapshot.project.key} only — they stay in ${org.name}`
                         : reasonFor('project.members.manage')
                     }
-                    onClick={() =>
+                    onClick={() => {
+                      // Named because the same word appears twice on this screen and means two
+                      // different things. This one is the small version, and saying so is what
+                      // stops somebody clicking it expecting the other.
+                      if (
+                        !window.confirm(
+                          `Remove ${member.display_name} from ${snapshot.project.key}?\n\nThey stay in ${org.name} and keep every other project. Add them back here at any time.`,
+                        )
+                      ) {
+                        return;
+                      }
                       void apply(null, () =>
                         send<Snapshot>(
                           `/api/v1/projects/members/${member.membership_id}`,
                           'DELETE',
                         ),
-                      )
-                    }
+                      );
+                    }}
                     style={{
                       fontSize: 12,
                       color: 'var(--color-neutral-600)',
@@ -536,7 +645,7 @@ export default function AccessPage() {
                       cursor: canManageMembers && member.editable ? 'pointer' : 'not-allowed',
                     }}
                   >
-                    remove
+                    remove from project
                   </button>
                 </td>
               </tr>
@@ -617,84 +726,286 @@ export default function AccessPage() {
         </span>
       </form>
 
-      <SectionHeading first>Users in this organisation</SectionHeading>
+      <SectionHeading first>Members of {org.name}</SectionHeading>
+      <div
+        style={{
+          marginBottom: 'var(--space-3)',
+          fontSize: 12,
+          color: 'var(--color-neutral-700)',
+          textWrap: 'pretty',
+        }}
+      >
+        Everybody with an account in this organisation, whichever projects they are on.{' '}
+        <strong>This is not the table above.</strong> Removing somebody from{' '}
+        {snapshot.project.key} takes them off that project and leaves the account alone; removing
+        them here ends every membership they hold and they can no longer sign in. The first is a
+        project administrator&rsquo;s job and the second is an organisation
+        administrator&rsquo;s, which is why they need different permissions.
+      </div>
+
+      {canManageOrg ? (
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--space-2)',
+            marginBottom: 'var(--space-3)',
+            fontSize: 12,
+            color: 'var(--color-neutral-700)',
+          }}
+        >
+          {/*
+            The role a Grant org-wide button will use, chosen once for the table rather than
+            asked for per row. A prompt per click would be four dialogs to put four people on
+            the same footing, and the answer is the same every time.
+          */}
+          Grant organisation-wide access as
+          <select
+            className="input"
+            style={{ width: 150, padding: '2px 6px', fontSize: 12 }}
+            value={orgGrantRoleId}
+            onChange={(event) => setOrgGrantRoleId(event.target.value)}
+            aria-label="Role for a new organisation-wide grant"
+          >
+            {liveRoles.map((role) => (
+              <option key={role.id} value={role.id}>
+                {role.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+
       <div className="bordered" style={{ overflowX: 'auto' }}>
         <table className="table">
           <thead>
             <tr>
               <th>Name</th>
               <th>Email</th>
-              <th>Role</th>
-              <th>Scope</th>
+              <th>Across the organisation</th>
+              <th>Projects</th>
               <th>State</th>
-              {canManageUsers ? <th>Password</th> : null}
+              {canManageOrg ? <th>Password</th> : null}
+              {canManageOrg ? <th /> : null}
             </tr>
           </thead>
           <tbody>
-            {users.map((user) => (
-              <tr key={user.id}>
-                <td style={{ whiteSpace: 'nowrap' }}>
-                  {user.display_name}
-                  {/*
-                    Only where the name is worth correcting. Several accounts carry an email
-                    address as their name because the console did not ask for one until 18 Sept,
-                    and nothing could change it until this existed.
-                  */}
-                  {canManageUsers ? (
-                    <button
-                      type="button"
-                      title={`Rename ${user.email}`}
-                      aria-label={`Rename ${user.email}`}
-                      onClick={() => void renameUser(user.id, user.display_name, user.email)}
-                      style={{
-                        marginLeft: 6,
-                        border: 0,
-                        background: 'transparent',
-                        padding: 0,
-                        cursor: 'pointer',
-                        fontSize: 11,
-                        color: 'var(--color-neutral-600)',
-                      }}
-                    >
-                      edit
-                    </button>
-                  ) : null}
-                </td>
-                <td className="mono" style={{ fontSize: 12 }}>
-                  {user.email}
-                </td>
-                <td>
-                  <span className="tag tag-accent">{user.role_name}</span>
-                </td>
-                <td style={{ fontSize: 13, color: 'var(--color-neutral-700)' }}>{user.scope}</td>
-                <td style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>{user.status}</td>
-                {canManageUsers ? (
-                  <td>
+            {users.map((user) => {
+              const removed = user.status === 'removed';
+              // Absent, not null — the service omits null fields entirely, so `== null`
+              // catches both spellings and `!== null` would have been true for `undefined`.
+              const orgWide = user.org_wide_membership_id == null ? null : user.org_wide_membership_id;
+
+              return (
+                <tr key={user.id} style={removed ? { opacity: 0.55 } : undefined}>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    {user.display_name}
+                    {user.super_admin ? (
+                      <span
+                        className="tag"
+                        style={{ marginLeft: 6, fontSize: 10 }}
+                        title="Platform super administrator — set outside the application; no screen grants it"
+                      >
+                        super
+                      </span>
+                    ) : null}
                     {/*
-                      Only for somebody with a password to reset. An invited account has none
-                      yet — that case is a reissued invitation, and the server says so rather
-                      than pretending the two are the same thing.
+                      Only where the name is worth correcting. Several accounts carry an email
+                      address as their name because the console did not ask for one until 18 Sept,
+                      and nothing could change it until this existed.
                     */}
-                    {user.status === 'active' ? (
+                    {canManageUsers && !removed ? (
+                      <button
+                        type="button"
+                        title={`Rename ${user.email}`}
+                        aria-label={`Rename ${user.email}`}
+                        onClick={() => void renameUser(user.id, user.display_name, user.email)}
+                        style={{
+                          marginLeft: 6,
+                          border: 0,
+                          background: 'transparent',
+                          padding: 0,
+                          cursor: 'pointer',
+                          fontSize: 11,
+                          color: 'var(--color-neutral-600)',
+                        }}
+                      >
+                        edit
+                      </button>
+                    ) : null}
+                  </td>
+                  <td className="mono" style={{ fontSize: 12 }}>
+                    {user.email}
+                  </td>
+
+                  {/*
+                    Organisation-wide access, which is the one grant that cannot be seen from any
+                    project screen — it reaches every project including ones that do not exist
+                    yet. Before this column, it could be handed out (by an invitation, or from the
+                    super admin console) and then never found again.
+                  */}
+                  <td>
+                    {orgWide ? (
+                      <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                        <select
+                          className="input"
+                          style={{ width: 140, padding: '2px 6px', fontSize: 12 }}
+                          value={user.org_wide_role_id ?? ''}
+                          disabled={!canManageOrg || user.id === snapshot.me.user_id}
+                          title={
+                            user.id === snapshot.me.user_id
+                              ? 'You cannot change your own access'
+                              : canManageOrg
+                                ? `${user.display_name} has this role on every project`
+                                : reasonFor('admin.users.manage')
+                          }
+                          aria-label={`Organisation-wide role for ${user.display_name}`}
+                          onChange={(event) =>
+                            void apply(null, () =>
+                              send<Snapshot>(
+                                `/api/v1/organisation/members/${orgWide}`,
+                                'PATCH',
+                                { role_id: event.target.value },
+                              ),
+                            )
+                          }
+                        >
+                          {liveRoles.map((role) => (
+                            <option key={role.id} value={role.id}>
+                              {role.name}
+                            </option>
+                          ))}
+                        </select>
+                        {canManageOrg && user.id !== snapshot.me.user_id ? (
+                          <button
+                            type="button"
+                            title={`Take away ${user.display_name}'s access to every project. Any single-project access they hold is kept.`}
+                            onClick={() => void revokeOrgWide(user.display_name, orgWide)}
+                            style={LINK_BUTTON}
+                          >
+                            revoke
+                          </button>
+                        ) : null}
+                      </span>
+                    ) : canManageOrg && !removed ? (
                       <button
                         type="button"
                         className="btn btn-secondary"
                         style={{ fontSize: 12, padding: '2px 10px' }}
-                        title={`Issue a single-use link for ${user.email} to choose a new password`}
-                        onClick={() => void resetPassword(user.id, user.display_name)}
+                        title={`Give ${user.display_name} one role on every project, including projects created later`}
+                        onClick={() => void grantOrgWide(user.id, user.display_name)}
                       >
-                        Reset
+                        Grant org-wide
                       </button>
                     ) : (
-                      <span style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>—</span>
+                      <span style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>
+                        per project
+                      </span>
                     )}
                   </td>
-                ) : null}
-              </tr>
-            ))}
+
+                  <td style={{ fontSize: 13, color: 'var(--color-neutral-700)' }}>
+                    {user.project_count === 0 ? (
+                      <span style={{ color: 'var(--color-neutral-600)' }}>
+                        {orgWide ? 'every project' : 'none'}
+                      </span>
+                    ) : (
+                      <span title={user.scope}>
+                        {user.project_count} {user.project_count === 1 ? 'project' : 'projects'}
+                        {orgWide ? ' + every project' : ''}
+                      </span>
+                    )}
+                  </td>
+
+                  <td style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>
+                    {user.status}
+                  </td>
+
+                  {canManageOrg ? (
+                    <td>
+                      {/*
+                        Only for somebody with a password to reset. An invited account has none
+                        yet — that case is a reissued invitation, and the server says so rather
+                        than pretending the two are the same thing.
+                      */}
+                      {user.status === 'active' ? (
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ fontSize: 12, padding: '2px 10px' }}
+                          title={`Issue a single-use link for ${user.email} to choose a new password`}
+                          onClick={() => void resetPassword(user.id, user.display_name)}
+                        >
+                          Reset
+                        </button>
+                      ) : (
+                        <span style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>—</span>
+                      )}
+                    </td>
+                  ) : null}
+
+                  {canManageOrg ? (
+                    <td>
+                      {removed ? (
+                        <button
+                          type="button"
+                          title={`Let ${user.display_name} sign in again. They come back with no access — grant it separately.`}
+                          onClick={() => void restoreUser(user.id, user.display_name)}
+                          style={LINK_BUTTON}
+                        >
+                          restore
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={!user.removable}
+                          title={
+                            user.locked_reason ??
+                            `Remove ${user.display_name} from ${org.name} entirely`
+                          }
+                          onClick={() => void removeFromOrg(user.id, user.display_name)}
+                          style={{
+                            ...LINK_BUTTON,
+                            cursor: user.removable ? 'pointer' : 'not-allowed',
+                            opacity: user.removable ? 1 : 0.5,
+                          }}
+                        >
+                          remove from {org.name}
+                        </button>
+                      )}
+                    </td>
+                  ) : null}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
+
+      {!canManageOrg ? (
+        <div
+          style={{
+            marginTop: 'var(--space-3)',
+            fontSize: 12,
+            color: 'var(--color-neutral-600)',
+            textWrap: 'pretty',
+          }}
+        >
+          {reasonFor('admin.users.manage')} — an organisation administrator or a super admin
+          changes who belongs to {org.name}.
+        </div>
+      ) : null}
     </div>
   );
 }
+
+/** A control that reads as a link. Used for the destructive ones, which should not look inviting. */
+const LINK_BUTTON = {
+  fontSize: 12,
+  color: 'var(--color-neutral-600)',
+  border: 0,
+  background: 'transparent',
+  padding: 0,
+  cursor: 'pointer',
+  whiteSpace: 'nowrap',
+} as const;

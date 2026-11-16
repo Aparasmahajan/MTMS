@@ -5,7 +5,7 @@ import { signOffFni } from '@/lib/server/service';
 const Body = z.object({ close: z.boolean() });
 
 /**
- * The FNI rule, step 5 — closing the module and its subactivities. Permitted only
+ * The FNI rule, step 5 — closing the module and its sub_activities. Permitted only
  * when readiness is 100% and the FNI column is done; the gate is recomputed here from
  * the store rather than trusted from the client.
  */
