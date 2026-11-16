@@ -28,7 +28,7 @@ function tabsFor(snapshot: Snapshot): { label: string; href: string; match: stri
     {
       label: 'Sub-module',
       href: firstSubModule ? `/sub-modules/${firstSubModule.id}` : '/matrix',
-      match: '/modules',
+      match: '/sub-modules',
     },
     { label: 'Library', href: '/library', match: '/library' },
     { label: 'Access', href: '/access', match: '/access' },
