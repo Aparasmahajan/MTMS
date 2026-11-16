@@ -10,7 +10,7 @@
 :root {
   /* Colour */
   --color-bg: #f2f2f3;
-  --color-surface: #e9e9ea;
+  --color-surface: #fcfcfd;
   --color-text: #1d1f20;
   --color-accent: #5980a6;
   --color-divider: rgba(29, 31, 32, 0.16);
@@ -109,15 +109,16 @@ h6 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; }
 }
 
 /* ---------------------------------------------------------------------------
-   The blueprint frame — a 1px hairline plus four corner registration marks.
-   Cards stay transparent line drawings; the solid accent primary button is the one
-   filled object. Never drop the corner marks from a framed element.
+   The blueprint frame — a 1px hairline plus four corner registration marks. The
+   surface sits lighter than the page, lifted toward the viewer by shadow rather
+   than colour. Never drop the corner marks from a framed element.
    --------------------------------------------------------------------------- */
 
 .blueprint {
   position: relative;
   border: 1px solid var(--color-divider);
-  background: transparent;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md);
 }
 
 .blueprint > .corner {
@@ -287,6 +288,8 @@ h6 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; }
 }
 .bordered {
   border: 1px solid var(--color-divider);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md);
 }
 .row-divided {
   border-bottom: 1px solid var(--color-divider);
@@ -343,6 +346,27 @@ h6 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; }
   color: var(--color-text);
   border-left: 2px solid var(--color-text);
   padding-left: var(--space-3);
+}
+
+/* A scrollbar that carries the function without the chrome: thin and the colour of a
+   divider until the pointer is over it, so a panel can cap its own height without the
+   browser's default bars fighting the flat, square look everywhere else. */
+.scroll-subtle {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-neutral-300) transparent;
+}
+.scroll-subtle::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scroll-subtle::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scroll-subtle::-webkit-scrollbar-thumb {
+  background: var(--color-neutral-300);
+}
+.scroll-subtle:hover::-webkit-scrollbar-thumb {
+  background: var(--color-neutral-500);
 }
 
 /* Two-column bodies stack on a narrow viewport. Phone use is read-plus-approve, so the
