@@ -116,17 +116,27 @@ export function blankProjectSnapshot(
   return {
     ...clone(from),
     org: org ?? from.org,
-    project: { id: project.id, key: project.key, name: project.name },
+    project: {
+      id: project.id,
+      key: project.key,
+      name: project.name,
+      // A new project starts with the generic words rather than inheriting the wording of
+      // whichever project it was cloned from.
+      module_label: 'Module',
+      sub_module_label: 'Sub-module',
+      sub_activity_label: 'Sub-activity',
+    },
     config: {
       columns: [],
-      node_types: [],
+      modules: [],
+      module_names: [],
       stages: [],
       owners: [],
       link_types: [],
       environments: [],
       phases: from.config.phases,
     },
-    modules: [],
+    sub_modules: [],
     audit: [],
     defects: [],
     members: [],
@@ -163,7 +173,7 @@ export function projectSummaries(
       key: snapshot.project.key,
       name: snapshot.project.name,
       configured: snapshot.config.columns.length > 0,
-      module_count: snapshot.modules.length,
+      sub_module_count: snapshot.sub_modules.length,
     }));
 }
 
@@ -192,14 +202,14 @@ export function demoPlatformView(workspace: DemoWorkspace, me: Snapshot['me']): 
           (snapshot) => snapshot.config.columns.length > 0,
         ).length,
         user_count: projects[0]?.users.length ?? 0,
-        module_count: projects.reduce((total, snapshot) => total + snapshot.modules.length, 0),
+        sub_module_count: projects.reduce((total, snapshot) => total + snapshot.sub_modules.length, 0),
         admins: organisation.admins,
         projects: projects.map((snapshot) => ({
           id: snapshot.project.id,
           key: snapshot.project.key,
           name: snapshot.project.name,
           configured: snapshot.config.columns.length > 0,
-          module_count: snapshot.modules.length,
+          sub_module_count: snapshot.sub_modules.length,
           admins: [
             // Organisation-wide access covers every project, this one included. Leaving it
             // out would report a project as unowned when it is not.

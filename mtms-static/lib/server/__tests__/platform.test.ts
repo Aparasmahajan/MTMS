@@ -65,7 +65,7 @@ describe('who is a super admin', () => {
 });
 
 describe('creating an organisation', () => {
-  async function create(name = 'Northern Grid', adminEmail = 'lead@mahajan.com') {
+  async function create(name = 'Northern Grid', adminEmail = 'lead@mail.com') {
     return createOrganisation(await actorFor(ADMIN), { name, adminEmail, adminName: 'A. Lead' });
   }
 
@@ -116,7 +116,7 @@ describe('creating an organisation', () => {
     const { tenant } = await create();
     expect(tenant.slug).toBe('northern-grid');
 
-    await refused(create('Northern  Grid', 'other@mahajan.com'), 'conflict');
+    await refused(create('Northern  Grid', 'other@mail.com'), 'conflict');
   });
 
   it('refuses a name-less organisation and a non-email admin', async () => {
@@ -147,7 +147,7 @@ describe('creating a project inside an organisation', () => {
     const actor = await actorFor(ADMIN);
     const { tenant } = await createOrganisation(actor, {
       name: 'Northern Grid',
-      adminEmail: 'lead@mahajan.com',
+      adminEmail: 'lead@mail.com',
     });
 
     const { projectId, key } = await createOrganisationProject(actor, tenant.id, {
@@ -162,7 +162,7 @@ describe('creating a project inside an organisation', () => {
     // deciding another team's process for them.
     expect(store.columns.filter((column) => column.project_id === projectId)).toHaveLength(0);
     const config = store.project_config.find((entry) => entry.project_id === projectId)!;
-    expect(config.node_types).toEqual([]);
+    expect(config.module_names).toEqual([]);
     expect(config.stages).toEqual([]);
   });
 
@@ -184,7 +184,7 @@ describe('creating a project inside an organisation', () => {
 
     const { tenant } = await createOrganisation(actor, {
       name: 'Northern Grid',
-      adminEmail: 'lead@mahajan.com',
+      adminEmail: 'lead@mail.com',
     });
     // The same key in a different organisation is a different project entirely.
     const created = await createOrganisationProject(actor, tenant.id, { key: 'CR_AUTOMATION' });
@@ -206,7 +206,7 @@ describe('suspending an organisation', () => {
     const actor = await actorFor(ADMIN);
     const { tenant } = await createOrganisation(actor, {
       name: 'Northern Grid',
-      adminEmail: 'lead@mahajan.com',
+      adminEmail: 'lead@mail.com',
     });
     await createOrganisationProject(actor, tenant.id, { key: 'CMDB' });
 
@@ -232,7 +232,7 @@ describe('suspending an organisation', () => {
     const actor = await actorFor(ADMIN);
     const { tenant } = await createOrganisation(actor, {
       name: 'Northern Grid',
-      adminEmail: 'lead@mahajan.com',
+      adminEmail: 'lead@mail.com',
     });
 
     await setOrganisationStatus(actor, tenant.id, 'suspended');
@@ -249,7 +249,7 @@ describe('the platform view', () => {
 
     expect(flowOne.project_count).toBe(3);
     expect(flowOne.configured_project_count).toBe(1);
-    expect(flowOne.module_count).toBe(18);
+    expect(flowOne.sub_module_count).toBe(18);
     expect(flowOne.admins.map((admin) => admin.email)).toContain('nitin@azalio.io');
 
     // Counts and names only. No cell, defect, audit entry or module name anywhere in it.
@@ -262,7 +262,7 @@ describe('the platform view', () => {
     const actor = await actorFor(ADMIN);
     const { tenant } = await createOrganisation(actor, {
       name: 'Orphan Works',
-      adminEmail: 'lead@mahajan.com',
+      adminEmail: 'lead@mail.com',
     });
 
     await mutate((store) => {

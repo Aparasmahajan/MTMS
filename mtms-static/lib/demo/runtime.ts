@@ -22,7 +22,7 @@ import {
 import { hasPermission, permissionDeniedReason, type PermissionKey } from '@/lib/shared/permissions';
 import { promotionGate } from '@/lib/shared/promotion';
 import { BLANK, readiness, rollUp, statusEntry, STATUS_SETS, toneOf } from '@/lib/shared/vocabulary';
-import type { CellView, ModuleView, Snapshot, SubactivityView } from '@/lib/shared/views';
+import type { CellView, SubModuleView, Snapshot, SubActivityView } from '@/lib/shared/views';
 
 /**
  * The demo's stand-in for the server.
@@ -134,8 +134,8 @@ function must(snapshot: Snapshot, key: PermissionKey): void {
   }
 }
 
-function moduleOf(snapshot: Snapshot, id: string): ModuleView {
-  const module = snapshot.modules.find((candidate) => candidate.id === id);
+function moduleOf(snapshot: Snapshot, id: string): SubModuleView {
+  const module = snapshot.sub_modules.find((candidate) => candidate.id === id);
   if (!module) throw new ApiError('not_found', 'That module is not in this project.', 404);
   return module;
 }
@@ -150,7 +150,7 @@ function audited(
   },
 ): Snapshot {
   const module = entry.moduleId
-    ? snapshot.modules.find((candidate) => candidate.id === entry.moduleId)
+    ? snapshot.sub_modules.find((candidate) => candidate.id === entry.moduleId)
     : undefined;
 
   return {
@@ -159,8 +159,8 @@ function audited(
       {
         id: newId(),
         scope: entry.scope,
-        module_id: entry.moduleId ?? null,
-        module_label: module ? `${module.node_type} · ${module.name}` : '—',
+        sub_module_id: entry.moduleId ?? null,
+        sub_module_label: module ? `${module.module_name} · ${module.name}` : '—',
         label: entry.label,
         what: entry.what,
         who: snapshot.me.display_name,
@@ -171,10 +171,10 @@ function audited(
   };
 }
 
-function replaceModule(snapshot: Snapshot, next: ModuleView): Snapshot {
+function replaceModule(snapshot: Snapshot, next: SubModuleView): Snapshot {
   return {
     ...snapshot,
-    modules: snapshot.modules.map((module) => (module.id === next.id ? next : module)),
+    sub_modules: snapshot.sub_modules.map((module) => (module.id === next.id ? next : module)),
   };
 }
 
@@ -183,22 +183,22 @@ function blankCells(snapshot: Snapshot): CellView[] {
     column_key: column.key,
     status: BLANK,
     rolled_up: false,
-    subactivity_count: 0,
+    sub_activity_count: 0,
     changed_by: null,
     changed_at: null,
   }));
 }
 
-/** Re-derives a module's own cells from its subactivities, then everything downstream. */
-function reroll(snapshot: Snapshot, module: ModuleView): ModuleView {
-  const subs = module.subactivities;
+/** Re-derives a module's own cells from its sub_activities, then everything downstream. */
+function reroll(snapshot: Snapshot, module: SubModuleView): SubModuleView {
+  const subs = module.sub_activities;
   const cells: CellView[] = module.cells.map((cell) =>
     subs.length === 0
-      ? { ...cell, rolled_up: false, subactivity_count: 0 }
+      ? { ...cell, rolled_up: false, sub_activity_count: 0 }
       : {
           ...cell,
           rolled_up: true,
-          subactivity_count: subs.length,
+          sub_activity_count: subs.length,
           changed_by: null,
           changed_at: null,
           status: rollUp(
@@ -234,9 +234,9 @@ function recountOffVocabulary(snapshot: Snapshot): Snapshot {
       ...snapshot.config,
       columns: snapshot.config.columns.map((column) => {
         let off = 0;
-        for (const module of snapshot.modules) {
+        for (const module of snapshot.sub_modules) {
           const rows: readonly { cells: CellView[] }[] =
-            module.subactivities.length > 0 ? module.subactivities : [module];
+            module.sub_activities.length > 0 ? module.sub_activities : [module];
           for (const row of rows) {
             const status = row.cells.find((cell) => cell.column_key === column.key)?.status;
             if (status && status !== BLANK && !column.allowed.includes(status)) off++;
@@ -296,7 +296,7 @@ export function demoRequest(
     ...next.data,
     drift: {
       ...next.data.drift,
-      gate: promotionGate(next.data.config.columns, next.data.modules, next.data.drift.rows),
+      gate: promotionGate(next.data.config.columns, next.data.sub_modules, next.data.drift.rows),
     },
   };
 
@@ -328,18 +328,18 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
   // -- cells ----------------------------------------------------------------
   if (at('cells', 'PATCH')) {
     must(snapshot, 'deliverable.update');
-    const moduleId = String(body.module_id);
-    const subactivityId = (body.subactivity_id as string | null) ?? null;
+    const moduleId = String(body.sub_module_id);
+    const subactivityId = (body.sub_activity_id as string | null) ?? null;
     const columnKey = String(body.column_key);
 
     const module = moduleOf(snapshot, moduleId);
     if (module.closed) {
       throw new ApiError('bad_request', 'This module is closed. Reopen it before changing a deliverable.', 400);
     }
-    if (subactivityId === null && module.subactivities.length > 0) {
+    if (subactivityId === null && module.sub_activities.length > 0) {
       throw new ApiError(
         'bad_request',
-        'This module has subactivities, so its row is a roll-up. Change the subactivity instead.',
+        'This module has sub_activities, so its row is a roll-up. Change the subactivity instead.',
         400,
       );
     }
@@ -350,7 +350,7 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
     const before =
       subactivityId === null
         ? module.cells.find((cell) => cell.column_key === columnKey)?.status
-        : module.subactivities
+        : module.sub_activities
             .find((sub) => sub.id === subactivityId)
             ?.cells.find((cell) => cell.column_key === columnKey)?.status;
 
@@ -365,10 +365,10 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
     );
     const after =
       subactivityId === null
-        ? advanced.modules.find((m) => m.id === moduleId)?.cells.find((c) => c.column_key === columnKey)?.status
-        : advanced.modules
+        ? advanced.sub_modules.find((m) => m.id === moduleId)?.cells.find((c) => c.column_key === columnKey)?.status
+        : advanced.sub_modules
             .find((m) => m.id === moduleId)
-            ?.subactivities.find((s) => s.id === subactivityId)
+            ?.sub_activities.find((s) => s.id === subactivityId)
             ?.cells.find((c) => c.column_key === columnKey)?.status;
 
     return plain(
@@ -433,7 +433,7 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
       }
     }
 
-    const updated: ModuleView = {
+    const updated: SubModuleView = {
       ...module,
       closed: close,
       closed_by: close ? snapshot.me.display_name : null,
@@ -471,11 +471,11 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
         return { ...cell, status: done, ...stamp };
       });
 
-    let updated: ModuleView =
-      module.subactivities.length > 0
+    let updated: SubModuleView =
+      module.sub_activities.length > 0
         ? {
             ...module,
-            subactivities: module.subactivities.map((sub) => {
+            sub_activities: module.sub_activities.map((sub) => {
               const cells = applyRow(sub.cells);
               return { ...sub, cells, readiness: subReadiness(snapshot, cells) };
             }),
@@ -505,7 +505,7 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
     const url = String(body.url ?? '').trim();
     if (!url) throw new ApiError('validation_failed', 'A link needs a URL.', 422);
 
-    const updated: ModuleView = {
+    const updated: SubModuleView = {
       ...module,
       links: [
         ...module.links,
@@ -525,7 +525,7 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
     must(snapshot, 'module.edit');
     return plain({
       ...snapshot,
-      modules: snapshot.modules.map((module) => ({
+      sub_modules: snapshot.sub_modules.map((module) => ({
         ...module,
         links: module.links.filter((link) => link.id !== linkDelete.id),
       })),
@@ -535,11 +535,11 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
   // -- modules --------------------------------------------------------------
   if (at('modules', 'POST')) {
     must(snapshot, 'module.create');
-    const nodeType = String(body.node_type ?? '').trim();
+    const nodeType = String(body.module_name ?? '').trim();
     const name = String(body.name ?? '').trim();
     if (
-      snapshot.modules.some(
-        (module) => module.node_type === nodeType && module.name === name,
+      snapshot.sub_modules.some(
+        (module) => module.module_name === nodeType && module.name === name,
       )
     ) {
       throw new ApiError('validation_failed', 'That node type and activity already exist in this project.', 422);
@@ -548,7 +548,7 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
     const created = withDerived(
       {
         id: newId(),
-        node_type: nodeType,
+        module_name: nodeType,
         name,
         owner: null,
         fni_target_date: null,
@@ -559,17 +559,22 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
         missing: [],
         blank_count: 0,
         cells: blankCells(snapshot),
-        subactivities: [],
+        sub_activities: [],
         links: [],
         last_run: null,
+        // Attached from the panels on the sub-module screen, as in the real app. A module
+        // template would copy its checklist here; the demo leaves that to the button.
+        step_lists: [],
+        owners: [],
+        threads: [],
       },
       snapshot.config.columns,
       snapshot.config.stages.length,
     );
 
-    const withNodeType = snapshot.config.node_types.includes(nodeType)
+    const withNodeType = snapshot.config.module_names.includes(nodeType)
       ? snapshot.config
-      : { ...snapshot.config, node_types: [...snapshot.config.node_types, nodeType] };
+      : { ...snapshot.config, module_names: [...snapshot.config.module_names, nodeType] };
 
     const library =
       body.add_to_library === true
@@ -577,10 +582,10 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
             ...snapshot.library,
             {
               id: newId(),
-              node_type: nodeType,
+              module_name: nodeType,
               name,
               version: 'v1',
-              subactivity_count: 0,
+              sub_activity_count: 0,
               used_in_projects: 1,
               in_this_project: true,
             },
@@ -589,15 +594,15 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
 
     return {
       data: audited(
-        { ...snapshot, config: withNodeType, library, modules: [...snapshot.modules, created] },
+        { ...snapshot, config: withNodeType, library, sub_modules: [...snapshot.sub_modules, created] },
         { scope: 'module', label: 'MODULE', what: `created ${nodeType} · ${name}`, moduleId: created.id },
       ),
-      meta: { module_id: created.id, node_type: nodeType },
+      meta: { sub_module_id: created.id, module_name: nodeType },
     };
   }
 
-  // -- subactivities --------------------------------------------------------
-  const subAdd = at('modules/:id/subactivities', 'POST');
+  // -- sub_activities --------------------------------------------------------
+  const subAdd = at('modules/:id/sub_activities', 'POST');
   if (subAdd) {
     must(snapshot, 'module.edit');
     const module = moduleOf(snapshot, subAdd.id!);
@@ -606,20 +611,25 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
     // Adding the first subactivity moves the module's own row onto it, so readiness
     // does not jump when a module gains its first child.
     const seededCells: CellView[] =
-      module.subactivities.length === 0
-        ? module.cells.map((cell) => ({ ...cell, rolled_up: false, subactivity_count: 0 }))
+      module.sub_activities.length === 0
+        ? module.cells.map((cell) => ({ ...cell, rolled_up: false, sub_activity_count: 0 }))
         : blankCells(snapshot);
 
-    const created: SubactivityView = {
+    const created: SubActivityView = {
       id: newId(),
       name: String(body.name ?? '').trim(),
       readiness: subReadiness(snapshot, seededCells),
       cells: seededCells,
+      // A sub-activity created in the demo starts with none of the three. They are attached
+      // deliberately, from the panels on the sub-module screen, exactly as in the real app.
+      step_lists: [],
+      owners: [],
+      threads: [],
     };
 
     const updated = reroll(snapshot, {
       ...module,
-      subactivities: [...module.subactivities, created],
+      sub_activities: [...module.sub_activities, created],
     });
     return plain(
       audited(replaceModule(snapshot, updated), {
@@ -631,27 +641,27 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
     );
   }
 
-  const subEdit = at('modules/:id/subactivities/:subId', 'PATCH');
+  const subEdit = at('modules/:id/sub_activities/:subId', 'PATCH');
   if (subEdit) {
     must(snapshot, 'module.edit');
     const module = moduleOf(snapshot, subEdit.id!);
-    const updated: ModuleView = {
+    const updated: SubModuleView = {
       ...module,
-      subactivities: module.subactivities.map((sub) =>
+      sub_activities: module.sub_activities.map((sub) =>
         sub.id === subEdit.subId ? { ...sub, name: String(body.name ?? '').trim() } : sub,
       ),
     };
     return plain(replaceModule(snapshot, updated));
   }
 
-  const subDelete = at('modules/:id/subactivities/:subId', 'DELETE');
+  const subDelete = at('modules/:id/sub_activities/:subId', 'DELETE');
   if (subDelete) {
     must(snapshot, 'module.edit');
     const module = moduleOf(snapshot, subDelete.id!);
     if (module.closed) throw new ApiError('bad_request', 'This module is closed.', 400);
 
-    const remaining = module.subactivities.filter((sub) => sub.id !== subDelete.subId);
-    const removed = module.subactivities.find((sub) => sub.id === subDelete.subId);
+    const remaining = module.sub_activities.filter((sub) => sub.id !== subDelete.subId);
+    const removed = module.sub_activities.find((sub) => sub.id === subDelete.subId);
 
     // Removing the last one materialises the module's row from what the roll-up showed,
     // so the module keeps the readiness it had a moment earlier.
@@ -660,17 +670,17 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
         ? withDerived(
             {
               ...module,
-              subactivities: [],
+              sub_activities: [],
               cells: module.cells.map((cell) => ({
                 ...cell,
                 rolled_up: false,
-                subactivity_count: 0,
+                sub_activity_count: 0,
               })),
             },
             snapshot.config.columns,
             snapshot.config.stages.length,
           )
-        : reroll(snapshot, { ...module, subactivities: remaining });
+        : reroll(snapshot, { ...module, sub_activities: remaining });
 
     return plain(
       audited(replaceModule(snapshot, updated), {
@@ -685,7 +695,7 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
   // -- defects --------------------------------------------------------------
   if (at('defects', 'POST')) {
     must(snapshot, 'defect.create');
-    const module = moduleOf(snapshot, String(body.module_id));
+    const module = moduleOf(snapshot, String(body.sub_module_id));
     const ticket = String(body.ticket_key ?? '').trim();
 
     return plain({
@@ -693,8 +703,8 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
       defects: [
         {
           id: newId(),
-          module_id: module.id,
-          module_label: `${module.node_type} · ${module.name}`,
+          sub_module_id: module.id,
+          sub_module_label: `${module.module_name} · ${module.name}`,
           phase: body.phase as never,
           ticket_key: ticket,
           ticket_url: ticket ? `https://tms.internal/browse/${ticket}` : '',
@@ -762,7 +772,7 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
       column_key: key,
       status: BLANK,
       rolled_up: false,
-      subactivity_count: 0,
+      sub_activity_count: 0,
       changed_by: null,
       changed_at: null,
     };
@@ -772,12 +782,12 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
         {
           ...snapshot,
           config: { ...snapshot.config, columns: [...snapshot.config.columns, column] },
-          modules: snapshot.modules.map((module) =>
+          sub_modules: snapshot.sub_modules.map((module) =>
             withDerived(
               {
                 ...module,
-                cells: [...module.cells, { ...blank, rolled_up: module.subactivities.length > 0, subactivity_count: module.subactivities.length }],
-                subactivities: module.subactivities.map((sub) => ({
+                cells: [...module.cells, { ...blank, rolled_up: module.sub_activities.length > 0, sub_activity_count: module.sub_activities.length }],
+                sub_activities: module.sub_activities.map((sub) => ({
                   ...sub,
                   cells: [...sub.cells, { ...blank }],
                 })),
@@ -828,7 +838,7 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
         audited(
           {
             ...reordered,
-            modules: reordered.modules.map((module) =>
+            sub_modules: reordered.sub_modules.map((module) =>
               withDerived(module, columns, snapshot.config.stages.length),
             ),
           },
@@ -850,12 +860,12 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
         {
           ...snapshot,
           config: { ...snapshot.config, columns },
-          modules: snapshot.modules.map((module) =>
+          sub_modules: snapshot.sub_modules.map((module) =>
             withDerived(
               {
                 ...module,
                 cells: module.cells.filter((cell) => cell.column_key !== key),
-                subactivities: module.subactivities.map((sub) => ({
+                sub_activities: module.sub_activities.map((sub) => ({
                   ...sub,
                   cells: sub.cells.filter((cell) => cell.column_key !== key),
                   readiness: subReadiness(
@@ -911,11 +921,11 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
         {
           ...snapshot,
           config,
-          modules: snapshot.modules.map((module) =>
+          sub_modules: snapshot.sub_modules.map((module) =>
             withDerived(
               {
                 ...module,
-                subactivities: module.subactivities.map((sub) => ({
+                sub_activities: module.sub_activities.map((sub) => ({
                   ...sub,
                   readiness: subReadiness({ ...snapshot, config }, sub.cells),
                 })),
@@ -938,7 +948,7 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
 
   if (at('config/lists', 'POST')) {
     must(snapshot, 'project.config');
-    const list = String(body.list) as 'node_types' | 'stages' | 'owners' | 'link_types';
+    const list = String(body.list) as 'modules' | 'stages' | 'owners' | 'link_types';
     const action = String(body.action);
     const value = String(body.value);
     const config = { ...snapshot.config };
@@ -949,8 +959,11 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
           ? [...config.stages, { id: newId(), label: value }]
           : config.stages.filter((stage) => stage.id !== value && stage.label !== value);
     } else {
-      const currentList = config[list];
-      config[list] =
+      // 'modules' on the wire, 'module_names' in the snapshot: the list holds the names, and
+      // the records with ids are derived from them. One mapping rather than a second name.
+      const field = list === 'modules' ? 'module_names' : list;
+      const currentList = config[field];
+      config[field] =
         action === 'add'
           ? currentList.includes(value)
             ? currentList
@@ -964,7 +977,7 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
           ...snapshot,
           config,
           // Stage count changes re-bucket every module on the pipeline.
-          modules: snapshot.modules.map((module) =>
+          sub_modules: snapshot.sub_modules.map((module) =>
             withDerived(module, config.columns, config.stages.length),
           ),
         },
@@ -980,19 +993,22 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
     const entry = snapshot.library.find((candidate) => candidate.id === cloneParams.id);
     if (!entry) throw new ApiError('not_found', 'That library entry does not exist.', 404);
 
-    const subactivities: SubactivityView[] = Array.from(
-      { length: entry.subactivity_count },
+    const sub_activities: SubActivityView[] = Array.from(
+      { length: entry.sub_activity_count },
       (_, index) => ({
         id: newId(),
-        name: `Subactivity ${index + 1}`,
+        name: `SubActivity ${index + 1}`,
         readiness: 0,
         cells: blankCells(snapshot),
+        step_lists: [],
+        owners: [],
+        threads: [],
       }),
     );
 
     const created = reroll(snapshot, {
       id: newId(),
-      node_type: entry.node_type,
+      module_name: entry.module_name,
       name: entry.name,
       owner: null,
       fni_target_date: null,
@@ -1003,21 +1019,26 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
       missing: [],
       blank_count: 0,
       cells: blankCells(snapshot),
-      subactivities,
+      sub_activities,
       links: [],
       last_run: null,
+      // A clone copies the shape of the work, not somebody else's checklist progress,
+      // owners or discussion. Those belong to the sub-module they were recorded against.
+      step_lists: [],
+      owners: [],
+      threads: [],
     });
 
-    const config = snapshot.config.node_types.includes(entry.node_type)
+    const config = snapshot.config.module_names.includes(entry.module_name)
       ? snapshot.config
-      : { ...snapshot.config, node_types: [...snapshot.config.node_types, entry.node_type] };
+      : { ...snapshot.config, module_names: [...snapshot.config.module_names, entry.module_name] };
 
     return {
       data: audited(
         {
           ...snapshot,
           config,
-          modules: [...snapshot.modules, created],
+          sub_modules: [...snapshot.sub_modules, created],
           library: snapshot.library.map((candidate) =>
             candidate.id === entry.id
               ? { ...candidate, used_in_projects: candidate.used_in_projects + 1, in_this_project: true }
@@ -1026,7 +1047,7 @@ function route(snapshot: Snapshot, path: string, method: string, body: Body): Re
         },
         { scope: 'module', label: 'MODULE', what: `cloned from the library`, moduleId: created.id },
       ),
-      meta: { module_id: created.id, node_type: entry.node_type },
+      meta: { sub_module_id: created.id, module_name: entry.module_name },
     };
   }
 

@@ -32,6 +32,50 @@ public class ProjectUseCases {
   }
 
   /**
+   * Who may create a project: a super admin, or somebody holding {@code project.create} across
+   * the whole organisation.
+   *
+   * <p><strong>The word "across" is the entire check.</strong> {@code actor.require} would ask
+   * whether the caller holds the permission <em>here</em> — and permissions resolve as the union
+   * of an organisation-wide role and a role on the open project, so a role granted on one
+   * project alone was enough to create new ones. That is a project administrator minting
+   * projects for the organisation, which is not a bigger version of administering a project; it
+   * is a different job, the same distinction that separates removing somebody from a project
+   * from removing them from the organisation.
+   *
+   * <p>So this re-resolves the caller's grants and looks only at the rows with no project. A
+   * role held on CR_AUTOMATION does not answer a question about Flow One.
+   *
+   * <p>A super admin passes without holding anything, which is the same repair route the role
+   * grid has: the flag is set outside the application, no screen turns it on, and its holder can
+   * already create organisations — so this is not an escalation, and without it an organisation
+   * whose admin role was damaged could not be given a project by anybody.
+   */
+  private void requireOrganisationAdministrator(Actor actor) {
+    if (actor.isSuperAdmin()) {
+      return;
+    }
+
+    boolean orgWide =
+        access.membershipsOf(actor.userId()).stream()
+            .filter(membership -> membership.tenantId().equals(actor.tenantId()))
+            // The only rows that count. A project-scoped grant says nothing about the
+            // organisation, which is what a new project belongs to.
+            .filter(membership -> membership.projectId() == null)
+            .map(membership -> access.role(actor.tenantId(), membership.roleId()))
+            .flatMap(java.util.Optional::stream)
+            .anyMatch(role -> role.permissions().contains(PermissionKey.PROJECT_CREATE));
+
+    if (!orgWide) {
+      throw ServiceException.forbidden(
+          "Creating a project is an organisation-wide action. It needs "
+              + PermissionKey.PROJECT_CREATE.wire()
+              + " across the whole organisation, not on one project — ask an organisation"
+              + " administrator or a super admin.");
+    }
+  }
+
+  /**
    * Creates a project and puts its creator in it.
    *
    * <p>The membership matters: an admin whose access is organisation-wide already sees it, but
@@ -39,7 +83,7 @@ public class ProjectUseCases {
    */
   @Transactional
   public UUID create(Actor actor, String key, String name, String description) {
-    actor.require(PermissionKey.PROJECT_CREATE);
+    requireOrganisationAdministrator(actor);
 
     if (key == null || !KEY.matcher(key).matches()) {
       throw ServiceException.validation(

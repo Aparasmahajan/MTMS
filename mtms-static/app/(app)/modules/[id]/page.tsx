@@ -1,14 +1,17 @@
-import { ModuleScreen } from '@/components/screens/ModuleScreen';
+import { ModuleDetailScreen } from '@/components/screens/ModuleDetailScreen';
 import { IS_DEMO } from '@/lib/demo/config';
 import { getStore } from '@/lib/server/store';
 
 /**
- * A server wrapper around the client screen, for one reason: `generateStaticParams`
- * cannot live in a `'use client'` file, and the static demo has to prerender a page per
- * module because it has no server to render one on demand.
+ * One module — what the matrix already knows about it, plus the things that can only attach
+ * to a record rather than to a name: its owners and its discussion.
  *
- * In the normal build this returns nothing and the route stays dynamic, which is what a
- * module reached straight from a URL needs.
+ * This route used to be the *sub-module* detail page, back when the code called a matrix row
+ * a "module". It moved to `/sub-modules/[id]` with the rename, and this is the screen the
+ * name now means.
+ *
+ * A server wrapper for the same reason as its neighbour: `generateStaticParams` cannot live
+ * in a `'use client'` file, and the export has to prerender one page per module.
  */
 export async function generateStaticParams(): Promise<{ id: string }[]> {
   if (!IS_DEMO) return [];
@@ -17,5 +20,5 @@ export async function generateStaticParams(): Promise<{ id: string }[]> {
 }
 
 export default function ModulePage() {
-  return <ModuleScreen />;
+  return <ModuleDetailScreen />;
 }

@@ -1,0 +1,944 @@
+'use client';
+
+import { useState } from 'react';
+import Link from 'next/link';
+import { notFound, useParams } from 'next/navigation';
+import { useTracker } from '@/components/TrackerProvider';
+import { Blueprint, SectionHeading, StatusMarker } from '@/components/primitives';
+import { DiscussionPanel } from '@/components/DiscussionPanel';
+import { OwnersPanel } from '@/components/OwnersPanel';
+import { StepChecklist } from '@/components/StepChecklist';
+import { send } from '@/lib/client/api';
+import { optimisticAdvance } from '@/lib/client/optimistic';
+import { toneOf, TONE_STYLE } from '@/lib/shared/vocabulary';
+import { cellPresentation, formatStamp, type SubModuleView, type Snapshot } from '@/lib/shared/views';
+
+/**
+ * The module screen — everything about one module, and the only place the FNI chain
+ * can be closed.
+ *
+ * The blockers computed here are for the disabled control's explanation only. The
+ * server recomputes them from the store before it will close anything.
+ */
+
+/** The quiet inline actions on a sub-activity row — same weight as "remove" on a link. */
+function subActivityActionStyle(enabled: boolean) {
+  return {
+    fontSize: 12,
+    color: 'var(--color-neutral-600)',
+    border: 0,
+    background: 'transparent',
+    cursor: enabled ? 'pointer' : 'not-allowed',
+    padding: 0,
+  } as const;
+}
+
+function blockersFor(subModule: SubModuleView): string[] {
+  const blockers: string[] = [];
+  if (subModule.readiness !== 100) {
+    blockers.push('DevOps has not confirmed every deliverable loaded in prod');
+  }
+  const fni = subModule.cells.find((cell) => cell.column_key === 'fni');
+  if (!fni || toneOf(fni.status) !== 'done') blockers.push('FNI final submission is not complete');
+  return blockers;
+}
+
+export function SubModuleScreen() {
+  const { id } = useParams<{ id: string }>();
+  const { snapshot, apply, can, reasonFor, setNotice, words } = useTracker();
+  const subModule = snapshot.sub_modules.find((candidate) => candidate.id === id);
+
+  const [linkType, setLinkType] = useState(snapshot.config.link_types[0] ?? 'RITM');
+  const [linkLabel, setLinkLabel] = useState('');
+  const [linkUrl, setLinkUrl] = useState('');
+  const [newSubActivity, setNewSubActivity] = useState('');
+  const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
+
+  if (!subModule) notFound();
+
+  const { columns, stages, owners, link_types: linkTypes, module_names: moduleNames } = snapshot.config;
+  const stage = stages[subModule.stage_index];
+  const blockers = blockersFor(subModule);
+  const canSignOff = can('fni.signoff');
+  const canSetDate = can('fni.date');
+  const canEdit = can('module.edit');
+  const canUpdate = can('deliverable.update');
+  const canConfirmProd = can('prod.confirm');
+
+  const gateOpen = blockers.length === 0;
+  const signOffDisabled = !canSignOff || (!subModule.closed && !gateOpen);
+  const signOffReason = !canSignOff
+    ? reasonFor('fni.signoff')
+    : subModule.closed
+      ? ''
+      : blockers.length
+        ? `Blocked — ${blockers.join('; ')}`
+        : '';
+
+  function advance(columnKey: string) {
+    const cell = subModule!.cells.find((entry) => entry.column_key === columnKey);
+    if (!cell) return;
+    if (cell.rolled_up) {
+      setNotice(
+        'That value is rolled up from the sub-activities and cannot be edited directly. Change it on the matrix, under this module.',
+      );
+      return;
+    }
+    if (!canUpdate) {
+      setNotice(reasonFor('deliverable.update'));
+      return;
+    }
+    void apply(
+      (current) => optimisticAdvance(current, subModule!.id, null, columnKey, current.me.display_name),
+      () =>
+        send<Snapshot>('/api/v1/cells', 'PATCH', {
+          sub_module_id: subModule!.id,
+          sub_activity_id: null,
+          column_key: columnKey,
+        }),
+    );
+  }
+
+  const handover = [
+    { label: 'Dev complete, handed to testing', by: 'development team', ok: subModule.readiness >= 50 },
+    { label: 'Testing signed off on lab / preprod', by: 'QA', ok: subModule.readiness >= 75 },
+    {
+      label: 'DevOps confirms every deliverable loaded in prod',
+      by: 'DevOps',
+      ok: subModule.readiness === 100,
+    },
+    {
+      label: 'FNI final submission raised',
+      by: 'FNI column on the matrix',
+      ok: !blockers.includes('FNI final submission is not complete'),
+    },
+    {
+      label: 'PM marks FNI done — closes the sub-module and its sub-activities',
+      by: subModule.closed
+        ? `${subModule.closed_by ?? 'PM'}, closed`
+        : 'waiting on the PM',
+      ok: subModule.closed,
+    },
+  ];
+
+  return (
+    <div className="page page-narrow">
+      <div style={{ fontSize: 13, color: 'var(--color-neutral-600)', marginBottom: 'var(--space-2)' }}>
+        <Link href="/matrix" style={{ color: 'inherit' }}>
+          {snapshot.project.key}
+        </Link>{' '}
+        /{' '}
+        {/*
+          A picker rather than a label. A sub-module filed under the wrong module used to be
+          fixable only from the matrix, two screens away from where you noticed it — and the
+          server keeps every cell when it moves, because what was loaded is a fact about the
+          work, not about which heading it was filed under.
+        */}
+        <select
+          className="input"
+          style={{ width: 'auto', padding: '1px 6px', fontSize: 13 }}
+          value={subModule.module_name}
+          disabled={!canEdit || subModule.closed}
+          title={
+            canEdit
+              ? subModule.closed
+                ? `This ${words.subModule.lower} is closed. Reopen it before moving it.`
+                : `Move this ${words.subModule.lower} to another ${words.module.lower}`
+              : reasonFor('module.edit')
+          }
+          aria-label={`${words.module.one} this ${words.subModule.lower} sits on`}
+          onChange={(event) => {
+            const value = event.target.value;
+            if (value === subModule.module_name) return;
+            void apply(null, () =>
+              send<Snapshot>(`/api/v1/sub-modules/${subModule.id}`, 'PATCH', {
+                module_name: value,
+              }),
+            );
+          }}
+        >
+          {(moduleNames.includes(subModule.module_name)
+            ? moduleNames
+            : [subModule.module_name, ...moduleNames]
+          ).map((moduleName) => (
+            <option key={moduleName} value={moduleName}>
+              {moduleName}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 'var(--space-8)',
+          marginBottom: 'var(--space-6)',
+          flexWrap: 'wrap',
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <h1 style={{ wordBreak: 'break-word' }}>{subModule.name}</h1>
+          <div
+            style={{
+              display: 'flex',
+              gap: 'var(--space-3)',
+              marginTop: 'var(--space-2)',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+            }}
+          >
+            <span className="tag tag-accent">{subModule.module_name}</span>
+            <span style={{ fontSize: 13, color: 'var(--color-neutral-700)' }}>
+              {subModule.readiness}% of counted deliverables in prod
+              {stage ? ` · ${stage.label}` : ''}
+            </span>
+            <span style={{ fontSize: 13, color: 'var(--color-neutral-700)' }}>
+              target {subModule.fni_target_date ?? 'not set'}
+            </span>
+            <span
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--space-2)',
+                fontSize: 13,
+                color: 'var(--color-neutral-700)',
+              }}
+            >
+              owner
+              <select
+                className="input"
+                style={{ width: 150, padding: '2px 6px' }}
+                value={subModule.owner ?? 'unassigned'}
+                disabled={!canEdit}
+                title={canEdit ? undefined : reasonFor('module.edit')}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  void apply(null, () =>
+                    send<Snapshot>(`/api/v1/sub-modules/${subModule.id}`, 'PATCH', {
+                      owner: value === 'unassigned' ? null : value,
+                    }),
+                  );
+                }}
+              >
+                {['unassigned', ...owners].map((owner) => (
+                  <option key={owner} value={owner}>
+                    {owner}
+                  </option>
+                ))}
+              </select>
+            </span>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 'var(--space-2)', flex: 'none' }}>
+          <Link href="/drift" className="btn btn-secondary">
+            Check drift
+          </Link>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={!canConfirmProd || subModule.closed}
+            title={canConfirmProd ? undefined : reasonFor('prod.confirm')}
+            onClick={async () => {
+              const meta = await apply(null, () =>
+                send<Snapshot>(`/api/v1/sub-modules/${subModule.id}/confirm-prod`, 'POST'),
+              );
+              if (meta) {
+                setNotice(
+                  `Marked ${meta.changed} cell${meta.changed === 1 ? '' : 's'} loaded in prod. Every change is stamped with your name.`,
+                );
+              }
+            }}
+          >
+            Mark loaded in prod
+          </button>
+        </div>
+      </div>
+
+      <div
+        className="split"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '1.1fr 1fr',
+          gap: 'var(--space-8)',
+          alignItems: 'start',
+        }}
+      >
+        <div>
+          <SectionHeading first>Handover &amp; closure</SectionHeading>
+          <Blueprint style={{ marginBottom: 'var(--space-8)' }}>
+            {handover.map((step) => {
+              const tone = step.ok ? TONE_STYLE.done : TONE_STYLE.none;
+              return (
+                <div
+                  key={step.label}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 'var(--space-3)',
+                    padding: 'var(--space-3) 0',
+                    borderBottom: '1px solid var(--color-divider)',
+                  }}
+                >
+                  <span
+                    aria-hidden
+                    style={{
+                      width: 20,
+                      height: 20,
+                      flex: 'none',
+                      marginTop: 2,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 11,
+                      background: tone.bg,
+                      color: tone.fg,
+                      border: `1px solid ${tone.border}`,
+                    }}
+                  >
+                    {step.ok ? '●' : '○'}
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13 }}>{step.label}</div>
+                    <div style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>{step.by}</div>
+                  </div>
+                  <span
+                    style={{
+                      fontFamily: 'var(--font-heading)',
+                      fontSize: 13,
+                      letterSpacing: '.07em',
+                      textTransform: 'uppercase',
+                      color: 'var(--color-neutral-700)',
+                      flex: 'none',
+                    }}
+                  >
+                    {step.ok ? 'done' : 'pending'}
+                  </span>
+                </div>
+              );
+            })}
+
+            <div
+              style={{
+                display: 'flex',
+                gap: 'var(--space-2)',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                paddingTop: 'var(--space-4)',
+              }}
+            >
+              <span style={{ fontSize: 13, color: 'var(--color-neutral-700)' }}>FNI target date</span>
+              <input
+                className="input"
+                type="date"
+                style={{ width: 170 }}
+                value={subModule.fni_target_date ?? ''}
+                disabled={!canSetDate}
+                title={canSetDate ? undefined : reasonFor('fni.date')}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  void apply(null, () =>
+                    send<Snapshot>(`/api/v1/sub-modules/${subModule.id}`, 'PATCH', {
+                      fni_target_date: value || null,
+                    }),
+                  );
+                }}
+              />
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={signOffDisabled}
+                title={signOffReason || undefined}
+                onClick={() =>
+                  void apply(null, () =>
+                    send<Snapshot>(`/api/v1/sub-modules/${subModule.id}/fni`, 'POST', {
+                      close: !subModule.closed,
+                    }),
+                  )
+                }
+              >
+                {subModule.closed ? 'Reopen activity' : 'Mark FNI done'}
+              </button>
+            </div>
+
+            {signOffReason ? (
+              <div
+                style={{
+                  marginTop: 'var(--space-3)',
+                  fontSize: 12,
+                  color: 'var(--color-neutral-700)',
+                  textWrap: 'pretty',
+                }}
+              >
+                {signOffReason}
+              </div>
+            ) : null}
+
+            {subModule.closed ? (
+              <div
+                style={{
+                  marginTop: 'var(--space-4)',
+                  padding: 'var(--space-3) var(--space-4)',
+                  background: 'var(--color-accent)',
+                  color: 'var(--color-bg)',
+                  fontFamily: 'var(--font-heading)',
+                  fontSize: 15,
+                  letterSpacing: '.05em',
+                  textTransform: 'uppercase',
+                }}
+              >
+                Closed — prod FNI signed off, our part is complete
+              </div>
+            ) : null}
+          </Blueprint>
+
+          {/*
+            Owners first, then the checklist, then the deliverables. That is the order the
+            questions get asked in: who is on this, what does the process say has to happen,
+            and what is actually loaded.
+          */}
+          <OwnersPanel
+            scopeType="sub_module"
+            scopeId={subModule.id}
+            groups={subModule.owners}
+          />
+
+          {/*
+            Steps sit above the deliverables, not inside them. The matrix answers "is it
+            loaded"; the checklist answers "did the process happen" — two different questions
+            that the same team asks in that order.
+          */}
+          <StepChecklist
+            lists={subModule.step_lists}
+            heading="Checklist"
+            emptyNote={
+              can('project.config')
+                ? `No checklist on this ${words.subModule.lower} yet. Build one on the Configure screen — write each step once, then attach a named list of them here.`
+                : `No checklist on this ${words.subModule.lower} yet. A project admin sets these up.`
+            }
+          />
+
+          {subModule.sub_activities.map((subActivity) => (
+            <StepChecklist
+              key={`steps-${subActivity.id}`}
+              lists={subActivity.step_lists}
+              heading={`Checklist · ${subActivity.name}`}
+              // Null, not a note: a sub-activity with no checklist of its own is the normal
+              // case — the list sits on the activity above and pushing one down is the
+              // exception. Saying "none" under every sub-activity would be noise.
+              emptyNote={null}
+            />
+          ))}
+
+          <SectionHeading first>Deliverables</SectionHeading>
+          <Blueprint padded={false}>
+            {subModule.cells.map((cell) => {
+              const column = columns.find((candidate) => candidate.key === cell.column_key);
+              // A column behind a switched-off environment is in the snapshot with its
+              // cell intact, but it is not part of this project's process right now.
+              if (!column || !column.active) return null;
+              const view = cellPresentation(cell, column);
+              return (
+                <div
+                  key={cell.column_key}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 'var(--space-3)',
+                    padding: 'var(--space-2) var(--space-4)',
+                    borderBottom: '1px solid var(--color-divider)',
+                  }}
+                >
+                  <StatusMarker cell={cell} column={column} size={22} onClick={() => advance(column.key)} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13 }}>{column.full}</div>
+                    <div style={{ fontSize: 11, color: 'var(--color-neutral-600)' }}>
+                      {cell.rolled_up
+                        ? `rolled up from ${cell.sub_activity_count} sub-activities`
+                        : view.stamp}
+                      {column.counts ? '' : ' · does not count toward prod'}
+                      {column.environment ? ` · ${column.environment}` : ''}
+                    </div>
+                  </div>
+                  <span style={{ fontSize: 12, color: 'var(--color-neutral-700)', flex: 'none' }}>
+                    {view.status_label}
+                  </span>
+                </div>
+              );
+            })}
+          </Blueprint>
+
+          <SectionHeading>{words.subActivity.many}</SectionHeading>
+          <div className="bordered">
+            {subModule.sub_activities.map((subActivity) => {
+              const editing = renaming?.id === subActivity.id;
+              return (
+                <div
+                  key={subActivity.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 'var(--space-3)',
+                    padding: 'var(--space-3) var(--space-4)',
+                    borderBottom: '1px solid var(--color-divider)',
+                  }}
+                >
+                  {editing ? (
+                    <form
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        const value = renaming.value.trim();
+                        if (!value || value === subActivity.name) {
+                          setRenaming(null);
+                          return;
+                        }
+                        void apply(null, () =>
+                          send<Snapshot>(
+                            `/api/v1/sub-modules/${subModule.id}/sub-activities/${subActivity.id}`,
+                            'PATCH',
+                            { name: value },
+                          ),
+                        ).then(() => setRenaming(null));
+                      }}
+                      style={{ flex: 1, display: 'flex', gap: 'var(--space-2)' }}
+                    >
+                      <input
+                        className="input"
+                        autoFocus
+                        style={{ flex: 1 }}
+                        value={renaming.value}
+                        onChange={(event) => setRenaming({ id: subActivity.id, value: event.target.value })}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Escape') setRenaming(null);
+                        }}
+                        aria-label={`Rename ${subActivity.name}`}
+                      />
+                      <button type="submit" className="btn btn-secondary">
+                        Save
+                      </button>
+                    </form>
+                  ) : (
+                    <span style={{ flex: 1, fontSize: 13 }}>{subActivity.name}</span>
+                  )}
+
+                  {editing ? null : (
+                    <>
+                      <span className="bar" style={{ width: 110, flex: 'none', height: 6 }} aria-hidden>
+                        <span style={{ width: `${subActivity.readiness}%` }} />
+                      </span>
+                      <span
+                        className="tabular"
+                        style={{
+                          width: 38,
+                          flex: 'none',
+                          textAlign: 'right',
+                          fontFamily: 'var(--font-heading)',
+                          fontSize: 15,
+                        }}
+                      >
+                        {subActivity.readiness}
+                      </span>
+                      <div style={{ display: 'flex', gap: 'var(--space-2)', flex: 'none' }}>
+                        <button
+                          type="button"
+                          disabled={!canEdit}
+                          title={canEdit ? undefined : reasonFor('module.edit')}
+                          onClick={() => setRenaming({ id: subActivity.id, value: subActivity.name })}
+                          style={subActivityActionStyle(canEdit)}
+                        >
+                          rename
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!canEdit}
+                          title={
+                            canEdit
+                              ? subModule.sub_activities.length === 1
+                                ? 'Removing the last sub-activity gives the module its own row back, keeping what it currently shows'
+                                : `Remove ${subActivity.name} and its deliverable row`
+                              : reasonFor('module.edit')
+                          }
+                          onClick={() =>
+                            void apply(null, () =>
+                              send<Snapshot>(
+                                `/api/v1/sub-modules/${subModule.id}/sub-activities/${subActivity.id}`,
+                                'DELETE',
+                              ),
+                            )
+                          }
+                          style={subActivityActionStyle(canEdit)}
+                        >
+                          remove
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+            {subModule.sub_activities.length === 0 ? (
+              <div style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 13, color: 'var(--color-neutral-600)' }}>
+                None.
+              </div>
+            ) : null}
+
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!newSubActivity.trim()) return;
+                void apply(null, () =>
+                  send<Snapshot>(`/api/v1/sub-modules/${subModule.id}/sub-activities`, 'POST', {
+                    name: newSubActivity.trim(),
+                  }),
+                ).then((result) => {
+                  if (result) setNewSubActivity('');
+                });
+              }}
+              style={{
+                display: 'flex',
+                gap: 'var(--space-2)',
+                padding: 'var(--space-3) var(--space-4)',
+                alignItems: 'center',
+              }}
+            >
+              <input
+                className="input"
+                style={{ flex: 1 }}
+                value={newSubActivity}
+                onChange={(event) => setNewSubActivity(event.target.value)}
+                placeholder={`New ${words.subActivity.lower}, e.g. Deletion`}
+                aria-label={`New ${words.subActivity.lower} name`}
+              />
+              <button
+                type="submit"
+                className="btn btn-secondary"
+                disabled={!canEdit || subModule.closed}
+                title={
+                  canEdit
+                    ? subModule.closed
+                      ? 'This module is closed. Reopen it before changing its sub-activities.'
+                      : undefined
+                    : reasonFor('module.edit')
+                }
+              >
+                Add
+              </button>
+            </form>
+          </div>
+          <div
+            style={{
+              marginTop: 'var(--space-2)',
+              fontSize: 12,
+              color: 'var(--color-neutral-600)',
+              lineHeight: 1.4,
+              textWrap: 'pretty',
+            }}
+          >
+            {subModule.sub_activities.length
+              ? 'The module row on the matrix is a roll-up: a column only counts as done when every sub-activity is done. Edit the sub-activity cells on the matrix.'
+              : 'This module has no sub-activities — its deliverable row is tracked directly. Adding the first one turns that row into a roll-up and carries the deliverables it already holds onto that sub-activity.'}
+          </div>
+
+          <SectionHeading>Defects on this {words.subModule.lower}</SectionHeading>
+          <div className="bordered">
+            {snapshot.defects
+              .filter((defect) => defect.sub_module_id === subModule.id)
+              .map((defect) => (
+                <div
+                  key={defect.id}
+                  style={{
+                    padding: 'var(--space-3) var(--space-4)',
+                    borderBottom: '1px solid var(--color-divider)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--space-3)' }}>
+                    <span className="tag tag-neutral" style={{ flex: 'none' }}>
+                      {defect.severity}
+                    </span>
+                    <span style={{ flex: 1, fontSize: 13, lineHeight: 1.35, textWrap: 'pretty' }}>
+                      {defect.description}
+                    </span>
+                    <span
+                      style={{
+                        fontFamily: 'var(--font-heading)',
+                        fontSize: 12,
+                        letterSpacing: '.08em',
+                        textTransform: 'uppercase',
+                        flex: 'none',
+                      }}
+                    >
+                      {defect.status}
+                    </span>
+                  </div>
+                  <div style={{ marginTop: 'var(--space-1)', fontSize: 12, color: 'var(--color-neutral-600)' }}>
+                    {defect.phase} · run {defect.child_req_id || '—'} · {defect.raised_by},{' '}
+                    {formatStamp(defect.created_at)}
+                  </div>
+                </div>
+              ))}
+            {snapshot.defects.filter((defect) => defect.sub_module_id === subModule.id).length === 0 ? (
+              <div style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 13, color: 'var(--color-neutral-600)' }}>
+                None raised.
+              </div>
+            ) : null}
+          </div>
+
+          <SectionHeading>Links</SectionHeading>
+          <Blueprint padded={false}>
+            {subModule.links.map((link) => (
+              <div
+                key={link.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  gap: 'var(--space-3)',
+                  padding: 'var(--space-3) var(--space-4)',
+                  borderBottom: '1px solid var(--color-divider)',
+                }}
+              >
+                <span className="tag tag-neutral" style={{ flex: 'none' }}>
+                  {link.type}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <a href={link.url} style={{ fontSize: 13 }} target="_blank" rel="noreferrer noopener">
+                    {link.label}
+                  </a>
+                  <div
+                    className="mono"
+                    style={{
+                      fontSize: 11,
+                      color: 'var(--color-neutral-600)',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {link.url}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={!canEdit}
+                  title={canEdit ? undefined : reasonFor('module.edit')}
+                  onClick={() =>
+                    void apply(null, () => send<Snapshot>(`/api/v1/links/${link.id}`, 'DELETE'))
+                  }
+                  style={{
+                    fontSize: 12,
+                    color: 'var(--color-neutral-600)',
+                    border: 0,
+                    background: 'transparent',
+                    cursor: canEdit ? 'pointer' : 'not-allowed',
+                    flex: 'none',
+                  }}
+                >
+                  remove
+                </button>
+              </div>
+            ))}
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!linkUrl.trim()) return;
+                void apply(null, () =>
+                  send<Snapshot>(`/api/v1/sub-modules/${subModule.id}/links`, 'POST', {
+                    type: linkType,
+                    label: linkLabel,
+                    url: linkUrl,
+                  }),
+                ).then((result) => {
+                  if (result) {
+                    setLinkLabel('');
+                    setLinkUrl('');
+                  }
+                });
+              }}
+              style={{
+                display: 'flex',
+                gap: 'var(--space-2)',
+                padding: 'var(--space-3) var(--space-4)',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+              }}
+            >
+              <select
+                className="input"
+                style={{ width: 130 }}
+                value={linkType}
+                onChange={(event) => setLinkType(event.target.value)}
+                aria-label="Link type"
+              >
+                {linkTypes.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+              <input
+                className="input"
+                style={{ width: 140 }}
+                value={linkLabel}
+                onChange={(event) => setLinkLabel(event.target.value)}
+                placeholder="Label"
+                aria-label="Link label"
+              />
+              <input
+                className="input"
+                style={{ flex: 1, minWidth: 160 }}
+                value={linkUrl}
+                onChange={(event) => setLinkUrl(event.target.value)}
+                placeholder="https://…"
+                aria-label="Link URL"
+              />
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={!canEdit}
+                title={canEdit ? undefined : reasonFor('module.edit')}
+              >
+                Add link
+              </button>
+            </form>
+          </Blueprint>
+        </div>
+
+        <div>
+          <DiscussionPanel
+            scopeType="sub_module"
+            scopeId={subModule.id}
+            threads={subModule.threads}
+          />
+
+          <SectionHeading>Change history</SectionHeading>
+          <div className="bordered">
+            {snapshot.audit
+              .filter((entry) => entry.sub_module_id === subModule.id)
+              .slice(0, 8)
+              .map((entry) => (
+                <div
+                  key={entry.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'baseline',
+                    gap: 'var(--space-3)',
+                    padding: 'var(--space-2) var(--space-4)',
+                    borderBottom: '1px solid var(--color-divider)',
+                    fontSize: 12,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: 'var(--font-heading)',
+                      letterSpacing: '.06em',
+                      textTransform: 'uppercase',
+                      width: 80,
+                      flex: 'none',
+                    }}
+                  >
+                    {entry.label}
+                  </span>
+                  <span style={{ flex: 1, color: 'var(--color-neutral-700)', wordBreak: 'break-word' }}>
+                    {entry.what}
+                  </span>
+                  <span style={{ color: 'var(--color-neutral-600)', flex: 'none' }}>
+                    {entry.who}, {formatStamp(entry.at)}
+                  </span>
+                </div>
+              ))}
+            {snapshot.audit.filter((entry) => entry.sub_module_id === subModule.id).length === 0 ? (
+              <div style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 12, color: 'var(--color-neutral-600)' }}>
+                No changes recorded against this subModule.
+              </div>
+            ) : null}
+          </div>
+
+          <SectionHeading>
+            Last execution ·{' '}
+            {subModule.last_run ? `CHILD_REQ_ID ${subModule.last_run.child_req_id}` : 'no execution recorded'}
+          </SectionHeading>
+          <div className="bordered">
+            {subModule.last_run?.phases.map((phase) => (
+              <div
+                key={phase.name}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--space-3)',
+                  padding: 'var(--space-2) var(--space-4)',
+                  borderBottom: '1px solid var(--color-divider)',
+                }}
+              >
+                <span
+                  aria-hidden
+                  style={{
+                    width: 7,
+                    height: 7,
+                    flex: 'none',
+                    background: phase.ok ? 'var(--color-accent)' : 'var(--color-neutral-300)',
+                  }}
+                />
+                <span className="mono" style={{ flex: 1, fontSize: 12 }}>
+                  {phase.name}
+                </span>
+                <span style={{ fontSize: 12, color: 'var(--color-neutral-700)' }}>{phase.steps}</span>
+                <span className="tabular" style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>
+                  {phase.duration}
+                </span>
+              </div>
+            ))}
+            {!subModule.last_run ? (
+              <div style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 12, color: 'var(--color-neutral-600)' }}>
+                No run has reported against this subModule.
+              </div>
+            ) : null}
+          </div>
+
+          <SectionHeading>Artifacts</SectionHeading>
+          <div className="bordered">
+            {subModule.last_run?.artifacts.map((artifact) => (
+              <div
+                key={artifact.path}
+                style={{
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  gap: 'var(--space-3)',
+                  padding: 'var(--space-2) var(--space-4)',
+                  borderBottom: '1px solid var(--color-divider)',
+                }}
+              >
+                <span
+                  style={{
+                    fontFamily: 'var(--font-heading)',
+                    fontSize: 12,
+                    letterSpacing: '.1em',
+                    textTransform: 'uppercase',
+                    color: 'var(--color-neutral-600)',
+                    width: 70,
+                    flex: 'none',
+                  }}
+                >
+                  {artifact.kind}
+                </span>
+                <span className="mono" style={{ flex: 1, fontSize: 12, wordBreak: 'break-all' }}>
+                  {artifact.path}
+                </span>
+                <span
+                  className="tabular"
+                  style={{ fontSize: 12, color: 'var(--color-neutral-700)', flex: 'none' }}
+                >
+                  {artifact.size}
+                </span>
+              </div>
+            ))}
+            {!subModule.last_run ? (
+              <div style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 12, color: 'var(--color-neutral-600)' }}>
+                None.
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

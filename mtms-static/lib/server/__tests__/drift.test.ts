@@ -233,7 +233,7 @@ describe('the promotion gate', () => {
     const project = await projectId();
 
     await mutate((data) => {
-      // Every counted cell done, on modules and subactivities alike.
+      // Every counted cell done, on modules and sub_activities alike.
       const columns = data.columns.filter((column) => column.project_id === project);
       for (const cell of data.cells) {
         const column = columns.find((candidate) => candidate.key === cell.column_key);

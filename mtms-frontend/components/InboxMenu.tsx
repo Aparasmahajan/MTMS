@@ -22,18 +22,20 @@ const KIND_MARK: Record<NotificationView['kind'], string> = {
   mention: '@',
   'step.blocked': '⊘',
   'step.ready': '●',
+  account: '⚿',
 };
 
 export function InboxMenu() {
   const { snapshot, apply } = useTracker();
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  /** The `account` row whose link was just copied, or `failed:<id>` when the clipboard refused. */
+  const [copied, setCopied] = useState('');
 
   const unread = snapshot.unread_notifications;
   const items = snapshot.notifications;
 
   function openItem(notification: NotificationView) {
-    setOpen(false);
     // Marked read on the way, not on arrival: a notification you clicked is one you have read,
     // and waiting for the destination to render would leave the badge wrong if it fails.
     if (notification.unread) {
@@ -41,6 +43,33 @@ export function InboxMenu() {
         send<Snapshot>(`/api/v1/notifications/${notification.id}/read`, 'POST'),
       );
     }
+
+    /*
+      An `account` row is copied, never opened, and the difference matters.
+
+      Its link is a single-use invitation or password-reset URL belonging to somebody else.
+      Following it lands the administrator on the "choose a password" form for an account that
+      is not theirs — and one wrong submission there sets a stranger's password and burns the
+      only link that person had. Nothing about a row you click suggests that is the risk.
+
+      So this copies it and stays put. The menu stays open too: the whole point of the row is
+      that the link survives, and closing the menu on the click would hide the one thing the
+      person came for.
+    */
+    if (notification.kind === 'account') {
+      if (notification.link) {
+        void navigator.clipboard
+          ?.writeText(notification.link)
+          .then(() => setCopied(notification.id))
+          // A clipboard write can be refused — an insecure origin, or a browser that wants a
+          // more direct gesture. The link is on screen either way, so say so rather than
+          // failing silently and leaving somebody clicking a button that does nothing.
+          .catch(() => setCopied('failed:' + notification.id));
+      }
+      return;
+    }
+
+    setOpen(false);
     if (notification.link) router.push(notification.link);
   }
 
@@ -192,6 +221,37 @@ export function InboxMenu() {
                   >
                     {notification.body}
                   </span>
+                ) : null}
+                {/*
+                  The link itself, shown rather than hidden behind the click — because this row
+                  exists precisely to be the copy that survives. `user-select: all` means one
+                  click selects the whole URL for anybody whose clipboard API is unavailable.
+                */}
+                {notification.kind === 'account' && notification.link ? (
+                  <>
+                    <span
+                      className="mono"
+                      style={{
+                        display: 'block',
+                        fontSize: 10,
+                        color: 'var(--color-neutral-700)',
+                        wordBreak: 'break-all',
+                        userSelect: 'all',
+                        marginTop: 2,
+                      }}
+                    >
+                      {notification.link}
+                    </span>
+                    <span
+                      style={{ display: 'block', fontSize: 10, color: 'var(--color-neutral-600)' }}
+                    >
+                      {copied === notification.id
+                        ? 'Copied.'
+                        : copied === 'failed:' + notification.id
+                          ? 'Could not copy — select the link above.'
+                          : 'Click to copy. Do not open it: it is their link, and it works once.'}
+                    </span>
+                  </>
                 ) : null}
                 <span style={{ display: 'block', fontSize: 11, color: 'var(--color-neutral-600)' }}>
                   {formatStamp(notification.at)}
