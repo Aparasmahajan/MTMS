@@ -30,14 +30,27 @@ import type { Snapshot } from '@/lib/shared/views';
  */
 // Bumped when the shape or the vocabulary changes: a returning visitor holds a snapshot
 // whose columns carry the OLD allowed sets, and would never be offered preprod.
-const STORAGE_KEY = 'mtms.static.snapshot.v3';
+//
+// v4: the rename that brought this app level with `mtms-frontend` — `modules` became
+// `sub_modules`, a sub-module gained `step_lists`, `owners` and `threads`, and the snapshot
+// gained the step library, the inbox and both timing panels. A v3 snapshot has none of
+// those and the old name for the one it does have, so loading it would render every screen
+// half-empty. That port missed this bump; it is the exact failure this key exists to stop.
+//
+// Exported so the e2e spec reads this rather than its own copy. It held a copy, and the copy
+// stayed at v1 through two bumps — so a test asserting on what is stored was reading a key
+// nothing has written to since September.
+export const STORAGE_KEY = 'mtms.static.snapshot.v4';
 /**
  * Everything above one project — the other projects' snapshots, and the organisations and
  * administrators the super admin console reads. A second key rather than one combined
  * value so the snapshot slot keeps its shape: the provider and the cross-tab channel both
  * carry a `Snapshot` and neither needs to learn about the workspace.
  */
-const WORKSPACE_KEY = 'mtms.static.workspace.v1';
+// v2: same reason as the v4 above. The workspace holds a snapshot per project, so every one
+// of them carries the old shape too — bumping only the current-project key would leave the
+// others to load half-empty the moment somebody switched project.
+export const WORKSPACE_KEY = 'mtms.static.workspace.v2';
 const CHANNEL_NAME = 'mtms.static.snapshot';
 
 type Listener = (snapshot: Snapshot) => void;

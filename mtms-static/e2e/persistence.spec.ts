@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { STORAGE_KEY } from '../lib/demo/persistence';
 
 /**
  * The two behaviours this repository exists to add: edits that survive a reload, and edits
@@ -23,8 +24,12 @@ import { expect, test, type Page } from '@playwright/test';
  */
 const EDITABLE_RITM = 'button[aria-label^="RITM raised — "]:not([aria-label*="rolled up"])';
 
-/** The storage key `lib/demo/persistence.ts` writes. */
-const STORAGE_KEY = 'mtms.static.snapshot.v1';
+/*
+ * The storage key is imported, not restated. This file used to hold its own copy, which stayed
+ * at `v1` while the app moved to `v3` and then `v4` — so the test below asserting on "what is
+ * stored" read a key nothing had written since September and failed against a working app.
+ * A test that restates a value it is meant to check is checking its own memory.
+ */
 
 async function openMatrix(page: Page) {
   await page.goto('/matrix');
