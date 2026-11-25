@@ -434,41 +434,179 @@ export function SubModuleScreen() {
 
           <SectionHeading first>Deliverables</SectionHeading>
           <Blueprint padded={false}>
-            {subModule.cells.map((cell) => {
-              const column = columns.find((candidate) => candidate.key === cell.column_key);
-              // A column behind a switched-off environment is in the snapshot with its
-              // cell intact, but it is not part of this project's process right now.
-              if (!column || !column.active) return null;
-              const view = cellPresentation(cell, column);
-              return (
+            <div className="scroll-subtle" style={{ maxHeight: 480, overflowY: 'auto' }}>
+              {subModule.cells.map((cell) => {
+                const column = columns.find((candidate) => candidate.key === cell.column_key);
+                // A column behind a switched-off environment is in the snapshot with its
+                // cell intact, but it is not part of this project's process right now.
+                if (!column || !column.active) return null;
+                const view = cellPresentation(cell, column);
+                return (
+                  <div
+                    key={cell.column_key}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 'var(--space-3)',
+                      padding: 'var(--space-2) var(--space-4)',
+                      borderBottom: '1px solid var(--color-divider)',
+                    }}
+                  >
+                    <StatusMarker cell={cell} column={column} size={22} onClick={() => advance(column.key)} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13 }}>{column.full}</div>
+                      <div style={{ fontSize: 11, color: 'var(--color-neutral-600)' }}>
+                        {cell.rolled_up
+                          ? `rolled up from ${cell.sub_activity_count} sub-activities`
+                          : view.stamp}
+                        {column.counts ? '' : ' · does not count toward prod'}
+                        {column.environment ? ` · ${column.environment}` : ''}
+                      </div>
+                    </div>
+                    <span style={{ fontSize: 12, color: 'var(--color-neutral-700)', flex: 'none' }}>
+                      {view.status_label}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </Blueprint>
+        </div>
+
+        <div>
+          <DiscussionPanel
+            scopeType="sub_module"
+            scopeId={subModule.id}
+            threads={subModule.threads}
+          />
+
+          <SectionHeading>Change history</SectionHeading>
+          <div className="bordered">
+            {snapshot.audit
+              .filter((entry) => entry.sub_module_id === subModule.id)
+              .slice(0, 8)
+              .map((entry) => (
                 <div
-                  key={cell.column_key}
+                  key={entry.id}
                   style={{
                     display: 'flex',
-                    alignItems: 'center',
+                    alignItems: 'baseline',
                     gap: 'var(--space-3)',
                     padding: 'var(--space-2) var(--space-4)',
                     borderBottom: '1px solid var(--color-divider)',
+                    fontSize: 12,
                   }}
                 >
-                  <StatusMarker cell={cell} column={column} size={22} onClick={() => advance(column.key)} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13 }}>{column.full}</div>
-                    <div style={{ fontSize: 11, color: 'var(--color-neutral-600)' }}>
-                      {cell.rolled_up
-                        ? `rolled up from ${cell.sub_activity_count} sub-activities`
-                        : view.stamp}
-                      {column.counts ? '' : ' · does not count toward prod'}
-                      {column.environment ? ` · ${column.environment}` : ''}
-                    </div>
-                  </div>
-                  <span style={{ fontSize: 12, color: 'var(--color-neutral-700)', flex: 'none' }}>
-                    {view.status_label}
+                  <span
+                    style={{
+                      fontFamily: 'var(--font-heading)',
+                      letterSpacing: '.06em',
+                      textTransform: 'uppercase',
+                      width: 80,
+                      flex: 'none',
+                    }}
+                  >
+                    {entry.label}
+                  </span>
+                  <span style={{ flex: 1, color: 'var(--color-neutral-700)', wordBreak: 'break-word' }}>
+                    {entry.what}
+                  </span>
+                  <span style={{ color: 'var(--color-neutral-600)', flex: 'none' }}>
+                    {entry.who}, {formatStamp(entry.at)}
                   </span>
                 </div>
-              );
-            })}
-          </Blueprint>
+              ))}
+            {snapshot.audit.filter((entry) => entry.sub_module_id === subModule.id).length === 0 ? (
+              <div style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 12, color: 'var(--color-neutral-600)' }}>
+                No changes recorded against this subModule.
+              </div>
+            ) : null}
+          </div>
+
+          <SectionHeading>
+            Last execution ·{' '}
+            {subModule.last_run ? `CHILD_REQ_ID ${subModule.last_run.child_req_id}` : 'no execution recorded'}
+          </SectionHeading>
+          <div className="bordered">
+            {subModule.last_run?.phases.map((phase) => (
+              <div
+                key={phase.name}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--space-3)',
+                  padding: 'var(--space-2) var(--space-4)',
+                  borderBottom: '1px solid var(--color-divider)',
+                }}
+              >
+                <span
+                  aria-hidden
+                  style={{
+                    width: 7,
+                    height: 7,
+                    flex: 'none',
+                    background: phase.ok ? 'var(--color-accent)' : 'var(--color-neutral-300)',
+                  }}
+                />
+                <span className="mono" style={{ flex: 1, fontSize: 12 }}>
+                  {phase.name}
+                </span>
+                <span style={{ fontSize: 12, color: 'var(--color-neutral-700)' }}>{phase.steps}</span>
+                <span className="tabular" style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>
+                  {phase.duration}
+                </span>
+              </div>
+            ))}
+            {!subModule.last_run ? (
+              <div style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 12, color: 'var(--color-neutral-600)' }}>
+                No run has reported against this subModule.
+              </div>
+            ) : null}
+          </div>
+
+          <SectionHeading>Artifacts</SectionHeading>
+          <div className="bordered">
+            {subModule.last_run?.artifacts.map((artifact) => (
+              <div
+                key={artifact.path}
+                style={{
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  gap: 'var(--space-3)',
+                  padding: 'var(--space-2) var(--space-4)',
+                  borderBottom: '1px solid var(--color-divider)',
+                }}
+              >
+                <span
+                  style={{
+                    fontFamily: 'var(--font-heading)',
+                    fontSize: 12,
+                    letterSpacing: '.1em',
+                    textTransform: 'uppercase',
+                    color: 'var(--color-neutral-600)',
+                    width: 70,
+                    flex: 'none',
+                  }}
+                >
+                  {artifact.kind}
+                </span>
+                <span className="mono" style={{ flex: 1, fontSize: 12, wordBreak: 'break-all' }}>
+                  {artifact.path}
+                </span>
+                <span
+                  className="tabular"
+                  style={{ fontSize: 12, color: 'var(--color-neutral-700)', flex: 'none' }}
+                >
+                  {artifact.size}
+                </span>
+              </div>
+            ))}
+            {!subModule.last_run ? (
+              <div style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 12, color: 'var(--color-neutral-600)' }}>
+                None.
+              </div>
+            ) : null}
+          </div>
 
           <SectionHeading>{words.subActivity.many}</SectionHeading>
           <div className="bordered">
@@ -801,142 +939,6 @@ export function SubModuleScreen() {
               </button>
             </form>
           </Blueprint>
-        </div>
-
-        <div>
-          <DiscussionPanel
-            scopeType="sub_module"
-            scopeId={subModule.id}
-            threads={subModule.threads}
-          />
-
-          <SectionHeading>Change history</SectionHeading>
-          <div className="bordered">
-            {snapshot.audit
-              .filter((entry) => entry.sub_module_id === subModule.id)
-              .slice(0, 8)
-              .map((entry) => (
-                <div
-                  key={entry.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'baseline',
-                    gap: 'var(--space-3)',
-                    padding: 'var(--space-2) var(--space-4)',
-                    borderBottom: '1px solid var(--color-divider)',
-                    fontSize: 12,
-                  }}
-                >
-                  <span
-                    style={{
-                      fontFamily: 'var(--font-heading)',
-                      letterSpacing: '.06em',
-                      textTransform: 'uppercase',
-                      width: 80,
-                      flex: 'none',
-                    }}
-                  >
-                    {entry.label}
-                  </span>
-                  <span style={{ flex: 1, color: 'var(--color-neutral-700)', wordBreak: 'break-word' }}>
-                    {entry.what}
-                  </span>
-                  <span style={{ color: 'var(--color-neutral-600)', flex: 'none' }}>
-                    {entry.who}, {formatStamp(entry.at)}
-                  </span>
-                </div>
-              ))}
-            {snapshot.audit.filter((entry) => entry.sub_module_id === subModule.id).length === 0 ? (
-              <div style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 12, color: 'var(--color-neutral-600)' }}>
-                No changes recorded against this subModule.
-              </div>
-            ) : null}
-          </div>
-
-          <SectionHeading>
-            Last execution ·{' '}
-            {subModule.last_run ? `CHILD_REQ_ID ${subModule.last_run.child_req_id}` : 'no execution recorded'}
-          </SectionHeading>
-          <div className="bordered">
-            {subModule.last_run?.phases.map((phase) => (
-              <div
-                key={phase.name}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 'var(--space-3)',
-                  padding: 'var(--space-2) var(--space-4)',
-                  borderBottom: '1px solid var(--color-divider)',
-                }}
-              >
-                <span
-                  aria-hidden
-                  style={{
-                    width: 7,
-                    height: 7,
-                    flex: 'none',
-                    background: phase.ok ? 'var(--color-accent)' : 'var(--color-neutral-300)',
-                  }}
-                />
-                <span className="mono" style={{ flex: 1, fontSize: 12 }}>
-                  {phase.name}
-                </span>
-                <span style={{ fontSize: 12, color: 'var(--color-neutral-700)' }}>{phase.steps}</span>
-                <span className="tabular" style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>
-                  {phase.duration}
-                </span>
-              </div>
-            ))}
-            {!subModule.last_run ? (
-              <div style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 12, color: 'var(--color-neutral-600)' }}>
-                No run has reported against this subModule.
-              </div>
-            ) : null}
-          </div>
-
-          <SectionHeading>Artifacts</SectionHeading>
-          <div className="bordered">
-            {subModule.last_run?.artifacts.map((artifact) => (
-              <div
-                key={artifact.path}
-                style={{
-                  display: 'flex',
-                  alignItems: 'baseline',
-                  gap: 'var(--space-3)',
-                  padding: 'var(--space-2) var(--space-4)',
-                  borderBottom: '1px solid var(--color-divider)',
-                }}
-              >
-                <span
-                  style={{
-                    fontFamily: 'var(--font-heading)',
-                    fontSize: 12,
-                    letterSpacing: '.1em',
-                    textTransform: 'uppercase',
-                    color: 'var(--color-neutral-600)',
-                    width: 70,
-                    flex: 'none',
-                  }}
-                >
-                  {artifact.kind}
-                </span>
-                <span className="mono" style={{ flex: 1, fontSize: 12, wordBreak: 'break-all' }}>
-                  {artifact.path}
-                </span>
-                <span
-                  className="tabular"
-                  style={{ fontSize: 12, color: 'var(--color-neutral-700)', flex: 'none' }}
-                >
-                  {artifact.size}
-                </span>
-              </div>
-            ))}
-            {!subModule.last_run ? (
-              <div style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 12, color: 'var(--color-neutral-600)' }}>
-                None.
-              </div>
-            ) : null}
-          </div>
         </div>
       </div>
     </div>

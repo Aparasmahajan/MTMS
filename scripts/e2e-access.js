@@ -345,6 +345,8 @@ const memberIn = (s, email) => s.members.find((m) => m.email === email);
   // person holding project.create on ONE project and check both answers at once.
   const adminCookie = cookie;
   const creatorEmail = `sweep.creator.${stamp}@azalio.io`;
+  // Set once the account exists, and read again by the profile section further down.
+  let creatorPassword = '';
 
   // A role carrying project.create. Built by cloning the admin role's grant of it onto a new
   // role, because a seeded Viewer has no reason to carry it.
@@ -380,9 +382,10 @@ const memberIn = (s, email) => s.members.find((m) => m.email === email);
     if (acceptUrl) {
       const token = new URL(acceptUrl).searchParams.get('token');
       cookie = '';
+      creatorPassword = 'creator-password-1';
       const accepted = await raw('/api/v1/auth/accept-invite', 'POST', {
         token,
-        password: 'creator-password-1',
+        password: creatorPassword,
       });
       check('they accept and are signed in', accepted.status === 200, `got ${accepted.status}`);
 
@@ -425,7 +428,7 @@ const memberIn = (s, email) => s.members.find((m) => m.email === email);
       cookie = '';
       await raw('/api/v1/auth/login', 'POST', {
         email: creatorEmail,
-        password: 'creator-password-1',
+        password: creatorPassword,
       });
       const now = await snapshot();
       check(
@@ -463,19 +466,52 @@ const memberIn = (s, email) => s.members.find((m) => m.email === email);
   });
   check('a short new password is refused', tooShort.status === 422, `got ${tooShort.status}`);
 
-  const rotated = `${PASSWORD}-rotated`;
-  await call('change my password', '/api/v1/me/password', 'POST', {
-    current_password: PASSWORD,
-    new_password: rotated,
-  });
-  const reLogin = await raw('/api/v1/auth/login', 'POST', { email: EMAIL, password: rotated });
-  check('the new password signs in', reLogin.status === 200, `got ${reLogin.status}`);
-  await call('change it back', '/api/v1/me/password', 'POST', {
-    current_password: rotated,
-    new_password: PASSWORD,
-  });
-  const backAgain = await raw('/api/v1/auth/login', 'POST', { email: EMAIL, password: PASSWORD });
-  check('and the original works again', backAgain.status === 200, `got ${backAgain.status}`);
+  /*
+    The rotation runs on the throwaway account, NOT on the account this script signed in as.
+
+    It used to change the signed-in admin's password and change it straight back, which has two
+    faults. The small one: it fails against a seeded account whose password is shorter than the
+    ten-character minimum — "tracker" cannot be restored, so the script reported two failures
+    that were really the service enforcing its own rule correctly.
+
+    The large one: a test that rewrites the credentials of whatever account you point it at, and
+    can only put them back if the policy happens to allow it, is a test that locks you out of a
+    real environment the first time something fails between the two calls. The throwaway account
+    created above has a password this script chose, so both directions are always legal and
+    nothing anybody relies on is touched.
+  */
+  if (creatorPassword) {
+    const adminAgain = cookie;
+    cookie = '';
+    const signedIn = await raw('/api/v1/auth/login', 'POST', {
+      email: creatorEmail,
+      password: creatorPassword,
+    });
+    check('the throwaway account signs in', signedIn.status === 200, `got ${signedIn.status}`);
+
+    const rotated = `${creatorPassword}-rotated`;
+    await call('change its password', '/api/v1/me/password', 'POST', {
+      current_password: creatorPassword,
+      new_password: rotated,
+    });
+    const reLogin = await raw('/api/v1/auth/login', 'POST', {
+      email: creatorEmail,
+      password: rotated,
+    });
+    check('the new password signs in', reLogin.status === 200, `got ${reLogin.status}`);
+
+    await call('change it back', '/api/v1/me/password', 'POST', {
+      current_password: rotated,
+      new_password: creatorPassword,
+    });
+    const backAgain = await raw('/api/v1/auth/login', 'POST', {
+      email: creatorEmail,
+      password: creatorPassword,
+    });
+    check('and the original works again', backAgain.status === 200, `got ${backAgain.status}`);
+
+    cookie = adminAgain;
+  }
 
   // --- Forgotten password, from the sign-in screen --------------------------
   //
