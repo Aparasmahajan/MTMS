@@ -83,7 +83,7 @@ public final class StatusVocabulary {
   /** The named subsets the seeded columns draw on. A column may use any subset. */
   public static final Map<String, List<String>> STATUS_SETS = Map.of(
       "create", List.of("notcreated", "created"),
-      "load", List.of("notloaded", "lab", "prod"),
+      "load", List.of("notloaded", "lab", "preprod", "prod"),
       "simple", List.of("notloaded", "loaded"),
       "sign", List.of("pending", "completed"),
       "ritm", List.of("notraised", "raised"));

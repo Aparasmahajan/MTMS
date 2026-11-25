@@ -18,7 +18,7 @@
  * want if the two are ever put behind one origin by a reverse proxy.
  */
 
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:6011';
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'https://mtms.azalio.io';
 
 /**
  * Never relative, even when {@link API_BASE_URL} is.
@@ -31,7 +31,7 @@ export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://loca
  * browser goes through this server, this server goes straight to the API.
  */
 export const SERVER_API_BASE_URL =
-  process.env.API_BASE_URL ?? (API_BASE_URL || 'http://localhost:6011');
+  process.env.API_BASE_URL ?? (API_BASE_URL || 'https://mtms.azalio.io');
 
 /** Joins the base to an API path without producing a double slash. */
 export function apiUrl(path: string, base: string = API_BASE_URL): string {
