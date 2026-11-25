@@ -14,6 +14,13 @@ REM   mvn.cmd spring-boot:run
 REM ---------------------------------------------------------------------------
 setlocal
 
+REM Local-only overrides (DATABASE_URL, DATABASE_USER, ...) live in .env, gitignored,
+REM never in this tracked script. Loaded here so a plain "mvn.cmd spring-boot:run
+REM -Dspring-boot.run.profiles=mysql" picks them up without a separate export step.
+if exist "%~dp0.env" (
+  for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%~dp0.env") do set "%%A=%%B"
+)
+
 if not defined MTMS_JAVA_HOME set "MTMS_JAVA_HOME=%USERPROFILE%\.jdks\ms-21.0.10"
 if not defined MTMS_MAVEN_HOME set "MTMS_MAVEN_HOME=C:\tmp\radius-tools\maven\apache-maven-3.9.9"
 

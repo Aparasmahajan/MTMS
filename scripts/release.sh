@@ -221,7 +221,12 @@ restart() {
 
   say "Starting the web app"
   cd "$web_dir/dist-frontend"
-  PORT="$WEB_PORT" HOSTNAME=0.0.0.0 nohup node server.js > ../web.log 2>&1 &
+  # API_BASE_URL is where SERVER-SIDE rendering calls the API — a different hop from the
+  # browser's, which is proxied and fixed at build time. Unset, it defaults to the public
+  # domain, so every page render would leave the machine and come back through nginx to reach
+  # a service on localhost. Same value as the pm2 path sets; see ecosystem.config.js.
+  API_BASE_URL="http://localhost:$API_PORT" PORT="$WEB_PORT" HOSTNAME=0.0.0.0 \
+    nohup node server.js > ../web.log 2>&1 &
 
   # Flyway runs on the API's first start and the JVM is not quick. Twelve seconds is what this
   # server has needed; the check below is what actually decides.

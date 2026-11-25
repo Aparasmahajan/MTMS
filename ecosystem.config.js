@@ -89,6 +89,25 @@ module.exports = {
         PORT: process.env.MTMS_WEB_PORT || '6010',
         HOSTNAME: '0.0.0.0',      // without this the standalone server binds to localhost only,
                                   // which looks like a firewall problem and is not one
+
+        // Where SERVER-SIDE rendering calls the API, and it is not the same hop as the browser's.
+        //
+        // The browser's requests are relative and this server proxies them (next.config.mjs,
+        // fixed at build time). But every page here is rendered server-side first —
+        // requireSnapshot() reads the session cookie — and that fetch goes out from Node, using
+        // SERVER_API_BASE_URL in lib/client/config.ts.
+        //
+        // That constant now defaults to the PUBLIC domain. Unset, every page render therefore
+        // leaves this machine over HTTPS, crosses nginx, and comes back to a service listening
+        // on localhost — so rendering a page depends on DNS, TLS and the reverse proxy all being
+        // healthy in order to reach something one hop away. It was caught by running the
+        // packaged bundle locally, where it could not sign in at all because the session check
+        // was being sent to production.
+        //
+        // Set here rather than in the frontend's own env file because this is the one place that
+        // already knows both ports, and because a value this easy to omit should not be optional.
+        API_BASE_URL:
+          process.env.API_BASE_URL || 'http://localhost:' + (process.env.MTMS_API_PORT || '6011'),
       },
 
       autorestart: true,
