@@ -313,6 +313,8 @@ export interface NotificationView {
   link: string;
   at: string;
   unread: boolean;
+  /** The project `link` belongs to. Absent for one that belongs to none. */
+  project_id?: string;
 }
 
 export interface OwnerView {
@@ -511,6 +513,14 @@ export interface Snapshot {
      * permission list here would draw a control the service then refuses.
      */
     can_create_projects: boolean;
+    /**
+     * What this person holds across the whole organisation. Organisation-wide actions —
+     * removing or restoring people, org-wide access, editing roles, resetting passwords,
+     * inviting to every project — are checked against this, not `permissions`, for the same
+     * reason as `can_create_projects`: a project administrator holds every key on their own
+     * project. Optional so an older service that does not send it gates rather than crashes.
+     */
+    organisation_permissions?: PermissionKey[];
   };
   org: { id: string; name: string };
   /**

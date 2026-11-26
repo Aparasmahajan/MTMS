@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTracker } from '@/components/TrackerProvider';
 import { send } from '@/lib/client/api';
+import { useDismiss } from '@/lib/client/useDismiss';
 import { formatStamp, type NotificationView, type Snapshot } from '@/lib/shared/views';
 
 /**
@@ -31,11 +32,14 @@ export function InboxMenu() {
   const [open, setOpen] = useState(false);
   /** The `account` row whose link was just copied, or `failed:<id>` when the clipboard refused. */
   const [copied, setCopied] = useState('');
+  const root = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  useDismiss(root, open, close);
 
   const unread = snapshot.unread_notifications;
   const items = snapshot.notifications;
 
-  function openItem(notification: NotificationView) {
+  async function openItem(notification: NotificationView) {
     // Marked read on the way, not on arrival: a notification you clicked is one you have read,
     // and waiting for the destination to render would leave the badge wrong if it fails.
     if (notification.unread) {
@@ -58,23 +62,42 @@ export function InboxMenu() {
     */
     if (notification.kind === 'account') {
       if (notification.link) {
-        void navigator.clipboard
-          ?.writeText(notification.link)
-          .then(() => setCopied(notification.id))
-          // A clipboard write can be refused — an insecure origin, or a browser that wants a
-          // more direct gesture. The link is on screen either way, so say so rather than
-          // failing silently and leaving somebody clicking a button that does nothing.
-          .catch(() => setCopied('failed:' + notification.id));
+        // A clipboard write can be refused — an insecure origin, or a browser that wants a
+        // more direct gesture. The link is on screen either way, so say so rather than
+        // failing silently and leaving somebody clicking a button that does nothing.
+        //
+        // And on plain HTTP there is no clipboard API at all: `navigator.clipboard` is
+        // undefined, and the old `?.writeText(...).then(...)` short-circuited past both
+        // handlers, so nothing at all happened. That counts as a refusal too.
+        if (!navigator.clipboard) {
+          setCopied('failed:' + notification.id);
+        } else {
+          void navigator.clipboard
+            .writeText(notification.link)
+            .then(() => setCopied(notification.id))
+            .catch(() => setCopied('failed:' + notification.id));
+        }
       }
       return;
     }
 
     setOpen(false);
-    if (notification.link) router.push(notification.link);
+    if (!notification.link) return;
+
+    // The inbox spans the organisation and its links are project-relative. Following one from
+    // another project opened this project's page with that id — a 404, or the wrong matrix — so
+    // switch to the project it belongs to first.
+    if (notification.project_id && notification.project_id !== snapshot.project.id) {
+      const switched = await apply(null, () =>
+        send<Snapshot>('/api/v1/projects/select', 'POST', { project_id: notification.project_id }),
+      );
+      if (!switched) return;
+    }
+    router.push(notification.link);
   }
 
   return (
-    <div style={{ position: 'relative' }}>
+    <div ref={root} style={{ position: 'relative' }}>
       <button
         type="button"
         onClick={() => setOpen(!open)}
@@ -180,7 +203,7 @@ export function InboxMenu() {
               key={notification.id}
               type="button"
               className="hoverable"
-              onClick={() => openItem(notification)}
+              onClick={() => void openItem(notification)}
               style={{
                 display: 'flex',
                 gap: 'var(--space-2)',

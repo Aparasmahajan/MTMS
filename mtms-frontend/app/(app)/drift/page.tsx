@@ -228,7 +228,9 @@ export default function DriftPage() {
     );
     if (meta) {
       setNotice(
-        `Promotion recorded for ${meta.columns} deliverables. Nothing on prod has changed yet — it stays unconfirmed until an agent reports those exact hashes back from prod.`,
+        // No count: the service records the promotion and returns no figure, and reading one
+        // that is not sent printed "Promotion recorded for undefined deliverables".
+        'Promotion from preprod to prod recorded. Nothing on prod has changed yet — it stays unconfirmed until an agent reports those exact hashes back from prod.',
       );
     }
   }

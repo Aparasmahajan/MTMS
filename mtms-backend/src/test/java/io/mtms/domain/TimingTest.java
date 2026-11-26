@@ -148,6 +148,57 @@ class TimingTest {
     }
 
     @Test
+    @DisplayName("a step defined after its checklist was made is measured from its own creation")
+    void stepAddedToAnOldList() {
+      io.mtms.domain.model.Steps.Definition lateStep =
+          new io.mtms.domain.model.Steps.Definition(
+              definitionId, PROJECT, "CIQ received", "", Set.of(), null,
+              START.plus(Duration.ofDays(90)));
+
+      List<Timing.StepTiming> timings =
+          Timing.perStep(
+              List.of(lateStep),
+              List.of(list(START)),
+              List.of(entry()),
+              List.of(
+                  event(
+                      io.mtms.domain.model.Steps.State.TODO,
+                      io.mtms.domain.model.Steps.State.DONE,
+                      91)));
+
+      // One day, not ninety-one.
+      assertEquals(1.0, timings.get(0).medianDays());
+    }
+
+    @Test
+    @DisplayName("a module's template list and an archived list are never counted as waiting")
+    void templatesAndArchivedListsAreNotOutstanding() {
+      UUID templateId = UUID.randomUUID();
+      UUID archivedId = UUID.randomUUID();
+      List<Timing.StepTiming> timings =
+          Timing.perStep(
+              List.of(definition()),
+              List.of(
+                  new io.mtms.domain.model.Steps.StepList(
+                      templateId, PROJECT, "Template", io.mtms.domain.model.Scope.MODULE,
+                      UUID.randomUUID(), false, null, START),
+                  new io.mtms.domain.model.Steps.StepList(
+                      archivedId, PROJECT, "Old", io.mtms.domain.model.Scope.SUB_MODULE,
+                      UUID.randomUUID(), false, START, START),
+                  list(START)),
+              List.of(
+                  new io.mtms.domain.model.Steps.Entry(
+                      UUID.randomUUID(), templateId, definitionId, 0),
+                  new io.mtms.domain.model.Steps.Entry(
+                      UUID.randomUUID(), archivedId, definitionId, 0),
+                  entry()),
+              List.of());
+
+      // Only the live sub-module list's entry is waiting.
+      assertEquals(1, timings.get(0).outstanding());
+    }
+
+    @Test
     @DisplayName("ticked, un-ticked and ticked again is two durations, not one long span")
     void reTickIsTwoDurations() {
       // Attached day 0. Ticked day 2. Un-ticked day 20. Ticked again day 23.

@@ -33,6 +33,24 @@ public class AuthController {
   private final AccountUseCases accounts;
   private final boolean secureCookies;
 
+  private static final org.slf4j.Logger log =
+      org.slf4j.LoggerFactory.getLogger(AuthController.class);
+
+  /** One worker, a short bounded queue, overflow discarded. See {@link #forgotPassword}. */
+  private final java.util.concurrent.ExecutorService resetQueue =
+      new java.util.concurrent.ThreadPoolExecutor(
+          1,
+          1,
+          0L,
+          java.util.concurrent.TimeUnit.MILLISECONDS,
+          new java.util.concurrent.ArrayBlockingQueue<>(100),
+          runnable -> {
+            Thread thread = new Thread(runnable, "password-reset");
+            thread.setDaemon(true);
+            return thread;
+          },
+          new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
+
   public AuthController(
       AuthenticationService authentication,
       AccountUseCases accounts,
@@ -113,7 +131,24 @@ public class AuthController {
   public ApiResponse.Success<Map<String, Object>> forgotPassword(
       @Valid @RequestBody ForgotPasswordRequest request) {
 
-    accounts.requestPasswordReset(request.email());
+    // Off the request thread, so the answer takes the same time whether or not an account
+    // exists. Run inline, an unknown address returned after one SELECT and a real one after an
+    // UPDATE and an SMTP round trip of up to tens of seconds: an account-enumeration oracle on
+    // an unauthenticated endpoint, contradicting everything the method promises. The queue is
+    // bounded and drops on overflow, so a flood costs at most a full queue, never a thread each.
+    String email = request.email();
+    try {
+      resetQueue.execute(
+          () -> {
+            try {
+              accounts.requestPasswordReset(email);
+            } catch (RuntimeException failure) {
+              log.warn("Password reset request failed", failure);
+            }
+          });
+    } catch (java.util.concurrent.RejectedExecutionException full) {
+      log.warn("Password reset queue full; request dropped");
+    }
     return ApiResponse.ok(Map.of("sent", true));
   }
 

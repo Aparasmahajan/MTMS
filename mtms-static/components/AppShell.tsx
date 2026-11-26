@@ -18,8 +18,16 @@ import { InboxMenu } from './InboxMenu';
  * session, so its slot here is the signed-in user and a way out.
  */
 
-function tabsFor(snapshot: Snapshot): { label: string; href: string; match: string }[] {
-  const firstSubModule = snapshot.sub_modules[0];
+function tabsFor(
+  snapshot: Snapshot,
+  subModuleHref: (id: string) => string,
+): { label: string; href: string; match: string }[] {
+  // The first sub-module that has a page. In the static build only the seeded ones were
+  // prerendered, so one created during the tour would be a 404 on a static host —
+  // `subModuleHref` sends those to the matrix, and the tab prefers one that has a page.
+  const firstSubModule =
+    snapshot.sub_modules.find((subModule) => subModuleHref(subModule.id) !== '/matrix') ??
+    snapshot.sub_modules[0];
   return [
     { label: 'Dashboard', href: '/', match: '/' },
     { label: 'Defects', href: '/defects', match: '/defects' },
@@ -27,7 +35,7 @@ function tabsFor(snapshot: Snapshot): { label: string; href: string; match: stri
     { label: 'Pipeline', href: '/pipeline', match: '/pipeline' },
     {
       label: 'Sub-module',
-      href: firstSubModule ? `/sub-modules/${firstSubModule.id}` : '/matrix',
+      href: firstSubModule ? subModuleHref(firstSubModule.id) : '/matrix',
       match: '/sub-modules',
     },
     { label: 'Library', href: '/library', match: '/library' },
@@ -38,14 +46,26 @@ function tabsFor(snapshot: Snapshot): { label: string; href: string; match: stri
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { snapshot, pending, error, clearError, notice, setNotice, apply, can, signOut, isDemo, switchRole } =
-    useTracker();
+  const {
+    snapshot,
+    pending,
+    error,
+    clearError,
+    notice,
+    setNotice,
+    apply,
+    can,
+    signOut,
+    isDemo,
+    switchRole,
+    subModuleHref,
+  } = useTracker();
   const pathname = usePathname();
   const router = useRouter();
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [newProjectKey, setNewProjectKey] = useState('');
 
-  const tabs = tabsFor(snapshot);
+  const tabs = tabsFor(snapshot, subModuleHref);
   const isActive = (match: string) =>
     match === '/' ? pathname === '/' : pathname.startsWith(match);
 

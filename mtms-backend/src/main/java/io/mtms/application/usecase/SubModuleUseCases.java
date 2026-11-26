@@ -43,6 +43,22 @@ public class SubModuleUseCases {
 
   @Transactional
   public UUID create(Actor actor, String moduleName, String name, String owner) {
+    return create(actor, moduleName, name, owner, false);
+  }
+
+  /**
+   * Creates a sub-module, and optionally records it in the organisation's library so other
+   * projects can clone it.
+   *
+   * <p>The Library screen has always offered "add to the library" beside the create form, and
+   * the request carried it, but nothing read it: the box was ticked, the answer was 200, and the
+   * library never grew. An entry already in the library under the same module and name is
+   * linked rather than duplicated — the table refuses a second one, and the existing entry is
+   * the one people mean.
+   */
+  @Transactional
+  public UUID create(
+      Actor actor, String moduleName, String name, String owner, boolean addToLibrary) {
     actor.require(PermissionKey.MODULE_CREATE);
     UUID projectId = actor.projectId();
 
@@ -51,9 +67,28 @@ public class SubModuleUseCases {
           "This project already tracks " + moduleName + " · " + name + ".");
     }
 
+    UUID libraryEntryId = null;
+    if (addToLibrary) {
+      Modules.LibraryEntry existing =
+          modules.library(actor.tenantId()).stream()
+              .filter(entry -> entry.moduleName().equals(moduleName) && entry.name().equals(name))
+              .findFirst()
+              .orElse(null);
+      if (existing != null) {
+        libraryEntryId = existing.id();
+        modules.adjustLibraryUsage(existing.id(), 1);
+      } else {
+        Modules.LibraryEntry entry =
+            new Modules.LibraryEntry(
+                UUID.randomUUID(), actor.tenantId(), moduleName, name, "v1", List.of(), 1);
+        modules.insertLibraryEntry(entry);
+        libraryEntryId = entry.id();
+      }
+    }
+
     Modules.SubModule module =
         new Modules.SubModule(
-            UUID.randomUUID(), projectId, moduleName, name, null,
+            UUID.randomUUID(), projectId, moduleName, name, libraryEntryId,
             owner == null || owner.isBlank() ? null : owner,
             null, null, null, Instant.now());
 
@@ -303,7 +338,7 @@ public class SubModuleUseCases {
    * than no library at all.
    */
   @Transactional
-  public UUID cloneFromLibrary(Actor actor, UUID entryId) {
+  public Modules.SubModule cloneFromLibrary(Actor actor, UUID entryId) {
     actor.require(PermissionKey.MODULE_CLONE);
     UUID projectId = actor.projectId();
 
@@ -335,7 +370,7 @@ public class SubModuleUseCases {
         actor, projectId, Audit.Scope.MODULE, "MODULE",
         "cloned from library — " + entry.name() + " " + entry.version(), module.id(), null);
     support.bump(projectId);
-    return module.id();
+    return module;
   }
 
   // ---------------------------------------------------------------------------

@@ -17,11 +17,13 @@ function AcceptCard() {
 
   async function submit() {
     if (!token) {
-      setError('That invitation link is missing its token.');
+      setError('That link is missing its token. Ask for a new one.');
       return;
     }
-    if (password.length < 8) {
-      setError('Use at least 8 characters.');
+    // The service's rule — AuthenticationService.acceptInvitation. This said 8, so a nine-character
+    // password passed here and was then refused with a different number.
+    if (password.length < 10) {
+      setError('Use at least 10 characters.');
       return;
     }
     if (password !== confirm) {
@@ -55,8 +57,9 @@ function AcceptCard() {
         <div className="kicker">Flow One</div>
         <h2 style={{ margin: '0 0 var(--space-2)' }}>Set your password</h2>
         <div className="lede" style={{ marginBottom: 'var(--space-6)' }}>
-          Your invitation is single-use and expires. Choose a password to finish setting up the
-          account.
+          This link works once and expires after seven days. Choose a password — at least 10
+          characters — to finish setting up your account, or to replace a password you have
+          forgotten.
         </div>
 
         <form

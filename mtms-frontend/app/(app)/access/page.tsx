@@ -5,6 +5,7 @@ import { useTracker } from '@/components/TrackerProvider';
 import { Blueprint, PageTitle, SectionHeading } from '@/components/primitives';
 import { RolesPanel } from '@/components/access/RolesPanel';
 import { send } from '@/lib/client/api';
+import { useBusy } from '@/lib/client/useBusy';
 import { PERMISSION_GROUPS, PERMISSION_LABELS, type PermissionKey } from '@/lib/shared/permissions';
 import type { Snapshot } from '@/lib/shared/views';
 
@@ -45,11 +46,12 @@ export default function AccessPage() {
 
   const [email, setEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
-  const [roleId, setRoleId] = useState(roles[0]?.id ?? '');
-  const [scope, setScope] = useState('org');
+  const [chosenRoleId, setRoleId] = useState('');
   const [memberUserId, setMemberUserId] = useState('');
-  const [memberRoleId, setMemberRoleId] = useState(roles[0]?.id ?? '');
-  const [orgGrantRoleId, setOrgGrantRoleId] = useState(roles[0]?.id ?? '');
+  const [chosenMemberRoleId, setMemberRoleId] = useState('');
+  const [chosenOrgGrantRoleId, setOrgGrantRoleId] = useState('');
+  const [inviting, runInvite] = useBusy();
+  const [adding, runAdd] = useBusy();
 
   /**
    * A super admin can always edit roles, even holding no permission at all.
@@ -59,8 +61,15 @@ export default function AccessPage() {
    * grid would sit disabled for the one account able to put it back — a server that allows the
    * call and a screen that will not make it is the same as no fix.
    */
-  const canManageRoles = can('admin.roles.manage') || snapshot.me.is_super_admin;
-  const canManageUsers = can('admin.users.manage');
+  //
+  // Roles are organisation-wide objects, so editing one needs the grant held organisation-wide —
+  // `organisation_permissions`, not `permissions`, which also counts the open project's role.
+  // A project administrator holds every key on their own project; reading `permissions` drew a
+  // grid the service then refused.
+  const orgPermissions = new Set(snapshot.me.organisation_permissions ?? []);
+  const canManageRoles = orgPermissions.has('admin.roles.manage') || snapshot.me.is_super_admin;
+  /** Inviting to the project that is open — a project administrator's ordinary job. */
+  const canManageUsers = can('admin.users.manage') || snapshot.me.is_super_admin;
   const canManageMembers = can('project.members.manage');
 
   /**
@@ -72,15 +81,32 @@ export default function AccessPage() {
    * `AccessUseCases.removeFromOrganisation`. The super admin is folded in because the flag is
    * set outside the application and grants no permission key on its own.
    */
-  const canManageOrg = canManageUsers || snapshot.me.is_super_admin;
+  const canManageOrg = orgPermissions.has('admin.users.manage') || snapshot.me.is_super_admin;
 
-  // Only people who cannot already reach the project — an org-wide membership covers it.
+  // Inviting to every project is organisation-wide; to one project it is not. Defaulting to
+  // "all projects" for somebody who cannot do that would offer a choice the service refuses.
+  const [chosenScope, setScope] = useState<string | null>(null);
+  const scope = chosenScope ?? (canManageOrg ? 'org' : snapshot.project.id);
+  const inviteNeedsOrg = scope === 'org' || scope !== snapshot.project.id;
+  const canInvite = inviteNeedsOrg ? canManageOrg : canManageUsers;
+
+  // Only people who cannot already reach the project — an org-wide membership covers it — and
+  // never a removed account: that comes back through Restore, with nothing, first.
   const alreadyHere = new Set(members.map((member) => member.user_id));
-  const addable = users.filter((user) => !alreadyHere.has(user.id));
+  const addable = users.filter((user) => !alreadyHere.has(user.id) && user.status !== 'removed');
 
   // Hidden roles are not offered anywhere. They are still in `roles` because rows already
   // pointing at one have to render with a name rather than an id.
   const liveRoles = roles.filter((role) => !role.hidden);
+
+  // Each select shows a live role, and sends the one it shows. These used to be fixed once to
+  // `roles[0]`: if that role was hidden — or got hidden in the grid on this same page — the
+  // select displayed one role and submitted another.
+  const liveRole = (chosen: string) =>
+    liveRoles.some((role) => role.id === chosen) ? chosen : liveRoles[0]?.id ?? '';
+  const roleId = liveRole(chosenRoleId);
+  const memberRoleId = liveRole(chosenMemberRoleId);
+  const orgGrantRoleId = liveRole(chosenOrgGrantRoleId);
   const selectedRole = roles.find((role) => role.id === roleId);
   const previewLabels = selectedRole
     ? selectedRole.permissions.map((key) => PERMISSION_LABELS[key])
@@ -215,13 +241,19 @@ export default function AccessPage() {
 
   async function sendInvitation() {
     if (!email.trim() || !roleId) return;
-    const meta = await apply(null, () =>
-      send<Snapshot>('/api/v1/invitations', 'POST', {
-        email,
-        display_name: displayName,
-        role_id: roleId,
-        scope_project_id: scope === 'org' ? null : scope,
-      }),
+    // The service reads `org_wide` and `project_id`. This used to send `scope_project_id`, which
+    // it has no field for — dropped without an error, so every invitation, "all projects"
+    // included, landed on whichever project happened to be open.
+    const meta = await runInvite(() =>
+      apply(null, () =>
+        send<Snapshot>('/api/v1/invitations', 'POST', {
+          email: email.trim(),
+          display_name: displayName.trim(),
+          role_id: roleId,
+          org_wide: scope === 'org',
+          project_id: scope === 'org' ? undefined : scope,
+        }),
+      ),
     );
     if (meta?.accept_url) {
       setEmail('');
@@ -384,10 +416,16 @@ export default function AccessPage() {
           <button
             type="submit"
             className="btn btn-primary"
-            disabled={!canManageUsers}
-            title={canManageUsers ? undefined : reasonFor('admin.users.manage')}
+            disabled={!canInvite || inviting}
+            title={
+              canInvite
+                ? undefined
+                : inviteNeedsOrg && canManageUsers
+                  ? 'Inviting to every project, or to a project other than this one, needs admin.users.manage across the whole organisation. You can invite to this project.'
+                  : reasonFor('admin.users.manage')
+            }
           >
-            Send invitation
+            {inviting ? 'Sending…' : 'Send invitation'}
           </button>
         </form>
 
@@ -672,12 +710,17 @@ export default function AccessPage() {
         onSubmit={(event) => {
           event.preventDefault();
           if (!memberUserId) return;
-          void apply(null, () =>
-            send<Snapshot>('/api/v1/projects/members', 'POST', {
-              user_id: memberUserId,
-              role_id: memberRoleId,
-            }),
-          );
+          void runAdd(async () => {
+            const meta = await apply(null, () =>
+              send<Snapshot>('/api/v1/projects/members', 'POST', {
+                user_id: memberUserId,
+                role_id: memberRoleId,
+              }),
+            );
+            // Cleared on success: they are no longer in the list, and a select left holding
+            // their id showed blank while a second submit re-added the same person.
+            if (meta) setMemberUserId('');
+          });
         }}
         style={{
           display: 'flex',
@@ -717,7 +760,7 @@ export default function AccessPage() {
         <button
           type="submit"
           className="btn btn-secondary"
-          disabled={!canManageMembers || addable.length === 0}
+          disabled={!canManageMembers || addable.length === 0 || adding}
           title={
             canManageMembers
               ? addable.length === 0
@@ -821,7 +864,7 @@ export default function AccessPage() {
                       address as their name because the console did not ask for one until 18 Sept,
                       and nothing could change it until this existed.
                     */}
-                    {canManageUsers && !removed ? (
+                    {canManageOrg && !removed && (!user.super_admin || snapshot.me.is_super_admin) ? (
                       <button
                         type="button"
                         title={`Rename ${user.email}`}
@@ -903,8 +946,17 @@ export default function AccessPage() {
                       <button
                         type="button"
                         className="btn btn-secondary"
-                        style={{ fontSize: 12, padding: '2px 10px' }}
-                        title={`Give ${user.display_name} one role on every project, including projects created later`}
+                        style={{
+                          fontSize: 12,
+                          padding: '2px 10px',
+                          opacity: user.id === snapshot.me.user_id ? 0.5 : 1,
+                        }}
+                        disabled={user.id === snapshot.me.user_id}
+                        title={
+                          user.id === snapshot.me.user_id
+                            ? 'You cannot change your own access'
+                            : `Give ${user.display_name} one role on every project, including projects created later`
+                        }
                         onClick={() => void grantOrgWide(user.id, user.display_name)}
                       >
                         Grant org-wide

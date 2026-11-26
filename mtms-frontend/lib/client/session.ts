@@ -1,4 +1,4 @@
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { SERVER_API_BASE_URL, apiUrl } from './config';
 import type { Snapshot } from '../shared/views';
@@ -32,9 +32,14 @@ function sessionCookieHeader(): string {
     .join('; ');
 }
 
-export async function fetchFromApi<T>(path: string): Promise<T | null> {
+/** What a server-side read came back with: the data, or why there is none. */
+type ApiRead<T> =
+  | { ok: true; data: T }
+  | { ok: false; status: number; message: string | null };
+
+export async function readFromApi<T>(path: string): Promise<ApiRead<T>> {
   const cookieHeader = sessionCookieHeader();
-  if (!cookieHeader) return null;
+  if (!cookieHeader) return { ok: false, status: 401, message: null };
 
   let response: Response;
   try {
@@ -43,13 +48,31 @@ export async function fetchFromApi<T>(path: string): Promise<T | null> {
       cache: 'no-store',
     });
   } catch {
-    return null;
+    return { ok: false, status: 0, message: 'Could not reach the service. Try again in a moment.' };
   }
 
-  if (!response.ok) return null;
+  let body: { data?: T; error?: { message?: string } } = {};
+  try {
+    body = await response.json();
+  } catch {
+    // An unreadable body is handled by the status below.
+  }
 
-  const body = (await response.json()) as { data?: T };
-  return body.data ?? null;
+  if (!response.ok || body.data == null) {
+    return { ok: false, status: response.status, message: body.error?.message ?? null };
+  }
+  return { ok: true, data: body.data };
+}
+
+export async function fetchFromApi<T>(path: string): Promise<T | null> {
+  const read = await readFromApi<T>(path);
+  return read.ok ? read.data : null;
+}
+
+/** The page being rendered, as the middleware recorded it — only ever a same-site path. */
+function currentPath(): string | null {
+  const path = headers().get('x-mtms-path');
+  return path && path.startsWith('/') && !path.startsWith('//') ? path : null;
 }
 
 /**
@@ -57,13 +80,30 @@ export async function fetchFromApi<T>(path: string): Promise<T | null> {
  *
  * Reading a cookie already marks these pages dynamic, which is correct: a snapshot is
  * per-user and per-project and must never be cached at the edge.
+ *
+ * **A 401 here is usually not the end of a session.** The access cookie lives fifteen minutes;
+ * the refresh cookie lives thirty days but is scoped to `/api/v1/auth`, so the browser never
+ * sends it with a page request and this render cannot rotate it. Redirecting to a bare sign-in
+ * screen logged everybody out a quarter of an hour after their last click. Instead the sign-in
+ * page is told where they were going, tries a silent refresh first — from the browser, where
+ * the refresh cookie *is* sent — and only asks for a password if that fails.
+ *
+ * Anything else — no project to open, a removed account — is a real state with a sentence
+ * the service already wrote, and it is shown rather than thrown away.
  */
 export async function requireSnapshot(): Promise<Snapshot> {
-  const snapshot = await fetchFromApi<Snapshot>('/api/v1/snapshot');
+  const read = await readFromApi<Snapshot>('/api/v1/snapshot');
+  if (read.ok) return read.data;
 
-  // A signed-in user with no readable project is a real state — a viewer removed from every
-  // project — not a crash. Send them back to sign in rather than to a stack trace.
-  if (!snapshot) redirect('/login');
+  const next = currentPath();
+  if (read.status === 401) {
+    redirect(next ? `/login?next=${encodeURIComponent(next)}` : '/login');
+  }
 
-  return snapshot;
+  const reason =
+    read.message ??
+    (read.status === 0
+      ? 'Could not reach the service. Try again in a moment.'
+      : 'That account cannot open any project in this organisation.');
+  redirect(`/login?denied=1&reason=${encodeURIComponent(reason)}`);
 }

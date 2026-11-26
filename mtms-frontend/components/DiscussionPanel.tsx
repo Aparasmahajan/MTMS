@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useTracker } from '@/components/TrackerProvider';
 import { Blueprint, EmptyRow, SectionHeading } from '@/components/primitives';
 import { send } from '@/lib/client/api';
+import { useBusy } from '@/lib/client/useBusy';
 import { formatStamp, type Snapshot, type ThreadView } from '@/lib/shared/views';
 
 /**
@@ -44,6 +45,7 @@ export function DiscussionPanel({
 }) {
   const { apply, can } = useTracker();
   const [topic, setTopic] = useState('');
+  const [raising, runRaise] = useBusy();
   const [opening, setOpening] = useState('');
   const [open, setOpen] = useState<string | null>(threads[0]?.id ?? null);
 
@@ -182,14 +184,16 @@ export function DiscussionPanel({
           onSubmit={(event) => {
             event.preventDefault();
             if (!topic.trim()) return;
-            void apply(null, () =>
-              // snake_case — see OwnersPanel. A camelCase key does not bind and arrives null.
-              send<Snapshot>('/api/v1/discussions/threads', 'POST', {
-                scope_type: scopeType,
-                scope_id: scopeId,
-                topic: topic.trim(),
-                body: opening.trim(),
-              }),
+            void runRaise(() =>
+              apply(null, () =>
+                // snake_case — see OwnersPanel. A camelCase key does not bind and arrives null.
+                send<Snapshot>('/api/v1/discussions/threads', 'POST', {
+                  scope_type: scopeType,
+                  scope_id: scopeId,
+                  topic: topic.trim(),
+                  body: opening.trim(),
+                }),
+              ),
             ).then((result) => {
               if (result) {
                 setTopic('');
@@ -217,8 +221,8 @@ export function DiscussionPanel({
                 aria-label="Opening comment"
               />
               <div>
-                <button type="submit" className="btn btn-primary">
-                  Raise it
+                <button type="submit" className="btn btn-primary" disabled={raising}>
+                  {raising ? 'Raising…' : 'Raise it'}
                 </button>
               </div>
             </>

@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ApiError, send } from '@/lib/client/api';
 import { Blueprint } from '@/components/primitives';
@@ -9,21 +9,64 @@ import { Blueprint } from '@/components/primitives';
  * Sign in — email and password only. No SSO in this release and no self sign-up:
  * accounts are created by invitation and the invited user sets their own password.
  */
+/** Where to go after signing in: only ever a path on this site, never another origin. */
+function safeNext(raw: string | null): string {
+  return raw && raw.startsWith('/') && !raw.startsWith('//') && !raw.startsWith('/login')
+    ? raw
+    : '/';
+}
+
 function SignInCard() {
   const router = useRouter();
-  const denied = useSearchParams().get('denied') === '1';
+  const params = useSearchParams();
+  const denied = params.get('denied') === '1';
+  const next = safeNext(params.get('next'));
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(
-    denied ? 'That account cannot open any project in this organisation.' : '',
+    denied
+      ? params.get('reason') ?? 'That account cannot open any project in this organisation.'
+      : '',
   );
   const [busy, setBusy] = useState(false);
+  // True while a silent refresh is being tried; the form is not shown until it has failed.
+  const [restoring, setRestoring] = useState(!denied);
 
   // The forgotten-password panel, opened in place rather than on its own route: it needs the
   // address that is already typed into the field above, and a second page would ask for it again.
   const [forgot, setForgot] = useState(false);
-  const [forgotSent, setForgotSent] = useState(false);
+  const [forgotSent, setForgotSent] = useState<string | null>(null);
+  const [sendingReset, setSendingReset] = useState(false);
+
+  /**
+   * Arriving here usually means the fifteen-minute access cookie ran out during a page load, not
+   * that the session is over. The refresh cookie is scoped to /api/v1/auth, so only a request
+   * from here can rotate it. Try that first, and go back where they were if it works.
+   *
+   * Not after a denial: the session is fine there, and refreshing would send them straight back
+   * to the page that refused them, in a loop.
+   */
+  useEffect(() => {
+    if (denied) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        await send('/api/v1/auth/refresh', 'POST');
+        if (!cancelled) {
+          router.replace(next);
+          router.refresh();
+        }
+      } catch {
+        if (!cancelled) setRestoring(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Once, on arrival.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /**
    * Asks for a reset link.
@@ -43,7 +86,7 @@ function SignInCard() {
       return;
     }
 
-    setBusy(true);
+    setSendingReset(true);
     setError('');
     try {
       await send('/api/v1/auth/forgot-password', 'POST', { email: trimmed });
@@ -51,8 +94,9 @@ function SignInCard() {
       // Deliberately ignored. A failure here is either the address being rejected as malformed
       // or the service being unreachable, and distinguishing them on screen is the leak.
     }
-    setForgotSent(true);
-    setBusy(false);
+    // Frozen at the moment of sending, so the confirmation does not change as the field is edited.
+    setForgotSent(trimmed);
+    setSendingReset(false);
   }
 
   async function submit() {
@@ -72,7 +116,7 @@ function SignInCard() {
     setError('');
     try {
       await send('/api/v1/auth/login', 'POST', { email: trimmed, password });
-      router.push('/');
+      router.push(next);
       router.refresh();
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : 'Could not reach the server.');
@@ -96,6 +140,13 @@ function SignInCard() {
         <div className="lede" style={{ marginBottom: 'var(--space-6)' }}>
           Organization Management System
         </div>
+
+        {restoring ? (
+          <div role="status" style={{ fontSize: 13, color: 'var(--color-neutral-700)' }}>
+            Restoring your session…
+          </div>
+        ) : (
+        <>
 
         <form
           onSubmit={(event) => {
@@ -177,11 +228,32 @@ function SignInCard() {
               style={{ color: 'var(--color-neutral-700)', textWrap: 'pretty' }}
               role="status"
             >
-              If <span className="mono">{email.trim()}</span> has an account, a reset link is on
+              If <span className="mono">{forgotSent}</span> has an account, a reset link is on
               its way. It works once and expires in seven days.
               <div style={{ marginTop: 'var(--space-2)', color: 'var(--color-neutral-600)' }}>
                 Nothing arrives if the address was mistyped, and this message looks the same
                 either way — check it, and ask an administrator if you are stuck.
+              </div>
+              <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-2)' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ fontSize: 12 }}
+                  onClick={() => setForgotSent(null)}
+                >
+                  Use a different address
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ fontSize: 12 }}
+                  onClick={() => {
+                    setForgot(false);
+                    setForgotSent(null);
+                  }}
+                >
+                  Close
+                </button>
               </div>
             </div>
           ) : (
@@ -192,10 +264,10 @@ function SignInCard() {
                   type="button"
                   className="btn btn-secondary"
                   style={{ fontSize: 12 }}
-                  disabled={busy}
+                  disabled={sendingReset}
                   onClick={() => void requestReset()}
                 >
-                  {busy ? 'Sending…' : 'Send a reset link'}
+                  {sendingReset ? 'Sending…' : 'Send a reset link'}
                 </button>
                 <button
                   type="button"
@@ -223,6 +295,8 @@ function SignInCard() {
           Email and password only — no SSO in this release. Accounts are created by invitation from a
           project admin; there is no self sign-up.
         </div>
+        </>
+        )}
       </Blueprint>
     </div>
   );

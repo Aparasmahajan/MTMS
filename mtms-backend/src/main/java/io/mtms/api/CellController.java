@@ -43,10 +43,10 @@ public class CellController {
     cells.advance(
         actor,
         new CellUseCases.AdvanceCommand(
-            UUID.fromString(request.subModuleId()),
+            RequestIds.uuid(request.subModuleId(), "sub_module_id"),
             request.subActivityId() == null || request.subActivityId().isBlank()
                 ? null
-                : UUID.fromString(request.subActivityId()),
+                : RequestIds.uuid(request.subActivityId(), "sub_activity_id"),
             request.columnKey(),
             request.status()));
 

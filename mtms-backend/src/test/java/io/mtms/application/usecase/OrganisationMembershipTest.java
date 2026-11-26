@@ -57,6 +57,7 @@ class OrganisationMembershipTest {
   private UUID adminRoleId;
   private UUID viewerRoleId;
   private UUID adminUserId;
+  private UUID projectAdminUserId;
 
   @BeforeEach
   void setUp() {
@@ -104,6 +105,26 @@ class OrganisationMembershipTest {
     adminRoleId = role("admin", "Admin");
     viewerRoleId = role("viewer", "Viewer");
     adminUserId = user("Anand", false);
+    // Backed by a real organisation-wide membership. Organisation-wide actions now read what is
+    // held across the organisation from the memberships, not from the Actor's per-project union,
+    // so an Actor whose permissions nothing in the repository grants would be refused.
+    grantOrgWide(
+        adminUserId,
+        PermissionKey.PROJECT_VIEW,
+        PermissionKey.PROJECT_MEMBERS_MANAGE,
+        PermissionKey.ADMIN_USERS_MANAGE);
+    // A different person: holds nothing organisation-wide.
+    projectAdminUserId = user("Priya", false);
+  }
+
+  /** Gives somebody a fresh role holding exactly {@code keys}, across the organisation. */
+  private void grantOrgWide(UUID userId, PermissionKey... keys) {
+    UUID role = UUID.randomUUID();
+    access.insertRole(
+        new Tenancy.Role(
+            role, TENANT, "r-" + role, "Role " + role, "", "", false, Set.of(keys)));
+    access.insertMembership(
+        new Tenancy.Membership(UUID.randomUUID(), TENANT, userId, null, role, Instant.now()));
   }
 
   private UUID role(String key, String name) {
@@ -159,10 +180,10 @@ class OrganisationMembershipTest {
   /** A project administrator: may manage this project's members and nothing wider. */
   private Actor projectAdmin() {
     return new Actor(
-        adminUserId,
+        projectAdminUserId,
         TENANT,
-        "Anand",
-        "anand@azalio.io",
+        "Priya",
+        "priya@azalio.io",
         false,
         projectId,
         Set.of(PermissionKey.PROJECT_VIEW, PermissionKey.PROJECT_MEMBERS_MANAGE),
@@ -488,9 +509,11 @@ class OrganisationMembershipTest {
     @Test
     @DisplayName("an organisation admin still cannot grant beyond themselves")
     void escalationStillRefused() {
+      UUID limitedUser = user("Limited", false);
+      grantOrgWide(limitedUser, PermissionKey.ADMIN_ROLES_MANAGE);
       Actor limited =
           new Actor(
-              adminUserId,
+              limitedUser,
               TENANT,
               "Anand",
               "anand@azalio.io",
@@ -525,9 +548,19 @@ class OrganisationMembershipTest {
                   PermissionKey.DEFECT_ASSIGN,
                   PermissionKey.DEFECT_TRANSITION)));
 
+      UUID rolesAdminUser = user("RolesAdmin", false);
+      grantOrgWide(
+          rolesAdminUser,
+          PermissionKey.ADMIN_ROLES_MANAGE,
+          PermissionKey.ADMIN_AUDIT_VIEW,
+          PermissionKey.PROJECT_VIEW,
+          PermissionKey.MODULE_EDIT,
+          PermissionKey.DEFECT_CREATE,
+          PermissionKey.DEFECT_ASSIGN,
+          PermissionKey.DEFECT_TRANSITION);
       Actor rolesAdmin =
           new Actor(
-              adminUserId,
+              rolesAdminUser,
               TENANT,
               "Anand",
               "anand@azalio.io",
@@ -546,6 +579,148 @@ class OrganisationMembershipTest {
       useCases.setRolePermission(rolesAdmin, id, "admin.audit.view", true);
 
       assertEquals(6, access.role(TENANT, id).orElseThrow().permissions().size());
+    }
+  }
+
+  /**
+   * The escalation the review found: a project administrator holds the seeded admin role on
+   * their project, which carries every key, so the per-project union says they hold
+   * admin.users.manage. Every one of these used to succeed.
+   */
+  @Nested
+  @DisplayName("a project administrator holding every key on their project")
+  class ProjectScopedEscalation {
+
+    private UUID projectAdminUser;
+    private Actor fullProjectAdmin;
+
+    @BeforeEach
+    void projectAdminWithEverything() {
+      projectAdminUser = user("Rahul", false);
+      UUID everything = UUID.randomUUID();
+      access.insertRole(
+          new Tenancy.Role(
+              everything, TENANT, "all", "All", "", "", false,
+              java.util.EnumSet.allOf(PermissionKey.class)));
+      access.insertMembership(
+          new Tenancy.Membership(
+              UUID.randomUUID(), TENANT, projectAdminUser, projectId, everything, Instant.now()));
+      fullProjectAdmin =
+          new Actor(
+              projectAdminUser, TENANT, "Rahul", "rahul@azalio.io", false, projectId,
+              java.util.EnumSet.allOf(PermissionKey.class), Set.of());
+    }
+
+    @Test
+    @DisplayName("cannot make themselves organisation-wide admin")
+    void cannotGrantThemselvesOrgWide() {
+      assertThrows(
+          ServiceException.class,
+          () -> useCases.grantOrganisationWide(fullProjectAdmin, projectAdminUser, adminRoleId));
+      assertFalse(
+          access.memberships(TENANT).stream()
+              .anyMatch(m -> m.userId().equals(projectAdminUser) && m.projectId() == null));
+    }
+
+    @Test
+    @DisplayName("cannot remove somebody from the organisation")
+    void cannotRemoveFromOrganisation() {
+      UUID manu = user("Manu", false);
+      assertThrows(
+          ServiceException.class, () -> useCases.removeFromOrganisation(fullProjectAdmin, manu));
+    }
+
+    @Test
+    @DisplayName("cannot reset anybody's password")
+    void cannotResetPasswords() {
+      assertThrows(
+          ServiceException.class, () -> useCases.resetPassword(fullProjectAdmin, adminUserId));
+    }
+
+    @Test
+    @DisplayName("cannot rewrite a role every project uses")
+    void cannotEditRoles() {
+      assertThrows(
+          ServiceException.class,
+          () -> useCases.setRolePermission(fullProjectAdmin, viewerRoleId, "fni.signoff", true));
+    }
+
+    @Test
+    @DisplayName("cannot invite to every project, or to a project other than their own")
+    void cannotInviteBeyondTheirProject() {
+      assertThrows(
+          ServiceException.class,
+          () -> useCases.invite(fullProjectAdmin, "a@azalio.io", "A", viewerRoleId, true));
+      assertThrows(
+          ServiceException.class,
+          () ->
+              useCases.invite(
+                  fullProjectAdmin, "b@azalio.io", "B", viewerRoleId, false, otherProjectId));
+    }
+
+    @Test
+    @DisplayName("may still invite to the project they administer")
+    void mayInviteToTheirOwnProject() {
+      useCases.invite(fullProjectAdmin, "c@azalio.io", "C", viewerRoleId, false);
+      assertTrue(
+          access.memberships(TENANT).stream()
+              .anyMatch(
+                  m ->
+                      projectId.equals(m.projectId())
+                          && access.findUser(TENANT, m.userId())
+                              .map(u -> u.email().equals("c@azalio.io"))
+                              .orElse(false)));
+    }
+  }
+
+  @Nested
+  @DisplayName("password resets and removed accounts")
+  class ResetsAndRemoval {
+
+    @Test
+    @DisplayName("an organisation admin cannot reset a super admin's password")
+    void notASuperAdmin() {
+      UUID platform = user("Paras", true);
+      assertThrows(ServiceException.class, () -> useCases.resetPassword(admin(), platform));
+    }
+
+    @Test
+    @DisplayName("nor the password of somebody holding more than they do")
+    void notSomebodyMorePrivileged() {
+      UUID boss = user("Boss", false);
+      grantOrgWide(boss, PermissionKey.ADMIN_USERS_MANAGE, PermissionKey.ADMIN_ROLES_MANAGE);
+      assertThrows(ServiceException.class, () -> useCases.resetPassword(admin(), boss));
+    }
+
+    @Test
+    @DisplayName("but may reset somebody holding less")
+    void mayResetSomebodyJunior() {
+      UUID junior = user("Junior", false);
+      membership(junior, projectId);
+      assertNotNull(useCases.resetPassword(admin(), junior).resetUrl());
+    }
+
+    @Test
+    @DisplayName("an invited account that is removed loses its outstanding link")
+    void removalKillsTheInvitationLink() {
+      AccessUseCases.Invited invited =
+          useCases.invite(admin(), "late@azalio.io", "Late", viewerRoleId, false);
+      String token = invited.acceptUrl().substring(invited.acceptUrl().indexOf("token=") + 6);
+      UUID late = access.findByEmail("late@azalio.io").get(0).user().id();
+
+      useCases.removeFromOrganisation(admin(), late);
+
+      assertTrue(
+          access.findByInviteTokenHash(new ScryptPasswordHasher().sha256(token)).isEmpty(),
+          "a removed account's invitation link must not still work");
+    }
+
+    @Test
+    @DisplayName("a removed account cannot be added back to a project without being restored")
+    void addMemberRefusesARemovedAccount() {
+      UUID manu = user("Manu", false);
+      useCases.removeFromOrganisation(admin(), manu);
+      assertThrows(ServiceException.class, () -> useCases.addMember(admin(), manu, viewerRoleId));
     }
   }
 }

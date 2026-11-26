@@ -504,7 +504,11 @@ function Checklists() {
  *     get the button.
  */
 function ChecklistEditor({ list, moduleName }: { list: StepListView; moduleName: string | null }) {
-  const { snapshot, apply, setNotice } = useTracker();
+  const { snapshot, apply, setNotice, can, reasonFor } = useTracker();
+  // Gate, don't hide. Every control here changes project configuration; for somebody without
+  // project.config they used to render live and answer a click with a server error.
+  const canConfig = can('project.config');
+  const denied = canConfig ? undefined : reasonFor('project.config');
   const [adding, setAdding] = useState('');
 
   const available = snapshot.step_library.filter(
@@ -541,6 +545,8 @@ function ChecklistEditor({ list, moduleName }: { list: StepListView; moduleName:
           <input
             type="checkbox"
             checked={list.enforce_order}
+            disabled={!canConfig}
+            title={denied}
             onChange={(event) =>
               void apply(null, () =>
                 send<Snapshot>(`/api/v1/steps/lists/${list.id}`, 'PATCH', {
@@ -560,7 +566,11 @@ function ChecklistEditor({ list, moduleName }: { list: StepListView; moduleName:
         {moduleName ? (
           <button
             type="button"
-            title={`Copy this checklist onto every other ${moduleName} sub-module that does not already have one by this name`}
+            disabled={!canConfig}
+            title={
+              denied ??
+              `Copy this checklist onto every other ${moduleName} sub-module that does not already have one by this name`
+            }
             onClick={async () => {
               if (
                 !window.confirm(
@@ -583,13 +593,15 @@ function ChecklistEditor({ list, moduleName }: { list: StepListView; moduleName:
                 );
               }
             }}
-            style={quietAction(true)}
+            style={quietAction(canConfig)}
           >
             apply to all
           </button>
         ) : null}
         <button
           type="button"
+          disabled={!canConfig}
+          title={denied}
           onClick={() => {
             if (
               !window.confirm(
@@ -601,7 +613,7 @@ function ChecklistEditor({ list, moduleName }: { list: StepListView; moduleName:
             }
             void apply(null, () => send<Snapshot>(`/api/v1/steps/lists/${list.id}`, 'DELETE'));
           }}
-          style={quietAction(true)}
+          style={quietAction(canConfig)}
         >
           remove
         </button>
@@ -628,14 +640,23 @@ function ChecklistEditor({ list, moduleName }: { list: StepListView; moduleName:
             {entry.allowed_roles.join(' or ') || 'needs a role'}
           </span>
           <div style={{ display: 'flex', gap: 'var(--space-2)', flex: 'none' }}>
-            <button type="button" onClick={() => move(index, -1)} style={quietAction(index > 0)} disabled={index === 0}>
+            <button
+              type="button"
+              onClick={() => move(index, -1)}
+              style={quietAction(canConfig && index > 0)}
+              disabled={!canConfig || index === 0}
+              title={denied}
+              aria-label={`Move ${entry.name} up`}
+            >
               ↑
             </button>
             <button
               type="button"
               onClick={() => move(index, 1)}
-              style={quietAction(index < list.entries.length - 1)}
-              disabled={index === list.entries.length - 1}
+              style={quietAction(canConfig && index < list.entries.length - 1)}
+              disabled={!canConfig || index === list.entries.length - 1}
+              title={denied}
+              aria-label={`Move ${entry.name} down`}
             >
               ↓
             </button>
@@ -644,10 +665,12 @@ function ChecklistEditor({ list, moduleName }: { list: StepListView; moduleName:
               // The server refuses this once anything has been recorded, and says why. The
               // screen does not pre-empt that: it would have to reimplement the rule, and the
               // server's sentence is better than a greyed-out control with no explanation.
+              disabled={!canConfig}
+              title={denied}
               onClick={() =>
                 void apply(null, () => send<Snapshot>(`/api/v1/steps/entries/${entry.id}`, 'DELETE'))
               }
-              style={quietAction(true)}
+              style={quietAction(canConfig)}
             >
               remove
             </button>
@@ -672,6 +695,8 @@ function ChecklistEditor({ list, moduleName }: { list: StepListView; moduleName:
           style={{ flex: 1 }}
           value={adding}
           onChange={(event) => setAdding(event.target.value)}
+          disabled={!canConfig}
+          title={denied}
           aria-label={`Add a step to ${list.name}`}
         >
           <option value="">Add a step from the library…</option>
@@ -681,7 +706,12 @@ function ChecklistEditor({ list, moduleName }: { list: StepListView; moduleName:
             </option>
           ))}
         </select>
-        <button type="submit" className="btn btn-secondary" disabled={!adding}>
+        <button
+          type="submit"
+          className="btn btn-secondary"
+          disabled={!canConfig || !adding}
+          title={denied}
+        >
           Add
         </button>
       </form>

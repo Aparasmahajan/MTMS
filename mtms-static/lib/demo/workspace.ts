@@ -1,4 +1,5 @@
 import { promotionGate } from '@/lib/shared/promotion';
+import { SEEDED_ROLES } from '@/lib/shared/permissions';
 import type { PlatformView } from '@/lib/server/platform';
 import type { Snapshot } from '@/lib/shared/views';
 
@@ -100,22 +101,77 @@ export function seedWorkspace(seed: Snapshot): DemoWorkspace {
   };
 }
 
+/** Ids for the records a new organisation is given. `crypto.randomUUID` needs a secure context. */
+function freshId(): string {
+  const cryptoRef = globalThis.crypto as Crypto | undefined;
+  if (cryptoRef?.randomUUID) return cryptoRef.randomUUID();
+  return `demo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 /**
- * A project with nothing in it: no columns, no node types, no stages, no modules.
+ * A project with nothing in it: no columns, no node types, no stages, no modules — and none
+ * of the project-level records either: no step library, no checklists' timings, no audit.
  *
  * Empty is the point. What goes in belongs to the project's own administrator, defined on
  * the Configure screen — a platform operator pre-filling it would be deciding another
- * team's process for them. The people and roles carry over because they belong to the
- * organisation, not to any one project.
+ * team's process for them.
+ *
+ * What carries over depends on whose project it is:
+ *
+ * - **Same organisation** — the people, roles, invitations, library and the reader's inbox
+ *   belong to the organisation, not to any one project, so they come along.
+ * - **Another organisation** — none of them do. Organisation A's people and roles appearing
+ *   in organisation B is precisely the leak tenancy exists to prevent. B gets the seven
+ *   roles every organisation starts with (fresh ids, the shipped permissions, not A's edited
+ *   ones) and its own administrators as its only people.
  */
 export function blankProjectSnapshot(
   from: Snapshot,
   project: { id: string; key: string; name: string },
-  org?: { id: string; name: string },
+  org?: { id: string; name: string; admins?: DemoOrganisation['admins'] },
 ): Snapshot {
+  const base = clone(from);
+  const sameOrg = !org || org.id === from.org.id;
+
+  const orgLevel: Pick<Snapshot, 'users' | 'roles' | 'invitations' | 'library' | 'notifications' | 'unread_notifications'> =
+    sameOrg
+      ? {
+          users: base.users,
+          roles: base.roles.map((role) => ({ ...role })),
+          invitations: base.invitations,
+          library: base.library.map((entry) => ({ ...entry, in_this_project: false })),
+          notifications: base.notifications,
+          unread_notifications: base.unread_notifications,
+        }
+      : {
+          roles: SEEDED_ROLES.map((role) => ({
+            id: freshId(),
+            key: role.key,
+            name: role.name,
+            note: role.note,
+            permissions: [...role.permissions],
+            is_system: true,
+            hidden: false,
+            member_count: 0,
+          })),
+          users: (org.admins ?? []).map((admin) => ({
+            id: freshId(),
+            display_name: admin.display_name,
+            email: admin.email,
+            role_name: 'Admin',
+            scope: `${org.name} — all projects`,
+            status: admin.status,
+          })),
+          invitations: [],
+          library: [],
+          notifications: [],
+          unread_notifications: 0,
+        };
+
   return {
-    ...clone(from),
-    org: org ?? from.org,
+    ...base,
+    ...orgLevel,
+    org: org ? { id: org.id, name: org.name } : from.org,
     project: {
       id: project.id,
       key: project.key,
@@ -140,6 +196,11 @@ export function blankProjectSnapshot(
     audit: [],
     defects: [],
     members: [],
+    // Project-level: the steps are this project's own process, and the timings are measured
+    // from its own ticks. Copying them would show figures for work this project never did.
+    step_library: [],
+    timing: [],
+    step_timing: [],
     drift: {
       rows: [],
       warnings: [],

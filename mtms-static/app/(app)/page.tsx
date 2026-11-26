@@ -15,7 +15,7 @@ import { missingLine } from '@/lib/shared/views';
  * why a cell click changes this screen too.
  */
 export default function DashboardPage() {
-  const { snapshot, can, reasonFor, subModuleHref, words } = useTracker();
+  const { snapshot, can, reasonFor, subModuleHref, moduleHref, words } = useTracker();
   const router = useRouter();
   const { sub_modules: subModules, config } = snapshot;
 
@@ -191,7 +191,7 @@ export default function DashboardPage() {
                 key={entry.id}
                 type="button"
                 className="hoverable"
-                onClick={() => router.push(`/modules/${entry.id}`)}
+                onClick={() => router.push(moduleHref(entry.id))}
                 style={{
                   display: 'flex',
                   width: '100%',

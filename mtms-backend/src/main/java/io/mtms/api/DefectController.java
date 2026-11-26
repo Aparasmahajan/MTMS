@@ -42,7 +42,7 @@ public class DefectController {
 
     defects.create(
         actor,
-        UUID.fromString(request.subModuleId()),
+        RequestIds.uuid(request.subModuleId(), "sub_module_id"),
         request.phase(),
         request.severity(),
         request.description(),

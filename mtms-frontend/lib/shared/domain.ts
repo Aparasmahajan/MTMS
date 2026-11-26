@@ -169,8 +169,12 @@ export const PROD_ENVIRONMENT = 'prod';
 export const Environment = z.object({
   key: z.string().min(1).max(24),
   label: z.string().min(1).max(40),
-  /** Column header — three or four characters, so the grid stays narrow. */
-  short: z.string().min(1).max(6),
+  /**
+   * Column header — three or four characters, so the grid stays narrow. `short_label` because
+   * that is what the service sends (`Environment.shortLabel`); this was `short`, which nothing
+   * ever filled, so the environment cards on Configure had blank headers.
+   */
+  short_label: z.string().min(1).max(6),
   enabled: z.boolean().default(true),
 });
 export type Environment = z.infer<typeof Environment>;

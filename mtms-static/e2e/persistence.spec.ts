@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { STORAGE_KEY } from '../lib/demo/persistence';
+import { STORAGE_KEY, WORKSPACE_KEY } from '../lib/demo/persistence';
 
 /**
  * The two behaviours this repository exists to add: edits that survive a reload, and edits
@@ -59,7 +59,12 @@ test.beforeEach(async ({ context }) => {
   // localStorage and the assertions drift as the file runs.
   const page = await context.newPage();
   await page.goto('/matrix');
-  await page.evaluate((key) => window.localStorage.removeItem(key), STORAGE_KEY);
+  // Both keys: the workspace holds a copy of every project's snapshot too, and the runtime
+  // re-reads it before each write.
+  await page.evaluate(
+    (keys) => keys.forEach((key) => window.localStorage.removeItem(key)),
+    [STORAGE_KEY, WORKSPACE_KEY],
+  );
   await page.close();
 });
 

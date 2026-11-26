@@ -3,13 +3,16 @@ package io.mtms.domain;
 import io.mtms.domain.model.Modules;
 import io.mtms.domain.model.Steps;
 import io.mtms.domain.model.Projects;
+import io.mtms.domain.model.Scope;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -194,20 +197,41 @@ public final class Timing {
       List<Steps.Event> transitions) {
 
     Map<UUID, Instant> attachedAt = new HashMap<>();
-    Map<UUID, Instant> listCreated = new HashMap<>();
+    Map<UUID, Steps.StepList> listById = new HashMap<>();
     for (Steps.StepList list : lists) {
-      listCreated.put(list.id(), list.createdAt());
+      listById.put(list.id(), list);
+    }
+    Map<UUID, Instant> definitionCreated = new HashMap<>();
+    for (Steps.Definition definition : definitions) {
+      definitionCreated.put(definition.id(), definition.createdAt());
     }
 
     Map<UUID, UUID> definitionOfEntry = new HashMap<>();
+    // Entries that can still be worked: on a live list, attached to a sub-module or sub-activity.
+    // A module's list is a template copied onto each sub-module and never ticked itself, and an
+    // archived list has left every screen; counting either made "N waiting" permanent.
+    Set<UUID> workable = new HashSet<>();
     for (Steps.Entry entry : entries) {
       definitionOfEntry.put(entry.id(), entry.definitionId());
-      // When the checklist was attached is when this step started being outstanding. There is no
-      // per-entry timestamp, and the list's is the honest stand-in: the entries are written in
-      // the same transaction as the list they belong to.
-      Instant created = listCreated.get(entry.stepListId());
-      if (created != null) {
-        attachedAt.put(entry.id(), created);
+      Steps.StepList list = listById.get(entry.stepListId());
+      if (list == null) {
+        continue;
+      }
+      if (!list.isArchived() && list.scopeType() != Scope.MODULE) {
+        workable.add(entry.id());
+      }
+      // When this step started being outstanding. There is no per-entry timestamp, so this is
+      // the later of when its list was created and when the step itself was defined. The list
+      // alone overstated badly for a step added to an old checklist — a step defined yesterday
+      // on a list from March read as three months. A step defined long ago and added to an old
+      // list late is still overstated; only a timestamp on the entry would fix that.
+      Instant attached = list.createdAt();
+      Instant defined = definitionCreated.get(entry.definitionId());
+      if (attached == null || (defined != null && defined.isAfter(attached))) {
+        attached = defined;
+      }
+      if (attached != null) {
+        attachedAt.put(entry.id(), attached);
       }
     }
 
@@ -250,6 +274,7 @@ public final class Timing {
       int outstanding = 0;
       for (Map.Entry<UUID, UUID> entry : definitionOfEntry.entrySet()) {
         if (entry.getValue().equals(definition.id())
+            && workable.contains(entry.getKey())
             && !Boolean.TRUE.equals(doneNow.get(entry.getKey()))) {
           outstanding++;
         }

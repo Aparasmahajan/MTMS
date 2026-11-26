@@ -202,6 +202,15 @@ public class AuthenticationService {
       throw ServiceException.validation("That invitation has expired. Ask for a new one.");
     }
 
+    // Removal clears outstanding links now, but a link issued before that change was deployed
+    // still exists in the database. Without this, following one set a removed account ACTIVE and
+    // signed it in, undoing the removal from the outside.
+    if (user.user().status() == Tenancy.UserStatus.DEACTIVATED) {
+      throw ServiceException.validation(
+          "This account has been removed from the organisation. Ask an administrator to restore"
+              + " it.");
+    }
+
     access.updatePassword(user.user().id(), passwords.hash(password));
     access.clearInviteToken(user.user().id());
 

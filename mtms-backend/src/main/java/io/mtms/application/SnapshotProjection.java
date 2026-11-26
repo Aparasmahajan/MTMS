@@ -134,7 +134,10 @@ public final class SnapshotProjection {
                         notification.body(),
                         notification.link(),
                         iso(notification.createdAt()),
-                        notification.isUnread()))
+                        notification.isUnread(),
+                        notification.projectId() == null
+                            ? null
+                            : notification.projectId().toString()))
             .toList(),
         (int) inbox.stream().filter(Notifications.Notification::isUnread).count(),
         driftView(data, columns, subModules, now),
@@ -302,7 +305,37 @@ public final class SnapshotProjection {
         List.copyOf(actor.roleKeys()),
         actor.permissions().stream().map(PermissionKey::wire).sorted().toList(),
         actor.isSuperAdmin(),
-        canCreateProjects(actor, access));
+        canCreateProjects(actor, access),
+        organisationPermissions(actor, access));
+  }
+
+  /**
+   * What this person holds across the whole organisation, as opposed to {@code permissions},
+   * which also counts the role on the open project.
+   *
+   * <p>Everything under /organisation/, every role edit and every password reset requires the
+   * grant organisation-wide — see {@code AccessUseCases.requireOrganisationPermission}. A
+   * project administrator holds every key on their own project, so reading {@code permissions}
+   * would draw controls the service then refuses.
+   */
+  private List<String> organisationPermissions(Actor actor, AccessData access) {
+    if (actor.isSuperAdmin()) {
+      return java.util.Arrays.stream(PermissionKey.values()).map(PermissionKey::wire).sorted().toList();
+    }
+
+    Map<UUID, Tenancy.Role> roleById = new HashMap<>();
+    access.roles().forEach(role -> roleById.put(role.id(), role));
+
+    return access.memberships().stream()
+        .filter(membership -> membership.userId().equals(actor.userId()))
+        .filter(membership -> membership.projectId() == null)
+        .map(membership -> roleById.get(membership.roleId()))
+        .filter(java.util.Objects::nonNull)
+        .flatMap(role -> role.permissions().stream())
+        .map(PermissionKey::wire)
+        .distinct()
+        .sorted()
+        .toList();
   }
 
   /**

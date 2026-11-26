@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useTracker } from '@/components/TrackerProvider';
 import { Blueprint, Chip } from '@/components/primitives';
 import { send } from '@/lib/client/api';
+import { useBusy } from '@/lib/client/useBusy';
 import type { DefectPhase, DefectSeverity } from '@/lib/shared/domain';
 import { DEFECT_STATUS_ORDER } from '@/lib/shared/domain';
 import { formatStamp, type Snapshot } from '@/lib/shared/views';
@@ -48,21 +49,25 @@ export default function DefectsPage() {
     value: defects.filter((defect) => defect.status === status).length,
   }));
 
+  const [adding, runAdd] = useBusy();
+
   async function addDefect() {
     if (!description.trim()) return;
     if (!subModuleId) {
       setNotice('There are no modules in this project to log a defect against.');
       return;
     }
-    const result = await apply(null, () =>
-      send<Snapshot>('/api/v1/defects', 'POST', {
-        sub_module_id: subModuleId,
-        phase,
-        ticket_key: ticketKey,
-        child_req_id: childReqId,
-        severity,
-        description,
-      }),
+    const result = await runAdd(() =>
+      apply(null, () =>
+        send<Snapshot>('/api/v1/defects', 'POST', {
+          sub_module_id: subModuleId,
+          phase,
+          ticket_key: ticketKey,
+          child_req_id: childReqId,
+          severity,
+          description,
+        }),
+      ),
     );
     if (result) {
       setDescription('');
@@ -232,10 +237,10 @@ export default function DefectsPage() {
           <button
             type="submit"
             className="btn btn-primary"
-            disabled={!canCreate}
+            disabled={!canCreate || adding}
             title={canCreate ? undefined : reasonFor('defect.create')}
           >
-            Add defect
+            {adding ? 'Adding…' : 'Add defect'}
           </button>
         </form>
         {!canCreate ? (

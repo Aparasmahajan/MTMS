@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useTracker } from '@/components/TrackerProvider';
 import { Blueprint, PageTitle } from '@/components/primitives';
 import { send } from '@/lib/client/api';
+import { useBusy } from '@/lib/client/useBusy';
 import type { Snapshot } from '@/lib/shared/views';
 
 /**
@@ -25,9 +26,12 @@ export default function LibraryPage() {
   const [moduleName, setModuleName] = useState(moduleNames[0] ?? '');
   const [name, setName] = useState('');
   const [addToLibrary, setAddToLibrary] = useState(false);
+  const [working, runWork] = useBusy();
 
   async function clone(entryId: string) {
-    const meta = await apply(null, () => send<Snapshot>(`/api/v1/library/${entryId}/clone`, 'POST'));
+    const meta = await runWork(() =>
+      apply(null, () => send<Snapshot>(`/api/v1/library/${entryId}/clone`, 'POST')),
+    );
     if (meta?.module_name) {
       router.push(`/matrix?node=${encodeURIComponent(String(meta.module_name))}`);
     }
@@ -39,12 +43,14 @@ export default function LibraryPage() {
       setNotice('This project has no modules yet. Add one on the Configure screen first.');
       return;
     }
-    const meta = await apply(null, () =>
-      send<Snapshot>('/api/v1/sub-modules', 'POST', {
-        module_name: moduleName,
-        name: name.trim(),
-        add_to_library: addToLibrary,
-      }),
+    const meta = await runWork(() =>
+      apply(null, () =>
+        send<Snapshot>('/api/v1/sub-modules', 'POST', {
+          module_name: moduleName,
+          name: name.trim(),
+          add_to_library: addToLibrary,
+        }),
+      ),
     );
     if (meta) {
       setName('');
@@ -111,7 +117,7 @@ export default function LibraryPage() {
           <button
             type="submit"
             className="btn btn-primary"
-            disabled={!canCreate}
+            disabled={!canCreate || working}
             title={canCreate ? undefined : reasonFor('module.create')}
           >
             Create module
@@ -177,7 +183,7 @@ export default function LibraryPage() {
                   <button
                     type="button"
                     className="btn btn-secondary"
-                    disabled={!canClone}
+                    disabled={!canClone || working}
                     title={canClone ? undefined : reasonFor('module.clone')}
                     onClick={() => void clone(entry.id)}
                   >

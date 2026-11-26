@@ -123,6 +123,11 @@ public class MutationSupport {
    * <p>One statement per project rather than one for the organisation, because the revision lives
    * on the project row and is what the cache key is built from.
    */
+  /** Whether a project id names a project of this organisation. */
+  public boolean projectExists(UUID tenantId, UUID projectId) {
+    return projects.findById(tenantId, projectId).isPresent();
+  }
+
   public void bumpEveryProjectIn(UUID tenantId) {
     projects.findAllByTenant(tenantId).forEach(project -> projects.bumpRevision(project.id()));
   }

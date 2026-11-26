@@ -104,7 +104,8 @@ public class SnapshotService {
                         notification.body(),
                         notification.link(),
                         notification.createdAt() == null ? null : notification.createdAt().toString(),
-                        notification.isUnread()))
+                        notification.isUnread(),
+                        notification.projectId() == null ? null : notification.projectId().toString()))
             .toList();
 
     return new Snapshot(

@@ -100,7 +100,10 @@ export function TrackerProvider({ initial, children }: { initial: Snapshot; chil
           caught instanceof ApiError ? caught.message : 'Could not reach the server. Try again.';
         setError(message);
         if (caught instanceof ApiError && caught.code === 'unauthenticated') {
-          router.push('/login');
+          // With where they were, so signing in again — or the silent refresh the sign-in page
+          // tries first — puts them back here rather than on the dashboard.
+          const here = window.location.pathname + window.location.search;
+          router.push(`/login?next=${encodeURIComponent(here)}`);
         }
         return null;
       } finally {

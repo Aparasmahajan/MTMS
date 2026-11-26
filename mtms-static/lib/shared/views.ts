@@ -88,6 +88,11 @@ export interface SubModuleView {
   owners: OwnerGroupView[];
   threads: ThreadView[];
   last_run: RunView | null;
+  /**
+   * When the sub-module was created — where every column's lead time is measured from. Null
+   * only on a snapshot saved before it was carried; such a row is left out of the timings.
+   */
+  created_at: string | null;
 }
 
 export interface AuditView {
@@ -259,6 +264,11 @@ export interface StepEntryView {
 export interface StepListView {
   id: string;
   name: string;
+  /** What it is attached to. */
+  scope_type: 'module' | 'sub_module' | 'sub_activity';
+  scope_id: string;
+  /** When it was attached — the moment every step on it started waiting. */
+  created_at: string | null;
   /** Whether the order is a real sequence. The server refuses an out-of-turn tick. */
   enforce_order: boolean;
   readiness: number;
@@ -281,7 +291,8 @@ export interface StepListView {
  */
 export interface NotificationView {
   id: string;
-  kind: 'mention' | 'step.blocked' | 'step.ready';
+  /** `account` is a password reset the reader issued — the only copy of the link. */
+  kind: 'mention' | 'step.blocked' | 'step.ready' | 'account';
   title: string;
   body: string;
   link: string;

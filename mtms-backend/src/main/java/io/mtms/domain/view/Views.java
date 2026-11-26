@@ -260,9 +260,19 @@ public final class Views {
    *
    * @param link a path, not a URL. The service does not know its own public address, and the
    *     client reading this is already at the right origin.
+   * @param projectId the project {@code link} belongs to, or null for one that belongs to none.
+   *     The inbox spans the organisation and the link is project-relative, so following it from
+   *     another project opened the wrong project's page — or a 404.
    */
   public record NotificationView(
-      String id, String kind, String title, String body, String link, String at, boolean unread) {}
+      String id,
+      String kind,
+      String title,
+      String body,
+      String link,
+      String at,
+      boolean unread,
+      String projectId) {}
 
   /**
    * @param mentionsMe the reader was named in it. The one thing a screen can do about a mention
