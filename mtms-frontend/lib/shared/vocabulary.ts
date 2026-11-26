@@ -96,6 +96,31 @@ export const STATUS_SETS = {
   ritm: ['notraised', 'raised'],
 } as const;
 
+export type StatusSetKey = keyof typeof STATUS_SETS;
+
+/** What each subset is called on the Configure screen's status-pattern picker. */
+export const STATUS_SET_LABELS: Record<StatusSetKey, string> = {
+  create: 'Created / Not created',
+  load: 'Loaded — lab, preprod, prod',
+  simple: 'Loaded / Not loaded',
+  sign: 'Pending / Completed',
+  ritm: 'Raised / Not raised',
+};
+
+/**
+ * Which named subset a column's `allowed` list matches, ignoring order — or `null` if it
+ * matches none of them exactly. A column edited outside these five (or seeded before this
+ * picker existed) still works: the caller falls back to the full vocabulary rather than
+ * hiding whichever statuses it actually holds.
+ */
+export function matchingStatusSet(allowed: readonly string[]): StatusSetKey | null {
+  const sorted = [...allowed].sort().join(',');
+  for (const [key, values] of Object.entries(STATUS_SETS)) {
+    if ([...values].sort().join(',') === sorted) return key as StatusSetKey;
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // The roll-up rule
 // ---------------------------------------------------------------------------
