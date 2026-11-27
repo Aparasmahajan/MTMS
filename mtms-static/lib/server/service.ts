@@ -72,6 +72,13 @@ import type {
   RoleView,
 } from '../shared/views';
 import { columnDisplayLabel } from '../shared/views';
+import {
+  columnTimings,
+  moduleFigures,
+  stepGate,
+  stepTimings,
+  type StepGate,
+} from '../shared/derive';
 import type { Actor } from './auth';
 import { badRequest, conflict, forbidden, notFound, validationFailed } from './errors';
 import { emit } from './events';
@@ -277,14 +284,7 @@ function wordForState(state: StepState): string {
   return state === 'todo' ? 'not done' : state;
 }
 
-/**
- * Whether this reader may tick one entry, and why not when they may not.
- *
- * The order of the checks is the message: the list's own order first, then who is allowed.
- * Each refusal names the thing standing in the way, because "not allowed" sends somebody to
- * ask an administrator about a permission when the real answer is that step 1 is not done.
- */
-function stepGate(
+function stepGateFor(
   store: StoreData,
   list: StepList,
   entries: readonly StepEntry[],
@@ -292,51 +292,22 @@ function stepGate(
   progressOf: (entryId: string) => StepProgress | undefined,
   definition: StepDefinition,
   access: Access,
-): { canTick: boolean; isOverrideForMe: boolean; lockedReason: string } {
-  if (list.enforce_order) {
-    const earlier = entries
+): StepGate {
+  // The rule itself is shared with the static demo — see `stepGate` in lib/shared/derive.ts.
+  return stepGate({
+    enforceOrder: list.enforce_order,
+    earlier: entries
       .filter((candidate) => candidate.order_index < entry.order_index)
-      .sort((a, b) => a.order_index - b.order_index);
-    const blocking = earlier.find((candidate) => progressOf(candidate.id)?.state !== 'done');
-    if (blocking) {
-      const name = store.step_definitions.find((d) => d.id === blocking.definition_id)?.name;
-      return {
-        canTick: false,
-        isOverrideForMe: false,
-        lockedReason: `This checklist runs in order, and "${name ?? 'an earlier step'}" is not done yet.`,
-      };
-    }
-  }
-
-  const allowed = roleNamesOf(store, definition.role_ids);
-  const mine = access.roleIds.some((roleId) => definition.role_ids.includes(roleId));
-
-  // A `project.config` holder may tick anything, and it is recorded as an override —
-  // "Anand ticked this on behalf of QA". That flag is the difference between an audit trail
-  // and a decoration, so the screen warns before it happens.
-  const canConfigure = access.permissions.has('project.config');
-
-  if (definition.role_ids.length === 0) {
-    // A step whose last allowed role was deleted must not quietly become one anybody may
-    // tick. That is the opposite of what gating meant, so it closes rather than opens.
-    return {
-      canTick: canConfigure,
-      isOverrideForMe: canConfigure,
-      lockedReason: canConfigure
-        ? 'This step names no role that still exists. Ticking it will be recorded as an override.'
-        : 'This step names no role that still exists, so nobody can tick it until an admin picks one.',
-    };
-  }
-
-  if (mine) return { canTick: true, isOverrideForMe: false, lockedReason: '' };
-
-  return {
-    canTick: canConfigure,
-    isOverrideForMe: canConfigure,
-    lockedReason: canConfigure
-      ? `Only ${allowed.join(' or ')} may tick this. You can, as an override, and it is recorded as one.`
-      : `Only ${allowed.join(' or ')} may tick this.`,
-  };
+      .sort((a, b) => a.order_index - b.order_index)
+      .map((candidate) => ({
+        name: store.step_definitions.find((d) => d.id === candidate.definition_id)?.name,
+        state: progressOf(candidate.id)?.state ?? 'todo',
+      })),
+    roleIds: definition.role_ids,
+    allowedNames: roleNamesOf(store, definition.role_ids),
+    myRoleIds: access.roleIds,
+    canConfigure: access.permissions.has('project.config'),
+  });
 }
 
 /** The checklists attached to one thing, with each step's state and whether the reader may act. */
@@ -362,7 +333,7 @@ function stepListsFor(
         const definition = store.step_definitions.find((d) => d.id === entry.definition_id);
         const progress = progressOf(entry.id);
         const gate = definition
-          ? stepGate(store, list, entries, entry, progressOf, definition, access)
+          ? stepGateFor(store, list, entries, entry, progressOf, definition, access)
           : { canTick: false, isOverrideForMe: false, lockedReason: 'That step no longer exists.' };
 
         return {
@@ -411,6 +382,7 @@ function stepListsFor(
         name: list.name,
         scope_type: list.scope_type,
         scope_id: list.scope_id,
+        created_at: list.created_at,
         enforce_order: list.enforce_order,
         entries: entryViews,
         done_count: done,
@@ -621,6 +593,7 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
       step_lists: stepListsFor(store, 'sub_module', module.id, access, actor.userId),
       owners: ownerGroupsFor(store, 'sub_module', module.id),
       threads: threadsFor(store, 'sub_module', module.id, actor.userId),
+      created_at: module.created_at,
     };
   });
 
@@ -641,18 +614,14 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
     const record = store.modules.find(
       (candidate) => candidate.project_id === projectId && candidate.name === name,
     );
-    const mine = modules.filter((subModule) => subModule.module_name === name);
-    const inProd = mine.filter((subModule) => subModule.readiness === 100).length;
 
     return {
       id: record?.id ?? `pending:${name}`,
       name,
       description: record?.description ?? '',
       order_index: record?.order_index ?? index,
-      sub_module_count: mine.length,
-      in_prod: inProd,
-      readiness:
-        mine.length === 0 ? 0 : Math.round(mine.reduce((total, m) => total + m.readiness, 0) / mine.length),
+      // Shared with the static demo, which recomputes these after every mutation.
+      ...moduleFigures(name, modules),
       owners: record ? ownerGroupsFor(store, 'module', record.id) : [],
       threads: record ? threadsFor(store, 'module', record.id, actor.userId) : [],
     };
@@ -908,8 +877,15 @@ export function buildSnapshot(store: StoreData, actor: Actor, projectId: string)
     notifications: inboxFor(store, actor),
     unread_notifications: inboxFor(store, actor).filter((row) => row.unread).length,
 
-    timing: columnTimings(activeColumns, projectModules, store.cells),
-    step_timing: stepTimings(store, projectId),
+    // Both computed over the views just built, with the functions the static demo calls after
+    // every mutation — so the two cannot report different figures for the same project.
+    timing: columnTimings(activeColumns, modules),
+    step_timing: stepTimings(
+      modules.flatMap((subModule) => [
+        ...subModule.step_lists,
+        ...subModule.sub_activities.flatMap((subActivity) => subActivity.step_lists),
+      ]),
+    ),
   };
 }
 
@@ -935,171 +911,9 @@ function inboxFor(store: StoreData, actor: Actor): NotificationView[] {
 // How long work actually takes
 // ---------------------------------------------------------------------------
 //
-// A port of `io.mtms.domain.Timing`. The point of it is that **nobody fills anything in**:
-// every cell carries the moment it last changed, every sub-module the moment it was created,
-// and every step transition is kept forever. So these are facts the application has been
-// recording since the first tick, and there are answers for work that finished months ago.
-//
-// Two panels, and they are not the same measurement:
-//
-//  - Per column, from the **cells**. A lead time — from the work appearing to that deliverable
-//    being finished — and the difference between one column and the previous one is roughly
-//    the time spent at that stage. A cell keeps only its *last* change, so a column that was
-//    corrected reads as having taken longer. That limitation is real and is stated on screen.
-//  - Per step, from the **append-only events**, which do not have that problem: a step ticked,
-//    un-ticked and ticked again contributes two durations rather than one long span. That is
-//    the reading that goes most wrong exactly on the work that went badly — which is the work
-//    anybody is asking about.
+// A port of `io.mtms.domain.Timing`, now in `lib/shared/derive.ts` so the static demo can
+// recompute it after every tick rather than show the build-time figures forever.
 
-/** One decimal. Hours of precision on a figure measured in weeks is false confidence. */
-function round1(value: number): number {
-  return Math.round(value * 10) / 10;
-}
-
-function daysBetween(from: string, to: string): number {
-  return round1((Date.parse(to) - Date.parse(from)) / 86_400_000);
-}
-
-/** Null for no data, so the caller renders "not enough yet" rather than a confident zero. */
-function median(values: readonly number[]): number | null {
-  if (values.length === 0) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  // Indexed reads are non-null here because the array is non-empty and `middle` is derived
-  // from its length, but `noUncheckedIndexedAccess` cannot see that.
-  const upper = sorted[middle] as number;
-  return sorted.length % 2 === 1
-    ? round1(upper)
-    : round1(((sorted[middle - 1] as number) + upper) / 2);
-}
-
-function mean(values: readonly number[]): number | null {
-  if (values.length === 0) return null;
-  return round1(values.reduce((total, value) => total + value, 0) / values.length);
-}
-
-/**
- * Days from a sub-module being created to each column being done.
- *
- * "Done" is read from the project's own vocabulary rather than assumed: a project defines
- * which statuses mean finished, and hard-coding one word here would silently report nothing
- * for a team whose column says "Loaded in prod".
- */
-function columnTimings(
-  activeColumns: readonly DeliverableColumn[],
-  subModules: readonly SubModule[],
-  cells: readonly Cell[],
-): ColumnTimingView[] {
-  const createdAt = new Map(subModules.map((subModule) => [subModule.id, subModule.created_at]));
-  const mine = new Set(subModules.map((subModule) => subModule.id));
-
-  const timings: ColumnTimingView[] = [];
-  let previousMedian: number | null = null;
-
-  for (const column of activeColumns) {
-    const days: number[] = [];
-
-    for (const cell of cells) {
-      // The sub-module's own row only. A sub-activity's cells are a finer grain, and mixing
-      // the two would count one piece of work several times with a different answer each.
-      if (cell.sub_activity_id !== null) continue;
-      if (cell.column_key !== column.key) continue;
-      if (!mine.has(cell.sub_module_id)) continue;
-      if (!cell.changed_at) continue;
-      if (toneOf(cell.status) !== 'done') continue;
-
-      const created = createdAt.get(cell.sub_module_id);
-      if (!created) continue;
-
-      // Negative means a cell changed before its sub-module existed — a clock problem
-      // rather than a measurement, so it is dropped rather than reported as a negative age.
-      const elapsed = daysBetween(created, cell.changed_at);
-      if (elapsed >= 0) days.push(elapsed);
-    }
-
-    const middle = median(days);
-    // Can legitimately be negative: a column finished before the one to its left, which
-    // happens when the order on screen is a reading order rather than a sequence. Shown as
-    // it is rather than clamped, because clamping would hide exactly that.
-    const added = middle !== null && previousMedian !== null ? round1(middle - previousMedian) : null;
-
-    timings.push({
-      column_key: column.key,
-      label: column.label,
-      median_days: middle,
-      mean_days: mean(days),
-      added_days: added,
-      measured: days.length,
-      // Anything unfinished is excluded rather than counted as instant, and the count says
-      // so: "4 days, from 2 of 60" is a very different statement from "4 days".
-      outstanding: subModules.length - days.length,
-    });
-
-    if (middle !== null) previousMedian = middle;
-  }
-
-  return timings;
-}
-
-/**
- * How long each step takes, from the append-only history.
- *
- * Measured from the moment a step became outstanding — the checklist being attached, or the
- * last un-tick — to the tick that followed. A step ticked twice is two durations, which is
- * the whole reason this reads events rather than the current state.
- */
-function stepTimings(store: StoreData, projectId: string): StepTimingView[] {
-  const lists = new Map(
-    store.step_lists.filter((list) => list.project_id === projectId).map((list) => [list.id, list]),
-  );
-
-  const perDefinition = new Map<string, { days: number[]; outstanding: number }>();
-
-  for (const entry of store.step_entries) {
-    const list = lists.get(entry.step_list_id);
-    if (!list) continue;
-
-    const bucket = perDefinition.get(entry.definition_id) ?? { days: [], outstanding: 0 };
-
-    const events = store.step_events
-      .filter((event) => event.entry_id === entry.id)
-      .sort((a, b) => a.at.localeCompare(b.at));
-
-    // Outstanding from the moment the checklist was attached, not from the first event —
-    // otherwise a step nobody has touched contributes nothing and the wait is invisible.
-    let since: string | null = list.created_at;
-
-    for (const event of events) {
-      if (event.to_state === 'done' && since !== null) {
-        const elapsed = daysBetween(since, event.at);
-        if (elapsed >= 0) bucket.days.push(elapsed);
-        since = null;
-      } else if (event.from_state === 'done' && event.to_state !== 'done') {
-        // Un-ticked: it is waiting again, and the clock restarts from here.
-        since = event.at;
-      }
-    }
-
-    if (since !== null) bucket.outstanding += 1;
-    perDefinition.set(entry.definition_id, bucket);
-  }
-
-  return [...perDefinition.entries()]
-    .map(([definitionId, bucket]) => {
-      const definition = store.step_definitions.find((candidate) => candidate.id === definitionId);
-      return {
-        definition_id: definitionId,
-        name: definition?.name ?? 'Removed step',
-        median_days: median(bucket.days),
-        mean_days: mean(bucket.days),
-        completions: bucket.days.length,
-        outstanding: bucket.outstanding,
-      };
-    })
-    // Slowest first: the point of the panel is which step is the bottleneck, and making
-    // somebody sort a list to find that out is making them do the work themselves.
-    .sort((a, b) => (b.median_days ?? -1) - (a.median_days ?? -1));
-}
 function shortDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }
@@ -1968,19 +1782,62 @@ export async function createProject(
 // Project configuration
 // ---------------------------------------------------------------------------
 
+/** What the Configure screen sends for a plain column — the service's own contract. */
+export interface PlainColumnInput {
+  key: string;
+  label: string;
+  full: string;
+  allowed: string[];
+  counts?: boolean;
+}
+
+/**
+ * Adds a plain column.
+ *
+ * Takes either the full contract the Configure screen sends (`{ key, label, full, allowed,
+ * counts }`) or, for older callers, just a typed name — from which the rest is derived as it
+ * always was. The route used to accept only `{ name }`, so the screen's request was a 422 in
+ * server mode and a nameless column in the demo: two halves of one contract, written apart.
+ */
 export async function addColumn(
   actor: Actor,
   projectId: string,
-  name: string,
+  input: string | PlainColumnInput,
 ): Promise<void> {
   await mutate((store) => {
     const access = resolveAccess(store, actor, projectId);
     require_(access, 'project.config', 'add a deliverable column');
 
-    const full = name.trim();
-    if (!full) throw validationFailed('A column needs a name.');
+    let key: string;
+    let label: string;
+    let full: string;
+    let allowed: string[];
+    let counts: boolean;
 
-    const key = `x_${full.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
+    if (typeof input === 'string') {
+      full = input.trim();
+      if (!full) throw validationFailed('A column needs a name.');
+      key = `x_${full.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
+      label = full.toUpperCase().slice(0, 8);
+      allowed = [...STATUS_SETS.simple];
+      counts = true;
+    } else {
+      key = input.key.trim().toLowerCase();
+      label = input.label.trim();
+      full = input.full.trim() || label;
+      allowed = [...input.allowed];
+      counts = input.counts ?? true;
+      if (!/^[a-z0-9_]+$/.test(key)) {
+        throw validationFailed('A column key is lowercase letters, digits and underscores.');
+      }
+      if (!label) throw validationFailed('A column needs a header.');
+      if (allowed.length === 0) throw validationFailed('A column must allow at least one status.');
+      const unknown = allowed.filter((status) => !isStatusKey(status));
+      if (unknown.length > 0) {
+        throw validationFailed(`Not a status this system knows: ${unknown.join(', ')}.`);
+      }
+    }
+
     if (store.columns.some((column) => column.project_id === projectId && column.key === key)) {
       throw validationFailed('A column with that name already exists on this project.');
     }
@@ -1990,10 +1847,10 @@ export async function addColumn(
       id: randomUUID(),
       project_id: projectId,
       key,
-      label: full.toUpperCase().slice(0, 8),
+      label,
       full,
-      allowed: [...STATUS_SETS.simple],
-      counts: true,
+      allowed,
+      counts,
       order_index: columns.length,
       // A column added here is a plain one. Splitting a deliverable across environments
       // is a decision about the deliverable, not about the name someone typed in a box.

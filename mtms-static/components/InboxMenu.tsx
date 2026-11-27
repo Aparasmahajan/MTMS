@@ -22,6 +22,7 @@ const KIND_MARK: Record<NotificationView['kind'], string> = {
   mention: '@',
   'step.blocked': '⊘',
   'step.ready': '●',
+  account: '↻',
 };
 
 export function InboxMenu() {

@@ -247,7 +247,7 @@ export function SubModuleScreen() {
               );
               if (meta) {
                 setNotice(
-                  `Marked ${meta.changed} cell${meta.changed === 1 ? '' : 's'} loaded in prod. Every change is stamped with your name.`,
+                  `Marked ${meta.cells_changed} cell${meta.cells_changed === 1 ? '' : 's'} loaded in prod. Every change is stamped with your name.`,
                 );
               }
             }}
@@ -638,7 +638,11 @@ export function SubModuleScreen() {
                             'PATCH',
                             { name: value },
                           ),
-                        ).then(() => setRenaming(null));
+                          // Closed only on success. On a failure the editor stays open with what
+                          // was typed, beside the error, rather than discarding it.
+                        ).then((saved) => {
+                          if (saved) setRenaming(null);
+                        });
                       }}
                       style={{ flex: 1, display: 'flex', gap: 'var(--space-2)' }}
                     >
@@ -698,14 +702,21 @@ export function SubModuleScreen() {
                                 : `Remove ${subActivity.name} and its deliverable row`
                               : reasonFor('module.edit')
                           }
-                          onClick={() =>
+                          onClick={() => {
+                            // Its whole row of deliverables goes with it. The last one is the
+                            // exception — the module keeps what it shows — and the question says so.
+                            const question =
+                              subModule.sub_activities.length === 1
+                                ? `Remove ${subActivity.name}?\n\nIt is the last one, so the ${words.subModule.lower} gets its own row back, keeping what it currently shows.`
+                                : `Remove ${subActivity.name}?\n\nIts row of deliverables, and every status recorded on it, is deleted with it.`;
+                            if (!window.confirm(question)) return;
                             void apply(null, () =>
                               send<Snapshot>(
                                 `/api/v1/sub-modules/${subModule.id}/sub-activities/${subActivity.id}`,
                                 'DELETE',
                               ),
-                            )
-                          }
+                            );
+                          }}
                           style={subActivityActionStyle(canEdit)}
                         >
                           remove

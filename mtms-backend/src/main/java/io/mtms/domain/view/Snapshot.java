@@ -80,7 +80,8 @@ public record Snapshot(
       List<String> roleNames,
       List<String> permissions,
       boolean isSuperAdmin,
-      boolean canCreateProjects) {}
+      boolean canCreateProjects,
+      List<String> organisationPermissions) {}
 
   public record Org(String id, String name) {}
 

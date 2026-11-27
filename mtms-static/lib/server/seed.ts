@@ -1209,6 +1209,45 @@ export async function buildSeed(): Promise<StoreData> {
       created_at: daysAgo(6),
       read_at: daysAgo(5),
     });
+
+    // Nitin's own inbox. The static demo is signed in as him, and an empty inbox there would
+    // demonstrate the one thing the feature is not: nothing arriving. Two unread and one read,
+    // so the badge, the unread styling and "mark all read" all have something to act on.
+    notifications.push(
+      {
+        id: id('notif:nitin:mention'),
+        tenant_id: TENANT_ID,
+        user_id: id('user:nitin@azalio.io'),
+        kind: 'mention',
+        title: 'Vinayak mentioned you in Vendor licence is holding up QA',
+        body: '@Nitin the licence renewal needs a sign-off above the project — can you push it through?',
+        link: `/sub-modules/${firstSbc.id}`,
+        created_at: daysAgo(3),
+        read_at: null,
+      },
+      {
+        id: id('notif:nitin:blocked'),
+        tenant_id: TENANT_ID,
+        user_id: id('user:nitin@azalio.io'),
+        kind: 'step.blocked',
+        title: 'Testing done by QA is blocked',
+        body: 'Waiting on the vendor to supply a test licence for the SBC lab.',
+        link: `/sub-modules/${firstSbc.id}`,
+        created_at: daysAgo(2),
+        read_at: null,
+      },
+      {
+        id: id('notif:nitin:ready'),
+        tenant_id: TENANT_ID,
+        user_id: id('user:nitin@azalio.io'),
+        kind: 'step.ready',
+        title: 'Unit tested is ready to tick',
+        body: 'Vinayak finished "CIQ received" on the delivery checklist, which was the last thing in the way.',
+        link: `/sub-modules/${firstSbc.id}`,
+        created_at: daysAgo(7),
+        read_at: daysAgo(6),
+      },
+    );
   }
 
   return {

@@ -44,7 +44,7 @@ export function OwnersPanel({
   // Hidden roles are not teams anything can be owned for — the server refuses it, and offering
   // them here would be a control that looks available and then does not work.
   const teams = snapshot.roles.filter((role) => !role.hidden);
-  const people = snapshot.users.filter((user) => user.status !== 'deactivated');
+  const people = snapshot.users.filter((user) => user.status !== 'removed');
 
   function assign() {
     if (!userId) return;

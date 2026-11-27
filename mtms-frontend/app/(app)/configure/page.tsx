@@ -8,6 +8,7 @@ import { Blueprint, PageTitle } from '@/components/primitives';
 import { StepsPanel } from '@/components/config/StepsPanel';
 import { WordingPanel } from '@/components/config/WordingPanel';
 import { send } from '@/lib/client/api';
+import { useBusy } from '@/lib/client/useBusy';
 import type { ConfigList, Environment } from '@/lib/shared/domain';
 import { PROD_ENVIRONMENT } from '@/lib/shared/domain';
 import { statusEntry, STATUS_SETS, STATUS_VOCABULARY, TONE_DESCRIPTION, TONE_STYLE } from '@/lib/shared/vocabulary';
@@ -39,7 +40,17 @@ function ConfigSet({
   const [draft, setDraft] = useState('');
   const canConfig = can('project.config');
 
-  function change(action: 'add' | 'remove', value: string) {
+  function change(action: 'add' | 'remove', value: string, label?: string) {
+    // Removing a module name takes its sub-modules off the matrix, which groups by these names.
+    // One stray click on a small × did that with no warning.
+    if (
+      action === 'remove' &&
+      !window.confirm(
+        `Remove ${label ?? value} from ${title.toLowerCase()}?\n\nAnything filed under it stops being grouped there. Adding it back restores that.`,
+      )
+    ) {
+      return;
+    }
     void apply(null, () =>
       send<Snapshot>('/api/v1/config/lists', 'POST', { list, action, value }),
     ).then((result) => {
@@ -90,7 +101,7 @@ function ConfigSet({
               className="mono"
               disabled={!canConfig}
               title={canConfig ? `Remove ${value.label}` : reasonFor('project.config')}
-              onClick={() => change('remove', value.key)}
+              onClick={() => change('remove', value.key, value.label)}
               style={{
                 border: 0,
                 background: 'transparent',
@@ -417,7 +428,7 @@ function Environments({
                       textTransform: 'uppercase',
                     }}
                   >
-                    {environment.short}
+                    {environment.short_label}
                   </span>
                   <button
                     type="button"
@@ -491,6 +502,8 @@ export default function ConfigurePage() {
   const [newProjectKey, setNewProjectKey] = useState('');
   const [newProjectName, setNewProjectName] = useState('');
   const canConfig = can('project.config');
+  const [creatingProject, runCreateProject] = useBusy();
+  const [addingColumn, runAddColumn] = useBusy();
 
   /*
     Read from `me`, not from `permissions`.
@@ -515,12 +528,14 @@ export default function ConfigurePage() {
     const key = newProjectKey.trim().toUpperCase();
     if (!key) return;
 
-    const result = await apply(null, () =>
-      send<Snapshot>('/api/v1/projects', 'POST', {
-        key,
-        name: newProjectName.trim() || key,
-        description: '',
-      }),
+    const result = await runCreateProject(() =>
+      apply(null, () =>
+        send<Snapshot>('/api/v1/projects', 'POST', {
+          key,
+          name: newProjectName.trim() || key,
+          description: '',
+        }),
+      ),
     );
     if (!result) return;
 
@@ -604,7 +619,11 @@ export default function ConfigurePage() {
               placeholder="Name (defaults to the key)"
               aria-label="New project name"
             />
-            <button type="submit" className="btn btn-secondary" disabled={!newProjectKey.trim()}>
+            <button
+              type="submit"
+              className="btn btn-secondary"
+              disabled={!newProjectKey.trim() || creatingProject}
+            >
               Create project
             </button>
             <span
@@ -758,9 +777,20 @@ export default function ConfigurePage() {
                       type="button"
                       disabled={!canConfig}
                       title={canConfig ? undefined : reasonFor('project.config')}
-                      onClick={() =>
-                        void apply(null, () => send<Snapshot>(`/api/v1/config/columns/${member.key}`, 'DELETE'))
-                      }
+                      onClick={() => {
+                        // This deletes the column and every cell in it, on every sub-module, and
+                        // nothing can bring them back. It was one click with no question asked.
+                        if (
+                          !window.confirm(
+                            `Remove the ${member.label} column?\n\nEvery status recorded in it, on every ${words.subModule.lower}, is deleted with it. This cannot be undone.`,
+                          )
+                        ) {
+                          return;
+                        }
+                        void apply(null, () =>
+                          send<Snapshot>(`/api/v1/config/columns/${member.key}`, 'DELETE'),
+                        );
+                      }}
                       style={{
                         fontSize: 12,
                         color: 'var(--color-neutral-600)',
@@ -799,7 +829,8 @@ export default function ConfigurePage() {
             const key = typed.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
             if (!key) return;
 
-            void apply(
+            void runAddColumn(() =>
+              apply(
               null,
               () =>
                 perEnvironment
@@ -816,6 +847,7 @@ export default function ConfigurePage() {
                       allowed: [...STATUS_SETS.simple],
                       counts: true,
                     }),
+              ),
             ).then((result) => {
               if (result) setNewColumn('');
             });
@@ -851,7 +883,7 @@ export default function ConfigurePage() {
           <button
             type="submit"
             className="btn btn-secondary"
-            disabled={!canConfig}
+            disabled={!canConfig || addingColumn}
             title={canConfig ? undefined : reasonFor('project.config')}
           >
             {perEnvironment ? 'Add deliverable' : 'Add column'}
@@ -868,7 +900,7 @@ export default function ConfigurePage() {
               ? 'This project has no environments configured, so a deliverable cannot be spread across them yet.'
               : perEnvironment
                 ? `One header with ${config.environments.length} columns under it — ${config.environments
-                    .map((environment) => environment.short)
+                    .map((environment) => environment.short_label)
                     .join(', ')} — and only prod counts toward readiness. A lab tick records where something has been; it is not part of the definition of done.`
                 : 'One column, counting toward readiness. Adjust its statuses in the table above once it exists.'}
           </span>

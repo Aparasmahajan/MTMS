@@ -76,7 +76,10 @@ public class ProjectController {
   @PostMapping("/projects/members")
   public ApiResponse.Success<Snapshot> addMember(
       @RequestBody AddMemberRequest request, Actor actor) {
-    access.addMember(actor, UUID.fromString(request.userId()), UUID.fromString(request.roleId()));
+    access.addMember(
+        actor,
+        RequestIds.uuid(request.userId(), "user_id"),
+        RequestIds.uuid(request.roleId(), "role_id"));
     return ApiResponse.ok(snapshots.of(actor));
   }
 
@@ -85,7 +88,7 @@ public class ProjectController {
   @PatchMapping("/projects/members/{id}")
   public ApiResponse.Success<Snapshot> changeMemberRole(
       @PathVariable("id") UUID membershipId, @RequestBody ChangeRoleRequest request, Actor actor) {
-    access.changeMemberRole(actor, membershipId, UUID.fromString(request.roleId()));
+    access.changeMemberRole(actor, membershipId, RequestIds.uuid(request.roleId(), "role_id"));
     return ApiResponse.ok(snapshots.of(actor));
   }
 
@@ -119,7 +122,9 @@ public class ProjectController {
       @RequestBody OrgMemberRequest request, Actor actor) {
 
     access.grantOrganisationWide(
-        actor, UUID.fromString(request.userId()), UUID.fromString(request.roleId()));
+        actor,
+        RequestIds.uuid(request.userId(), "user_id"),
+        RequestIds.uuid(request.roleId(), "role_id"));
     return ApiResponse.ok(snapshots.of(actor));
   }
 
@@ -128,7 +133,8 @@ public class ProjectController {
   public ApiResponse.Success<Snapshot> changeOrganisationWideRole(
       @PathVariable("id") UUID membershipId, @RequestBody ChangeRoleRequest request, Actor actor) {
 
-    access.changeOrganisationWideRole(actor, membershipId, UUID.fromString(request.roleId()));
+    access.changeOrganisationWideRole(
+        actor, membershipId, RequestIds.uuid(request.roleId(), "role_id"));
     return ApiResponse.ok(snapshots.of(actor));
   }
 
@@ -173,9 +179,13 @@ public class ProjectController {
 
   // --- Invitations and roles -------------------------------------------------
 
+  /**
+   * {@code org_wide: true} invites to every project; otherwise {@code project_id} names the
+   * project, and leaving it out means the one that is open.
+   */
   public record InviteRequest(
-      @NotBlank String email, @NotBlank String displayName, @NotBlank String roleId,
-      Boolean orgWide) {}
+      @NotBlank String email, String displayName, @NotBlank String roleId,
+      Boolean orgWide, String projectId) {}
 
   /**
    * Invites somebody into this organisation.
@@ -191,8 +201,9 @@ public class ProjectController {
             actor,
             request.email(),
             request.displayName(),
-            UUID.fromString(request.roleId()),
-            request.orgWide() != null && request.orgWide());
+            RequestIds.uuid(request.roleId(), "role_id"),
+            request.orgWide() != null && request.orgWide(),
+            RequestIds.optionalUuid(request.projectId(), "project_id"));
 
     // Map keys, written as the frontend reads them — Jackson's SNAKE_CASE renames record
     // properties and leaves Map keys exactly as spelled here.
@@ -335,8 +346,9 @@ public class ProjectController {
   @PostMapping("/library/{id}/clone")
   public ApiResponse.Success<Snapshot> cloneFromLibrary(
       @PathVariable("id") UUID entryId, Actor actor) {
-    modules.cloneFromLibrary(actor, entryId);
-    return ApiResponse.ok(snapshots.of(actor));
+    String moduleName = modules.cloneFromLibrary(actor, entryId).moduleName();
+    // The Library screen goes to the module the clone landed in, and reads it from here.
+    return ApiResponse.ok(snapshots.of(actor), Map.of("module_name", moduleName));
   }
 
   // --- Links (addressed by their own id, so not under /sub-modules) --------------

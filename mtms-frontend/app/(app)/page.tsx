@@ -95,11 +95,22 @@ export default function DashboardPage() {
     },
   ];
 
+  // The RITM gap only where the project has a column keyed `ritm`. Columns are project
+  // configuration; in a project without one, every sub-module used to be reported as "no RITM
+  // has been raised" — a gap in a column that does not exist.
+  const ritmColumn = config.columns.find((column) => column.key === 'ritm');
   const gaps = [
     { count: stats.blankCells, text: 'cells with no status at all, so readiness cannot be trusted' },
     { count: stats.noTarget, text: `${words.subModule.lowerMany} with no target date for prod loading` },
     { count: stats.noOwner, text: `${words.subModule.lowerMany} with no owner recorded` },
-    { count: stats.noRitm, text: `${words.subModule.lowerMany} where no RITM has been raised` },
+    ...(ritmColumn
+      ? [
+          {
+            count: stats.noRitm,
+            text: `${words.subModule.lowerMany} where no ${ritmColumn.label} has been raised`,
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -123,7 +134,9 @@ export default function DashboardPage() {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
+          // Four across where there is room, fewer on a phone — fixed at four, the 44px figures
+          // were squeezed into columns a quarter of a phone wide.
+          gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
           gap: 1,
           background: 'var(--color-divider)',
           border: '1px solid var(--color-divider)',

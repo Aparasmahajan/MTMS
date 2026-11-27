@@ -58,7 +58,9 @@ function sources(dir: string, found: string[] = []): string[] {
  */
 function bodies(source: string): string[] {
   const found: string[] = [];
-  const marker = /send<[^>]*>\(/g;
+  // Typed and untyped alike. Only `send<...>(` was scanned at first, so login, logout,
+  // accept-invite, forgot-password and every other `send('/api/…')` were never checked at all.
+  const marker = /\bsend(?:<[^>]*>)?\(/g;
   let match: RegExpExecArray | null;
 
   while ((match = marker.exec(source)) !== null) {
@@ -131,6 +133,82 @@ describe('the wire is snake_case', () => {
       offenders,
       `A camelCase key does not bind — Jackson reads the wire as snake_case, so the field\n` +
         `arrives null and the failure appears somewhere else entirely, or not at all:\n\n` +
+        offenders.map((line) => `  ${line}`).join('\n') +
+        '\n',
+    ).toEqual([]);
+  });
+});
+
+/**
+ * Every key the service could possibly read, gathered from the controllers.
+ *
+ * The snake_case rule above cannot see a key that is spelled correctly and simply is not a field
+ * the service has. `scope_project_id` on an invitation was exactly that — impeccably cased, read
+ * by nothing — so every invitation landed on whichever project was open, and `add_to_library`
+ * was another. Spring drops an unknown key without a word, so the only place to catch it is
+ * here: a key sent that no request record or `JsonNode` lookup in the service mentions.
+ *
+ * Deliberately a superset — every record component in the API package, snake_cased — rather
+ * than per endpoint. Matching a path to its handler would mean re-implementing Spring's routing
+ * in a regex; this catches a key that exists nowhere, which is the failure that has shipped.
+ */
+function serviceKeys(): Set<string> {
+  const apiDir = join('..', 'mtms-backend', 'src', 'main', 'java', 'io', 'mtms', 'api');
+  const keys = new Set<string>();
+  const snake = (name: string) => name.replace(/[A-Z]/g, (char) => `_${char.toLowerCase()}`);
+
+  const javaFiles = (dir: string, found: string[] = []): string[] => {
+    for (const entry of readdirSync(dir)) {
+      const path = join(dir, entry);
+      if (statSync(path).isDirectory()) javaFiles(path, found);
+      else if (entry.endsWith('.java')) found.push(path);
+    }
+    return found;
+  };
+
+  for (const file of javaFiles(apiDir)) {
+    const source = readFileSync(file, 'utf8');
+    for (const record of source.matchAll(/record\s+\w+\s*\(([^)]*)\)/g)) {
+      for (const component of (record[1] ?? '').split(',')) {
+        const name = component.trim().split(/\s+/).pop();
+        if (name && /^[a-zA-Z_]\w*$/.test(name)) keys.add(snake(name));
+      }
+    }
+    for (const lookup of source.matchAll(/\b(?:has|get|path|hasNonNull)\("([a-z_]+)"\)/g)) {
+      if (lookup[1]) keys.add(lookup[1]);
+    }
+  }
+  return keys;
+}
+
+describe('the service reads what is sent', () => {
+  it('no request body sends a key that no request record in the service has', () => {
+    const known = serviceKeys();
+    // Sanity: if the backend moved and nothing was found, this test must fail loudly rather
+    // than pass by checking against an empty set.
+    expect(known.size, 'no request records found under mtms-backend/…/api').toBeGreaterThan(20);
+
+    const offenders: string[] = [];
+    for (const root of ROOTS) {
+      for (const file of sources(root)) {
+        const source = readFileSync(file, 'utf8');
+        for (const call of bodies(source)) {
+          const path = call.match(/['"`]([^'"`]*\/api\/[^'"`]*)['"`]/)?.[1];
+          if (!path) continue;
+          const scanned = call.replace(/\$\{[^{}]*\}/g, '«interpolation»');
+          for (const match of scanned.matchAll(OBJECT_KEY)) {
+            const key = match[1];
+            if (key && !NOT_WIRE.has(key) && !CAMEL_CASE.test(key) && !known.has(key)) {
+              offenders.push(`${file} → ${path} sends "${key}", which no request in the service reads`);
+            }
+          }
+        }
+      }
+    }
+
+    expect(
+      offenders,
+      `Spring ignores a key it has no field for, so this request succeeds and the value is lost:\n\n` +
         offenders.map((line) => `  ${line}`).join('\n') +
         '\n',
     ).toEqual([]);

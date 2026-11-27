@@ -13,8 +13,16 @@ import {
 import { useRouter } from 'next/navigation';
 import { ApiError, send } from '@/lib/client/api';
 import { IS_DEMO } from '@/lib/demo/config';
-import { adoptSnapshot, initDemoRuntime, resetDemo, switchDemoRole } from '@/lib/demo/runtime';
-import { loadSnapshot, subscribeToRemoteChanges } from '@/lib/demo/persistence';
+import {
+  adoptSnapshot,
+  adoptWorkspace,
+  demoSnapshot,
+  initDemoRuntime,
+  resetDemo,
+  resetDemoLocally,
+  switchDemoRole,
+} from '@/lib/demo/runtime';
+import { loadSnapshot, onPersistFailure, subscribeToRemoteChanges } from '@/lib/demo/persistence';
 import { hasPermission, permissionDeniedReason, type PermissionKey } from '@/lib/shared/permissions';
 import type { SubModuleView, Snapshot } from '@/lib/shared/views';
 import { wordingOf, type Wording } from '@/lib/shared/wording';
@@ -59,6 +67,8 @@ interface TrackerContextValue {
    * than to a 404 on the client's static host.
    */
   subModuleHref: (id: string) => string;
+  /** The same, for a module's page — `/modules/[id]`, prerendered only for seeded modules. */
+  moduleHref: (id: string) => string;
   signOut: () => Promise<void>;
   /** True in the static client demo: no server, nothing persists. */
   isDemo: boolean;
@@ -109,20 +119,52 @@ export function TrackerProvider({ initial, children }: { initial: Snapshot; chil
      * It has to happen *after* mount rather than during render: the server-rendered markup is
      * the seed, and returning anything else on the first pass is a hydration mismatch.
      */
-    const saved = loadSnapshot();
-    if (saved) {
-      adoptSnapshot(saved);
-      setSnapshot(saved);
-    }
+    // `initDemoRuntime` has already preferred the saved copy and re-derived it, so what to
+    // render is whatever the runtime now holds.
+    if (loadSnapshot()) setSnapshot(demoSnapshot());
 
-    return subscribeToRemoteChanges((incoming) => {
-      adoptSnapshot(incoming);
-      setSnapshot(incoming);
+    const unsubscribe = subscribeToRemoteChanges({
+      // `adoptSnapshot` answers null for another project's snapshot: a second tab working on
+      // a different project is not a reason for this one to switch.
+      snapshot: (incoming) => {
+        const adopted = adoptSnapshot(incoming);
+        if (adopted) setSnapshot(adopted);
+      },
+      // A project or organisation created in another tab — the switcher picks it up now.
+      workspace: (incoming) => {
+        const adopted = adoptWorkspace(incoming);
+        if (adopted) setSnapshot(adopted);
+      },
+      // Reset pressed elsewhere. Without this a tab left open keeps showing — and on its next
+      // click writes back — everything the reset just cleared.
+      reset: () => {
+        setSnapshot(resetDemoLocally(initial));
+        setNotice('The demo was reset in another tab, so this one has gone back to the start too.');
+      },
     });
+
+    // A write the browser refused (a full quota, or storage switched off). The edit is on
+    // screen but will not survive a reload, and the person has to be told that.
+    const stopWarning = onPersistFailure((message) => setNotice(message));
+
+    return () => {
+      unsubscribe();
+      stopWarning();
+    };
+    // `initial` is the build-time seed and never changes for the life of the provider.
   }, []);
 
-  /** Which module pages exist as static HTML — see `subModuleHref`. */
+  /**
+   * Which detail pages exist as static HTML — see `subModuleHref`.
+   *
+   * Taken from `initial`, the snapshot baked into the HTML at build time, because that is
+   * exactly the set `generateStaticParams` prerendered. Anything created since has no page
+   * on a static host.
+   */
   const prerendered = useRef<Set<string>>(new Set(initial.sub_modules.map((module) => module.id)));
+  const prerenderedModules = useRef<Set<string>>(
+    new Set(initial.config.modules.map((module) => module.id)),
+  );
 
   const apply = useCallback<TrackerContextValue['apply']>((optimistic, call) => {
     const run = queue.current.then(async () => {
@@ -194,7 +236,9 @@ export function TrackerProvider({ initial, children }: { initial: Snapshot; chil
       reasonFor: (key) => permissionDeniedReason(key),
       subModuleById: (id) => snapshot.sub_modules.find((module) => module.id === id),
       subModuleHref: (id) =>
-        !IS_DEMO || prerendered.current.has(id) ? `/modules/${id}` : '/matrix',
+        !IS_DEMO || prerendered.current.has(id) ? `/sub-modules/${id}` : '/matrix',
+      moduleHref: (id) =>
+        !IS_DEMO || prerenderedModules.current.has(id) ? `/modules/${id}` : '/matrix',
       signOut,
       isDemo: IS_DEMO,
       switchRole,

@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useCallback, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { send } from '@/lib/client/api';
+import { useDismiss } from '@/lib/client/useDismiss';
 import type { Snapshot } from '@/lib/shared/views';
 import { useTracker } from './TrackerProvider';
 import { InboxMenu } from './InboxMenu';
@@ -43,6 +44,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  const switcherRoot = useRef<HTMLDivElement>(null);
+  const closeSwitcher = useCallback(() => setSwitcherOpen(false), []);
+  useDismiss(switcherRoot, switcherOpen, closeSwitcher);
 
   const tabs = tabsFor(snapshot);
   const isActive = (match: string) =>
@@ -51,8 +55,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   async function pickProject(projectId: string) {
     setSwitcherOpen(false);
     if (projectId === snapshot.project.id) return;
-    await apply(null, () => send<Snapshot>('/api/v1/projects/select', 'POST', { project_id: projectId }));
-    router.push('/');
+    const switched = await apply(null, () =>
+      send<Snapshot>('/api/v1/projects/select', 'POST', { project_id: projectId }),
+    );
+    // Only on success. On a failure the error banner says why, and moving to the dashboard of
+    // the project they were already in reads as though the switch had worked.
+    if (switched) router.push('/');
   }
 
   return (
@@ -71,6 +79,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           zIndex: 30,
         }}
       >
+        <div ref={switcherRoot} style={{ display: 'contents' }}>
         <button
           type="button"
           onClick={() => setSwitcherOpen((open) => !open)}
@@ -228,6 +237,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </div>
         ) : null}
+        </div>
 
         <nav style={{ display: 'flex', flexWrap: 'wrap', flex: '1 1 auto', minWidth: 0 }}>
           {tabs.map((tab) => {

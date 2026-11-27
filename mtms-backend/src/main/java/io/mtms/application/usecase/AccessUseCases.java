@@ -14,6 +14,7 @@ import io.mtms.domain.model.Notifications;
 import io.mtms.domain.model.Tenancy;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -61,6 +62,14 @@ public class AccessUseCases {
         access
             .findUser(actor.tenantId(), userId)
             .orElseThrow(() -> ServiceException.notFound("That person is not in this organisation."));
+
+    // A removed account comes back through Restore, with no access, and is then granted what it
+    // should have. Adding one to a project here used to succeed and quietly hand project access
+    // to somebody the organisation had removed.
+    if (user.status() == Tenancy.UserStatus.DEACTIVATED) {
+      throw ServiceException.validation(
+          user.displayName() + " has been removed from the organisation. Restore them first.");
+    }
 
     Tenancy.Role role = requireGrantableRole(actor, roleId);
 
@@ -161,11 +170,11 @@ public class AccessUseCases {
    */
   @Transactional
   public void removeFromOrganisation(Actor actor, UUID userId) {
-    if (!actor.isSuperAdmin()) {
-      actor.require(PermissionKey.ADMIN_USERS_MANAGE);
-    }
+    Set<PermissionKey> held =
+        requireOrganisationPermission(actor, PermissionKey.ADMIN_USERS_MANAGE);
 
     Tenancy.User user = requireRemovableUser(actor, userId);
+    requireNotOutranked(actor, user, held, "remove them");
 
     // Every membership, not only the ones on the project currently open. A person removed from
     // the organisation who kept an organisation-wide row would be deactivated and still listed
@@ -184,6 +193,10 @@ public class AccessUseCases {
             Tenancy.UserStatus.DEACTIVATED,
             user.lastLoginAt(),
             user.createdAt()));
+    // Any invitation or reset link still outstanding dies with the account. Accepting one used
+    // to set the account ACTIVE again, so "removed" could be undone by the removed person with a
+    // link they already held.
+    access.clearInviteToken(userId);
 
     support.recordProjectChange(
         actor,
@@ -205,9 +218,8 @@ public class AccessUseCases {
    */
   @Transactional
   public void restoreToOrganisation(Actor actor, UUID userId) {
-    if (!actor.isSuperAdmin()) {
-      actor.require(PermissionKey.ADMIN_USERS_MANAGE);
-    }
+    Set<PermissionKey> held =
+        requireOrganisationPermission(actor, PermissionKey.ADMIN_USERS_MANAGE);
 
     Tenancy.User user =
         access
@@ -247,9 +259,8 @@ public class AccessUseCases {
    */
   @Transactional
   public UUID grantOrganisationWide(Actor actor, UUID userId, UUID roleId) {
-    if (!actor.isSuperAdmin()) {
-      actor.require(PermissionKey.ADMIN_USERS_MANAGE);
-    }
+    Set<PermissionKey> held =
+        requireOrganisationPermission(actor, PermissionKey.ADMIN_USERS_MANAGE);
 
     Tenancy.User user =
         access
@@ -262,7 +273,7 @@ public class AccessUseCases {
           user.displayName() + " has been removed from the organisation. Restore them first.");
     }
 
-    Tenancy.Role role = requireGrantableRole(actor, roleId);
+    Tenancy.Role role = requireGrantableRole(actor, roleId, held);
 
     boolean already =
         access.memberships(actor.tenantId()).stream()
@@ -289,12 +300,12 @@ public class AccessUseCases {
   /** Changes the role on an organisation-wide membership. */
   @Transactional
   public void changeOrganisationWideRole(Actor actor, UUID membershipId, UUID roleId) {
-    if (!actor.isSuperAdmin()) {
-      actor.require(PermissionKey.ADMIN_USERS_MANAGE);
-    }
+    Set<PermissionKey> held =
+        requireOrganisationPermission(actor, PermissionKey.ADMIN_USERS_MANAGE);
 
     Tenancy.Membership membership = requireOrganisationWide(actor, membershipId);
-    Tenancy.Role role = requireGrantableRole(actor, roleId);
+    requireNotOutranked(actor, userOf(actor, membership.userId()), held, "change their access");
+    Tenancy.Role role = requireGrantableRole(actor, roleId, held);
 
     access.updateMembershipRole(membership.id(), roleId);
     support.recordProjectChange(
@@ -310,11 +321,11 @@ public class AccessUseCases {
    */
   @Transactional
   public void revokeOrganisationWide(Actor actor, UUID membershipId) {
-    if (!actor.isSuperAdmin()) {
-      actor.require(PermissionKey.ADMIN_USERS_MANAGE);
-    }
+    Set<PermissionKey> held =
+        requireOrganisationPermission(actor, PermissionKey.ADMIN_USERS_MANAGE);
 
     Tenancy.Membership membership = requireOrganisationWide(actor, membershipId);
+    requireNotOutranked(actor, userOf(actor, membership.userId()), held, "remove their access");
 
     access.deleteMembership(membership.id());
     support.recordProjectChange(
@@ -394,7 +405,7 @@ public class AccessUseCases {
    */
   @Transactional
   public UUID createRole(Actor actor, String name, String note) {
-    actor.require(PermissionKey.ADMIN_ROLES_MANAGE);
+    requireOrganisationPermission(actor, PermissionKey.ADMIN_ROLES_MANAGE);
 
     String trimmed = name == null ? "" : name.trim();
     if (trimmed.isEmpty()) {
@@ -444,7 +455,7 @@ public class AccessUseCases {
 
   @Transactional
   public void renameRole(Actor actor, UUID roleId, String name, String note) {
-    actor.require(PermissionKey.ADMIN_ROLES_MANAGE);
+    requireOrganisationPermission(actor, PermissionKey.ADMIN_ROLES_MANAGE);
     Tenancy.Role role = requireRole(actor, roleId);
 
     String nextName = name == null || name.isBlank() ? role.name() : name.trim();
@@ -489,7 +500,7 @@ public class AccessUseCases {
    */
   @Transactional
   public void setRoleHidden(Actor actor, UUID roleId, boolean hidden) {
-    actor.require(PermissionKey.ADMIN_ROLES_MANAGE);
+    requireOrganisationPermission(actor, PermissionKey.ADMIN_ROLES_MANAGE);
     Tenancy.Role role = requireRole(actor, roleId);
 
     if (hidden == role.isHidden()) {
@@ -560,7 +571,6 @@ public class AccessUseCases {
    * <p>Creates the account in {@code invited} state with a single-use token, of which only the
    * sha256 is stored. The link goes out through {@link Mailer}; nothing here can read it back.
    */
-  @Transactional
   /**
    * What an invitation produces.
    *
@@ -577,11 +587,50 @@ public class AccessUseCases {
       String acceptUrl,
       Mailer.Delivery delivery) {}
 
+  // On the method. It used to sit above the javadoc of the record above, where it is legal
+  // (@Transactional targets types too) and annotated the record, leaving this to auto-commit each
+  // insert: a failure after the user row left an invited account whose only link was lost.
+  @Transactional
   public Invited invite(
       Actor actor, String email, String displayName, UUID roleId, boolean orgWide) {
+    return invite(actor, email, displayName, roleId, orgWide, null);
+  }
 
-    actor.require(PermissionKey.ADMIN_USERS_MANAGE);
-    Tenancy.Role role = requireGrantableRole(actor, roleId);
+  /**
+   * Invites somebody to every project ({@code orgWide}), to a named project, or — with neither —
+   * to the project that is open.
+   *
+   * <p>The Access screen has always offered "all projects" and each project by name. Until now
+   * the service read neither choice, so every invitation landed on whichever project was open.
+   */
+  @Transactional
+  public Invited invite(
+      Actor actor,
+      String email,
+      String displayName,
+      UUID roleId,
+      boolean orgWide,
+      UUID targetProjectId) {
+
+    UUID target = targetProjectId == null ? actor.projectId() : targetProjectId;
+    if (!orgWide && !support.projectExists(actor.tenantId(), target)) {
+      throw ServiceException.notFound("That project does not exist.");
+    }
+
+    // An invitation to every project, or to a project other than the one open, reaches past the
+    // project this request is about and needs organisation-wide authority. One to the open
+    // project is a project administrator's ordinary job.
+    Set<PermissionKey> held =
+        orgWide || !target.equals(actor.projectId())
+            ? requireOrganisationPermission(actor, PermissionKey.ADMIN_USERS_MANAGE)
+            : projectPermissions(actor, PermissionKey.ADMIN_USERS_MANAGE);
+    Tenancy.Role role = requireGrantableRole(actor, roleId, held);
+
+    email = email == null ? "" : email.trim();
+    if (email.isEmpty() || !email.contains("@") || email.length() > 254) {
+      throw ServiceException.validation("Enter the email address of the person to invite.");
+    }
+    displayName = displayName == null || displayName.isBlank() ? email : displayName.trim();
 
     boolean exists =
         access.findByEmail(email).stream()
@@ -593,7 +642,7 @@ public class AccessUseCases {
     String token = SecureTokens.random();
     Instant now = Instant.now();
     UUID userId = UUID.randomUUID();
-    UUID projectId = orgWide ? null : actor.projectId();
+    UUID projectId = orgWide ? null : target;
 
     access.insertUser(
         new Tenancy.UserWithSecret(
@@ -638,7 +687,12 @@ public class AccessUseCases {
 
     support.recordProjectChange(
         actor, actor.projectId(), "ACCESS", displayName + " invited as " + role.name());
-    support.bump(actor.projectId());
+    if (projectId == null) {
+      support.bumpEveryProjectIn(actor.tenantId());
+    } else {
+      support.bump(projectId);
+      support.bump(actor.projectId());
+    }
 
     return new Invited(invitation.id(), email, displayName, acceptUrl, delivery);
   }
@@ -708,15 +762,21 @@ public class AccessUseCases {
    */
   @Transactional
   public void renameUser(Actor actor, UUID userId, String displayName) {
-    if (!actor.isSuperAdmin()) {
-      actor.require(PermissionKey.ADMIN_USERS_MANAGE);
-    }
+    Set<PermissionKey> held =
+        requireOrganisationPermission(actor, PermissionKey.ADMIN_USERS_MANAGE);
 
     Tenancy.User user =
         access
             .findUser(actor.tenantId(), userId)
             .orElseThrow(
                 () -> ServiceException.notFound("That person is not in this organisation."));
+
+    if (user.isSuperAdmin() && !actor.isSuperAdmin()) {
+      throw ServiceException.forbidden(
+          user.displayName()
+              + " is a platform super administrator. Only another super administrator can"
+              + " rename them.");
+    }
 
     String next = displayName == null ? "" : displayName.trim();
     if (next.isEmpty()) {
@@ -780,15 +840,19 @@ public class AccessUseCases {
    */
   @Transactional
   public PasswordReset resetPassword(Actor actor, UUID userId) {
-    if (!actor.isSuperAdmin()) {
-      actor.require(PermissionKey.ADMIN_USERS_MANAGE);
-    }
+    Set<PermissionKey> held =
+        requireOrganisationPermission(actor, PermissionKey.ADMIN_USERS_MANAGE);
 
     Tenancy.User user =
         access
             .findUser(actor.tenantId(), userId)
             .orElseThrow(
                 () -> ServiceException.notFound("That person is not in this organisation."));
+
+    // Issuing a reset link is the ability to become that person, so it may only be done to
+    // somebody who holds nothing the issuer does not. Without this an organisation admin could
+    // take over a platform super admin, and a sub-admin could take over the admin above them.
+    requireNotOutranked(actor, user, held, "reset their password");
 
     if (user.status() == Tenancy.UserStatus.INVITED) {
       throw ServiceException.validation(
@@ -882,9 +946,8 @@ public class AccessUseCases {
    */
   @Transactional
   public void setRolePermission(Actor actor, UUID roleId, String permission, boolean granted) {
-    if (!actor.isSuperAdmin()) {
-      actor.require(PermissionKey.ADMIN_ROLES_MANAGE);
-    }
+    Set<PermissionKey> held =
+        requireOrganisationPermission(actor, PermissionKey.ADMIN_ROLES_MANAGE);
 
     Tenancy.Role role =
         access
@@ -898,7 +961,7 @@ public class AccessUseCases {
                     ServiceException.validation(
                         "Not a permission this system knows: " + permission + "."));
 
-    if (granted && !actor.isSuperAdmin() && !actor.permissions().contains(key)) {
+    if (granted && !held.contains(key)) {
       throw ServiceException.forbidden(
           "You cannot grant a permission you do not hold: " + key.label() + ".");
     }
@@ -916,7 +979,10 @@ public class AccessUseCases {
         actor.projectId(),
         "ACCESS",
         role.name() + (granted ? " granted " : " no longer has ") + key.label());
-    support.bump(actor.projectId());
+    // Roles are organisation-wide. Bumping only the open project left every other project
+    // serving a cached snapshot with the old permissions: buttons enabled that then 403, and a
+    // role stripped of project.view still reading other projects from cache.
+    support.bumpEveryProjectIn(actor.tenantId());
   }
 
   /**
@@ -932,7 +998,8 @@ public class AccessUseCases {
    */
   @Transactional
   public void setRolePermissions(Actor actor, UUID roleId, List<String> permissions) {
-    actor.require(PermissionKey.ADMIN_ROLES_MANAGE);
+    Set<PermissionKey> held =
+        requireOrganisationPermission(actor, PermissionKey.ADMIN_ROLES_MANAGE);
 
     Tenancy.Role role =
         access
@@ -959,11 +1026,19 @@ public class AccessUseCases {
     support.recordProjectChange(
         actor, actor.projectId(), "ACCESS",
         role.name() + " permissions updated — " + resolved.size() + " granted");
-    support.bump(actor.projectId());
+    support.bumpEveryProjectIn(actor.tenantId());
   }
 
-  /** A role must exist, belong to this organisation, and grant nothing the actor lacks. */
+  /** For project-level grants: measured against what the actor holds on the open project. */
   private Tenancy.Role requireGrantableRole(Actor actor, UUID roleId) {
+    return requireGrantableRole(
+        actor,
+        roleId,
+        actor.isSuperAdmin() ? EnumSet.allOf(PermissionKey.class) : actor.permissions());
+  }
+
+  /** A role must exist, belong to this organisation, and grant nothing {@code held} lacks. */
+  private Tenancy.Role requireGrantableRole(Actor actor, UUID roleId, Set<PermissionKey> held) {
     Tenancy.Role role =
         access
             .role(actor.tenantId(), roleId)
@@ -971,12 +1046,94 @@ public class AccessUseCases {
 
     List<PermissionKey> ungrantable =
         Permissions.unGrantablePermissions(
-            actor.permissions(), role.permissions().stream().map(PermissionKey::wire).toList());
+            held, role.permissions().stream().map(PermissionKey::wire).toList());
 
     if (!ungrantable.isEmpty()) {
       throw ServiceException.forbidden(
           "That role grants more than you hold, so you cannot assign it.");
     }
     return role;
+  }
+
+  // --- Organisation-wide authority ---------------------------------------------
+
+  /**
+   * Requires {@code key} across the whole organisation and returns everything held there.
+   *
+   * <p>{@link Actor#permissions()} is the union of organisation-wide grants and the grants on the
+   * project currently open. That is right for project work and wrong for anything reaching past
+   * the project: a project administrator holds the seeded {@code admin} role on their project,
+   * which carries every key, so checking the union let them grant themselves organisation-wide
+   * admin, reset anybody's password and rewrite roles every project uses. Project creation was
+   * already answered this way in {@code ProjectUseCases}; everything organisation-wide here now
+   * is too.
+   *
+   * <p>A super admin holds everything, which is also what makes the console's repair route work
+   * for one with no membership in the organisation.
+   */
+  private Set<PermissionKey> requireOrganisationPermission(Actor actor, PermissionKey key) {
+    if (actor.isSuperAdmin()) {
+      return EnumSet.allOf(PermissionKey.class);
+    }
+    Set<PermissionKey> held = permissionsOf(actor.tenantId(), actor.userId(), true);
+    if (!held.contains(key)) {
+      throw ServiceException.forbidden(
+          key.deniedReason()
+              + " This is an organisation-wide action, so it has to be held across the whole"
+              + " organisation, not on one project.");
+    }
+    return held;
+  }
+
+  /** Requires {@code key} on the open project, and returns what is held there. */
+  private Set<PermissionKey> projectPermissions(Actor actor, PermissionKey key) {
+    if (actor.isSuperAdmin()) {
+      return EnumSet.allOf(PermissionKey.class);
+    }
+    actor.require(key);
+    return actor.permissions();
+  }
+
+  /** What a user holds in this organisation: organisation-wide only, or anywhere at all. */
+  private Set<PermissionKey> permissionsOf(UUID tenantId, UUID userId, boolean orgWideOnly) {
+    Set<PermissionKey> held = EnumSet.noneOf(PermissionKey.class);
+    access.membershipsOf(userId).stream()
+        .filter(membership -> membership.tenantId().equals(tenantId))
+        .filter(membership -> !orgWideOnly || membership.projectId() == null)
+        .map(membership -> access.role(tenantId, membership.roleId()))
+        .flatMap(Optional::stream)
+        .forEach(role -> held.addAll(role.permissions()));
+    return held;
+  }
+
+  /**
+   * Refuses acting on somebody who outranks the caller.
+   *
+   * <p>"Outranks" means holding, anywhere in the organisation, a permission the caller does not
+   * hold organisation-wide, or being a platform super admin. Resetting a password is becoming
+   * that person, and removing them is taking their access; neither may be done upwards.
+   */
+  private void requireNotOutranked(
+      Actor actor, Tenancy.User target, Set<PermissionKey> held, String what) {
+    if (actor.isSuperAdmin()) {
+      return;
+    }
+    if (target.isSuperAdmin()) {
+      throw ServiceException.forbidden(
+          target.displayName()
+              + " is a platform super administrator. Only another super administrator can "
+              + what
+              + ".");
+    }
+    if (!held.containsAll(permissionsOf(actor.tenantId(), target.id(), false))) {
+      throw ServiceException.forbidden(
+          target.displayName() + " holds permissions you do not, so you cannot " + what + ".");
+    }
+  }
+
+  private Tenancy.User userOf(Actor actor, UUID userId) {
+    return access
+        .findUser(actor.tenantId(), userId)
+        .orElseThrow(() -> ServiceException.notFound("That person is not in this organisation."));
   }
 }

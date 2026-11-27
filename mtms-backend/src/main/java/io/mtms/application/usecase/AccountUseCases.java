@@ -41,6 +41,9 @@ public class AccountUseCases {
   /** The same week an invitation gets. A reset is the same promise: time to act on it. */
   private static final Duration RESET_VALIDITY = Duration.ofDays(7);
 
+  /** How long a self-service reset link stands before another request may replace it. */
+  private static final Duration RESEND_AFTER = Duration.ofMinutes(5);
+
   private static final int MINIMUM_PASSWORD_LENGTH = 10;
 
   private final AccessRepository access;
@@ -101,6 +104,17 @@ public class AccountUseCases {
       // showing them as removed does not account for.
       if (user.status() != Tenancy.UserStatus.ACTIVE) {
         log.info("Password reset asked for {}, which is {}", user.email(), user.status());
+        continue;
+      }
+
+      // One link per account per few minutes. The endpoint is unauthenticated, so without this
+      // anybody could mail-bomb any address — and every request also replaced the outstanding
+      // link, silently killing one an administrator had just handed over. A link issued less
+      // than RESEND_AFTER ago is left alone; its expiry tells us when it was issued.
+      Instant outstanding = candidate.inviteExpiresAt();
+      if (outstanding != null
+          && outstanding.isAfter(now.plus(RESET_VALIDITY).minus(RESEND_AFTER))) {
+        log.info("Password reset asked for {} again within {}; not reissued", email, RESEND_AFTER);
         continue;
       }
 

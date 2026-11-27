@@ -126,14 +126,21 @@ class RolesAndOwnersTest {
   }
 
   private Actor admin() {
-    return new Actor(
-        user("Anand"), TENANT, "Anand", "anand@azalio.io", false, projectId,
+    Set<PermissionKey> held =
         Set.of(
             PermissionKey.PROJECT_VIEW,
             PermissionKey.PROJECT_CONFIG,
             PermissionKey.MODULE_EDIT,
-            PermissionKey.ADMIN_ROLES_MANAGE),
-        Set.of());
+            PermissionKey.ADMIN_ROLES_MANAGE);
+    UUID anand = user("Anand");
+    // Roles are organisation-wide, so editing one needs admin.roles.manage held across the
+    // organisation — backed by a real organisation-wide membership, not just the Actor's union.
+    UUID role = UUID.randomUUID();
+    access.insertRole(
+        new Tenancy.Role(role, TENANT, "r-" + role, "Role " + role, "", "", false, held));
+    access.insertMembership(
+        new Tenancy.Membership(UUID.randomUUID(), TENANT, anand, null, role, Instant.now()));
+    return new Actor(anand, TENANT, "Anand", "anand@azalio.io", false, projectId, held, Set.of());
   }
 
   private Tenancy.Role roleById(UUID id) {

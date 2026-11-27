@@ -34,12 +34,17 @@ public class SubModuleController {
   }
 
   public record CreateSubModuleRequest(
-      @NotBlank String moduleName, @NotBlank String name, String owner) {}
+      @NotBlank String moduleName, @NotBlank String name, String owner, Boolean addToLibrary) {}
 
   @PostMapping
   public ApiResponse.Success<Snapshot> create(
       @RequestBody CreateSubModuleRequest request, Actor actor) {
-    modules.create(actor, request.moduleName(), request.name(), request.owner());
+    modules.create(
+        actor,
+        request.moduleName(),
+        request.name(),
+        request.owner(),
+        Boolean.TRUE.equals(request.addToLibrary()));
     return ApiResponse.ok(snapshots.of(actor));
   }
 
